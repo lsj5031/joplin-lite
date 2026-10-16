@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"strconv"
 
 	"github.com/lsj5031/joplin-lite/internal/e2ee"
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -52,6 +51,58 @@ func PushChanges(backend SyncBackend, db *store.DB, e2eeSvc *e2ee.Service) error
 	return nil
 }
 
+// itemPlain returns the plaintext bytes to push for an item and whether they
+// are newly serialized (as opposed to the exact bytes that were pulled).
+// Unchanged items are pushed back byte-for-byte from the raw store
+// (losslessness by construction); changed items are re-serialized from the raw
+// text so unknown metadata keys survive verbatim in their original positions.
+func itemPlain(db *store.DB, id string, updatedTime int64, fields map[string]string, fresh string) ([]byte, bool) {
+	raw, rawTime, ok, err := db.GetItemRaw(id)
+	if err != nil || !ok {
+		return []byte(fresh), true
+	}
+	if rawTime == updatedTime {
+		return raw, false
+	}
+	pi, perr := models.ParseItem(string(raw))
+	if perr != nil {
+		return []byte(fresh), true
+	}
+	return []byte(pi.SerializeWithOverrides(fields)), true
+}
+
+// envelopeMeta reduces a field map to Joplin's keep-keys set for an encrypted
+// envelope (BaseItem.serializeForSync) plus the encryption fields.
+func envelopeMeta(fields map[string]string, cipherText, masterKeyID string) map[string]string {
+	keep := map[string]bool{
+		"id": true, "note_id": true, "tag_id": true, "parent_id": true,
+		"share_id": true, "updated_time": true, "deleted_time": true,
+		"type_": true, "master_key_id": true,
+	}
+	out := make(map[string]string)
+	for k, v := range fields {
+		if keep[k] {
+			out[k] = v
+		}
+	}
+	out["encryption_applied"] = "1"
+	out["encryption_cipher_text"] = cipherText
+	out["master_key_id"] = masterKeyID
+	return out
+}
+
+// storePushedRaw records the serialized plaintext after a successful push of
+// newly serialized content, so later pushes of the unchanged item pass through
+// these exact bytes.
+func storePushedRaw(db *store.DB, id string, plain []byte, changed bool, updatedTime int64) {
+	if !changed {
+		return
+	}
+	if err := db.SaveItemRaw(id, plain, updatedTime); err != nil {
+		slog.Error("failed to store raw item copy", "id", id, "error", err)
+	}
+}
+
 func pushNotes(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePush bool, e2eeSvc *e2ee.Service, activeMasterKeyID string) error {
 	// Find notes that have been modified locally but not synced
 	rows, err := db.Query(`SELECT n.id FROM notes n
@@ -80,7 +131,8 @@ func pushNotes(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforeP
 			continue
 		}
 
-		content := serializeNoteForSync(note, encryptBeforePush, e2eeSvc, activeMasterKeyID)
+		plain, changed := itemPlain(db, id, note.UpdatedTime, models.NoteFields(note), models.SerializeNote(note))
+		content := serializeNoteForSync(note, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
 		}
@@ -100,27 +152,18 @@ func pushNotes(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforeP
 	return nil
 }
 
-func serializeNoteForSync(note *models.Note, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
+func serializeNoteForSync(note *models.Note, plain []byte, changed bool, db *store.DB, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
 	if encrypt && note.EncryptionApplied == 0 && e2eeSvc != nil && masterKeyID != "" {
-		plain := models.SerializeNote(note)
-		cipherText, err := e2eeSvc.EncryptString(masterKeyID, plain)
+		cipherText, err := e2eeSvc.EncryptString(masterKeyID, string(plain))
 		if err != nil {
 			slog.Error("failed to encrypt note for sync", "id", note.ID, "error", err)
 			return nil
 		}
-		meta := map[string]string{
-			"id":                     note.ID,
-			"parent_id":              note.ParentID,
-			"updated_time":           models.FmtTimeForSync(note.UpdatedTime),
-			"deleted_time":           models.FmtTimeForSync(note.DeletedTime),
-			"type_":                  strconv.Itoa(models.TypeNote),
-			"encryption_applied":     "1",
-			"encryption_cipher_text": cipherText,
-			"master_key_id":          masterKeyID,
-		}
-		return []byte(models.SerializeEncryptedEnvelope(meta))
+		storePushedRaw(db, note.ID, plain, changed, note.UpdatedTime)
+		return []byte(models.SerializeEncryptedEnvelope(envelopeMeta(models.NoteFields(note), cipherText, masterKeyID)))
 	}
-	return []byte(models.SerializeNote(note))
+	storePushedRaw(db, note.ID, plain, changed, note.UpdatedTime)
+	return plain
 }
 
 func pushFolders(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePush bool, e2eeSvc *e2ee.Service, activeMasterKeyID string) error {
@@ -150,7 +193,8 @@ func pushFolders(backend SyncBackend, db *store.DB, syncTarget int, encryptBefor
 			continue
 		}
 
-		content := serializeFolderForSync(folder, encryptBeforePush, e2eeSvc, activeMasterKeyID)
+		plain, changed := itemPlain(db, id, folder.UpdatedTime, models.FolderFields(folder), models.SerializeFolder(folder))
+		content := serializeFolderForSync(folder, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
 		}
@@ -170,27 +214,18 @@ func pushFolders(backend SyncBackend, db *store.DB, syncTarget int, encryptBefor
 	return nil
 }
 
-func serializeFolderForSync(folder *models.Folder, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
+func serializeFolderForSync(folder *models.Folder, plain []byte, changed bool, db *store.DB, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
 	if encrypt && folder.EncryptionApplied == 0 && e2eeSvc != nil && masterKeyID != "" {
-		plain := models.SerializeFolder(folder)
-		cipherText, err := e2eeSvc.EncryptString(masterKeyID, plain)
+		cipherText, err := e2eeSvc.EncryptString(masterKeyID, string(plain))
 		if err != nil {
 			slog.Error("failed to encrypt folder for sync", "id", folder.ID, "error", err)
 			return nil
 		}
-		meta := map[string]string{
-			"id":                     folder.ID,
-			"parent_id":              folder.ParentID,
-			"updated_time":           models.FmtTimeForSync(folder.UpdatedTime),
-			"deleted_time":           models.FmtTimeForSync(folder.DeletedTime),
-			"type_":                  strconv.Itoa(models.TypeFolder),
-			"encryption_applied":     "1",
-			"encryption_cipher_text": cipherText,
-			"master_key_id":          masterKeyID,
-		}
-		return []byte(models.SerializeEncryptedEnvelope(meta))
+		storePushedRaw(db, folder.ID, plain, changed, folder.UpdatedTime)
+		return []byte(models.SerializeEncryptedEnvelope(envelopeMeta(models.FolderFields(folder), cipherText, masterKeyID)))
 	}
-	return []byte(models.SerializeFolder(folder))
+	storePushedRaw(db, folder.ID, plain, changed, folder.UpdatedTime)
+	return plain
 }
 
 func pushTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePush bool, e2eeSvc *e2ee.Service, activeMasterKeyID string) error {
@@ -220,7 +255,8 @@ func pushTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePu
 			continue
 		}
 
-		content := serializeTagForSync(tag, encryptBeforePush, e2eeSvc, activeMasterKeyID)
+		plain, changed := itemPlain(db, id, tag.UpdatedTime, models.TagFields(tag), models.SerializeTag(tag))
+		content := serializeTagForSync(tag, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
 		}
@@ -240,25 +276,18 @@ func pushTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePu
 	return nil
 }
 
-func serializeTagForSync(tag *models.Tag, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
+func serializeTagForSync(tag *models.Tag, plain []byte, changed bool, db *store.DB, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
 	if encrypt && tag.EncryptionApplied == 0 && e2eeSvc != nil && masterKeyID != "" {
-		plain := models.SerializeTag(tag)
-		cipherText, err := e2eeSvc.EncryptString(masterKeyID, plain)
+		cipherText, err := e2eeSvc.EncryptString(masterKeyID, string(plain))
 		if err != nil {
 			slog.Error("failed to encrypt tag for sync", "id", tag.ID, "error", err)
 			return nil
 		}
-		meta := map[string]string{
-			"id":                     tag.ID,
-			"updated_time":           models.FmtTimeForSync(tag.UpdatedTime),
-			"type_":                  strconv.Itoa(models.TypeTag),
-			"encryption_applied":     "1",
-			"encryption_cipher_text": cipherText,
-			"master_key_id":          masterKeyID,
-		}
-		return []byte(models.SerializeEncryptedEnvelope(meta))
+		storePushedRaw(db, tag.ID, plain, changed, tag.UpdatedTime)
+		return []byte(models.SerializeEncryptedEnvelope(envelopeMeta(models.TagFields(tag), cipherText, masterKeyID)))
 	}
-	return []byte(models.SerializeTag(tag))
+	storePushedRaw(db, tag.ID, plain, changed, tag.UpdatedTime)
+	return plain
 }
 
 func pushNoteTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePush bool, e2eeSvc *e2ee.Service, activeMasterKeyID string) error {
@@ -285,7 +314,8 @@ func pushNoteTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBefo
 	}
 
 	for _, nt := range noteTags {
-		content := serializeNoteTagForSync(nt, encryptBeforePush, e2eeSvc, activeMasterKeyID)
+		plain, changed := itemPlain(db, nt.ID, nt.UpdatedTime, models.NoteTagFields(nt), models.SerializeNoteTag(nt))
+		content := serializeNoteTagForSync(nt, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
 		}
@@ -305,27 +335,18 @@ func pushNoteTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBefo
 	return nil
 }
 
-func serializeNoteTagForSync(nt *models.NoteTag, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
+func serializeNoteTagForSync(nt *models.NoteTag, plain []byte, changed bool, db *store.DB, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
 	if encrypt && nt.EncryptionApplied == 0 && e2eeSvc != nil && masterKeyID != "" {
-		plain := models.SerializeNoteTag(nt)
-		cipherText, err := e2eeSvc.EncryptString(masterKeyID, plain)
+		cipherText, err := e2eeSvc.EncryptString(masterKeyID, string(plain))
 		if err != nil {
-			slog.Error("failed to encrypt note_tag for sync", "id", nt.ID, "error", err)
+			slog.Error("failed to encrypt note_tag", "id", nt.ID, "error", err)
 			return nil
 		}
-		meta := map[string]string{
-			"id":                     nt.ID,
-			"note_id":                nt.NoteID,
-			"tag_id":                 nt.TagID,
-			"updated_time":           models.FmtTimeForSync(nt.UpdatedTime),
-			"type_":                  strconv.Itoa(models.TypeNoteTag),
-			"encryption_applied":     "1",
-			"encryption_cipher_text": cipherText,
-			"master_key_id":          masterKeyID,
-		}
-		return []byte(models.SerializeEncryptedEnvelope(meta))
+		storePushedRaw(db, nt.ID, plain, changed, nt.UpdatedTime)
+		return []byte(models.SerializeEncryptedEnvelope(envelopeMeta(models.NoteTagFields(nt), cipherText, masterKeyID)))
 	}
-	return []byte(models.SerializeNoteTag(nt))
+	storePushedRaw(db, nt.ID, plain, changed, nt.UpdatedTime)
+	return plain
 }
 
 func pushResources(backend SyncBackend, db *store.DB, syncTarget int) error {
@@ -355,12 +376,13 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int) error {
 			continue
 		}
 
-		// Push metadata
-		content := models.SerializeResource(resource)
+		// Push metadata (raw-passthrough like other items)
+		plain, changed := itemPlain(db, id, resource.UpdatedTime, models.ResourceFields(resource), models.SerializeResource(resource))
+		storePushedRaw(db, id, plain, changed, resource.UpdatedTime)
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
-		if err := backend.Put(path, []byte(content)); err != nil {
+		if err := backend.Put(path, plain); err != nil {
 			slog.Error("failed to push resource metadata", "id", id, "error", err)
 			continue
 		}
@@ -402,6 +424,7 @@ func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
 		if err := db.RemoveDeletedItem(item.ID); err != nil {
 			return err
 		}
+		_ = db.DeleteItemRaw(item.ItemID)
 		slog.Debug("deleted remote item", "id", item.ItemID)
 	}
 	return nil

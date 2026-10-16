@@ -165,5 +165,8 @@ func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
 	}
 
 	_, err = db.Exec("DELETE FROM sync_items WHERE item_id = ?", itemID)
-	return err
+	if err != nil {
+		return err
+	}
+	return db.DeleteItemRaw(itemID)
 }

@@ -249,6 +249,14 @@ var schemaStatements = []string{
 		created_time INT NOT NULL DEFAULT 0
 	)`,
 
+	// Raw passthrough store (joplin-lite sidecar, not part of the Joplin v49
+	// schema): exact bytes of pulled items, pushed back unmodified.
+	`CREATE TABLE IF NOT EXISTS item_raw (
+		id TEXT PRIMARY KEY,
+		raw BLOB NOT NULL,
+		updated_time INT NOT NULL DEFAULT 0
+	)`,
+
 	// FTS for notes search. FTS5, not FTS4: the cgo-free modernc.org/sqlite
 	// build ships SQLITE_ENABLE_FTS5 only (no FTS3/4). This table is a local
 	// search index and is not part of the Joplin sync format.

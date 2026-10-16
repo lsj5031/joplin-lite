@@ -218,13 +218,11 @@ went with `store/rag.go`.
 **[gap] Losslessness work (M0, before anything trusts serialization):** `models/serialize.go`
 today is not byte-identical — `writeMetadata` emits only known keys (unknown metadata lines are
 dropped), `order` is formatted through the time formatter, floats are fixed at 8 decimals, and
-trailing whitespace is trimmed on parse. Plan:
-- keep the **raw item text** for anything pulled and unmodified, and push those exact bytes
-  back (losslessness by construction);
-- when we do re-serialize, emit unknown metadata lines verbatim in their original position;
-- lock the rest with a **golden corpus**: real items from my target (note, todo, folder, tag,
-  note-tag, resource, master key, conflict note) asserting `Serialize(Deserialize(x)) == x`
-  byte-for-byte. This corpus is the format gate of every later milestone.
+trailing whitespace is trimmed on parse. Plan:- keep the **raw item text** for anything pulled and unmodified, and push those exact bytes back (losslessness by construction) — **[M0 done]** `item_raw` sidecar table (`internal/store/raw.go`) + `RawItem` (`internal/models/rawitem.go`); `sync/delta.go` captures raw bytes on pull, `sync/push.go` passes them through when `updated_time` is unchanged;
+- when we do re-serialize, emit unknown metadata lines verbatim in their original position — **[M0 done]** `RawItem.SerializeWithOverrides` keeps unknown keys (e.g. Joplin's `is_locked`, `extracted_resource_ids`, which our model lacks) verbatim at their original positions and re-emits known keys only when the value changed;
+- lock the rest with a **golden corpus**: real items from my target (note, todo, folder, tag, note-tag, resource, master key, conflict note) asserting `Serialize(Deserialize(x)) == x` byte-for-byte. This corpus is the format gate of every later milestone. — **[M0 done, synthetic]** `internal/models/testdata/golden/` (14 fixtures incl. empty-body, unicode, escaping quirks, unknown keys, both envelope forms) asserting raw/merge/typed byte-identical round-trips; **M1 replaces/extends these with real items from the target — that was the corpus's intent.**
+
+**Serialization facts (verified 2026-10-17 against `BaseItem.ts`):** sections are `title`, `body` (omitted when empty), metadata, joined by blank lines, no trailing newline (Joplin's own parser chokes on one); metadata values escape only literal `\n`/`\r` sequences and real newlines/CRs — bare backslashes are untouched (`note_paths.md` locks the quirk); `type_` is last; the encrypted envelope is the keep-keys reduced item (`id`, `note_id`, `tag_id`, `parent_id`, `share_id`, `updated_time`, `deleted_time`, `type_`, `master_key_id` + `encryption_applied`, `encryption_cipher_text`) as a metadata-only block. Known model gap: `order` is int64 here; a fractional Joplin order would truncate through the typed path (raw-passthrough covers unmodified items) — widen to float64 if a real item shows one.
 
 **Our work:**1. Go **cgo-free**: drop `rag`/`mcp`, swap `mattn/go-sqlite3` → `modernc.org/sqlite` (`CGO_ENABLED=0`; no MSVC; matches MyGO). **[correction — verified in M0]** modernc's build ships `SQLITE_ENABLE_FTS5` only — **no FTS4** — so `notes_fts` migrated to FTS5 external content (`content='notes'`, canonical `'delete'`-command triggers); `search.go`'s join is unchanged and the index is local-only (not part of the sync format). DSN pragmas are the modernc `_pragma=` form (`_pragma=journal_mode(WAL)` etc.); WAL verified by the M0 smoke test.
 2. A **Dropbox** `SyncBackend` + Dropbox OAuth (details above).
@@ -273,7 +271,7 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - Store smoke test: WAL, FTS5 search, resource blob round-trip through the new driver.
 - Record binary size and startup time.
 - **Gate:** format gate green; all existing round-trip + e2ee tests green.
-- **Progress (2026-10-17):** bullets 1, 3, 4 done — the fork lives at the repo root (module `github.com/lsj5031/joplin-lite`), `CGO_ENABLED=0 go build ./...` and `go test ./...` green (clipper, config, e2ee, store, sync), smoke test added (`internal/store/db_smoke_test.go`: WAL + FTS5 insert/update/delete round-trip + resource blob), size/startup recorded under Success criteria. **Remaining: the golden corpus + raw-passthrough serialization fix — the format gate — which is the rest of M0.**
+- **Done (2026-10-17), gate green:** all bullets — fork at repo root (module `github.com/lsj5031/joplin-lite`), `CGO_ENABLED=0 go build ./...` / `go test ./...` green (clipper, config, e2ee, models, store, sync), store smoke test (`internal/store/db_smoke_test.go`), golden corpus + raw-passthrough (`internal/models/testdata/golden/`, `internal/models/rawitem.go`, `item_raw` sidecar through `sync/delta.go` + `sync/push.go`), size/startup recorded under Success criteria. Corpus fixtures are synthetic-but-canonical; M1 extends them with real target items.
 
 **M1 — E2EE interop**
 - Load master keys from the master password (existing `DecryptPulledItems` flow), verify the
@@ -334,10 +332,7 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - **Footprint** — cgo-free SQLite (modernc) inflates the binary; "~7 MB" may become
   ~15–20 MB. Measure, then decide: accept, strip, or reconsider the driver.
 
-## Open questions (verify on real targets, not in code)
-
-1. Joplin's exact float formatting for `latitude/longitude/altitude` and `order` in serialized
-   items — the golden corpus answers this; fix `serialize.go` to match reality, whatever it is.
+## Open questions (verify on real targets, not in code)1. ~~Joplin's exact float formatting for `latitude/longitude/altitude` and `order`~~ **[resolved 2026-10-17 from `packages/lib/models/BaseItem.ts`]**: `order`, `todo_due`, `todo_completed`, `deleted_time`, `blob_updated_time` are plain millisecond numbers ("0" when zero) — never ISO; only `created_time`, `updated_time`, `user_created_time`, `user_updated_time` are ISO; floats serialize as fixed 8 decimals (4 for altitude), matching `unserialize_format`'s toFixed. Residual uncertainty: the float *text* form in real files (toFixed string vs bare number) is locked as toFixed(8/4); confirm on a real-target item at M1.
 2. Exact clipper route set + query semantics the extension exercises (port from
    `packages/lib/ClipperServer.ts`).
 3. Whether current Joplin ever writes `locks/` with legacy `sync_desktop_*` names (old

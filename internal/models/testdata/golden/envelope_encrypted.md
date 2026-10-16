@@ -1,0 +1,8 @@
+id: 0d28d893565c4b2989301f2259164273
+parent_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01
+updated_time: 2026-03-05T08:00:00.000Z
+encryption_cipher_text: JED0100003774686973206973206369706865727465787400000a6162636465666768
+encryption_applied: 1
+master_key_id: ffffffffffffffffffffffffffffffff
+deleted_time: 0
+type_: 1

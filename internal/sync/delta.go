@@ -134,7 +134,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if err := db.UpsertNote(note); err != nil {
 			return fmt.Errorf("cannot upsert note %s: %w", note.ID, err)
 		}
-		return db.UpsertSyncItem(note.ID, models.TypeNote, syncTarget)
+		if err := db.UpsertSyncItem(note.ID, models.TypeNote, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(note.ID, content, note.UpdatedTime)
 
 	case models.TypeFolder:
 		folder := models.DeserializeFolder(string(content))
@@ -151,7 +154,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if err := db.UpsertFolder(folder); err != nil {
 			return fmt.Errorf("cannot upsert folder %s: %w", folder.ID, err)
 		}
-		return db.UpsertSyncItem(folder.ID, models.TypeFolder, syncTarget)
+		if err := db.UpsertSyncItem(folder.ID, models.TypeFolder, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(folder.ID, content, folder.UpdatedTime)
 
 	case models.TypeTag:
 		tag := models.DeserializeTag(string(content))
@@ -168,7 +174,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if err := db.UpsertTag(tag); err != nil {
 			return fmt.Errorf("cannot upsert tag %s: %w", tag.ID, err)
 		}
-		return db.UpsertSyncItem(tag.ID, models.TypeTag, syncTarget)
+		if err := db.UpsertSyncItem(tag.ID, models.TypeTag, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(tag.ID, content, tag.UpdatedTime)
 
 	case models.TypeNoteTag:
 		nt := models.DeserializeNoteTag(string(content))
@@ -178,7 +187,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if err := db.UpsertNoteTag(nt); err != nil {
 			return fmt.Errorf("cannot upsert note_tag %s: %w", nt.ID, err)
 		}
-		return db.UpsertSyncItem(nt.ID, models.TypeNoteTag, syncTarget)
+		if err := db.UpsertSyncItem(nt.ID, models.TypeNoteTag, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(nt.ID, content, nt.UpdatedTime)
 
 	case models.TypeResource:
 		resource := models.DeserializeResource(string(content))
@@ -188,7 +200,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if err := db.UpsertResource(resource); err != nil {
 			return fmt.Errorf("cannot upsert resource %s: %w", resource.ID, err)
 		}
-		return db.UpsertSyncItem(resource.ID, models.TypeResource, syncTarget)
+		if err := db.UpsertSyncItem(resource.ID, models.TypeResource, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(resource.ID, content, resource.UpdatedTime)
 
 	case models.TypeMasterKey:
 		mk := models.DeserializeMasterKey(string(content))
@@ -198,7 +213,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if err := db.UpsertMasterKey(mk); err != nil {
 			return fmt.Errorf("cannot upsert master_key %s: %w", mk.ID, err)
 		}
-		return db.UpsertSyncItem(mk.ID, models.TypeMasterKey, syncTarget)
+		if err := db.UpsertSyncItem(mk.ID, models.TypeMasterKey, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(mk.ID, content, mk.UpdatedTime)
 
 	case models.TypeRevision:
 		// Revisions (note history) are synced by Joplin but we don't persist their content.

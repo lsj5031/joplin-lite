@@ -7,30 +7,41 @@ import (
 )
 
 // SerializeNote converts a Note to Joplin's text format for sync.
+// Layout follows Joplin's BaseItem.serialize: title, body (only when
+// non-empty) and the metadata block joined by blank lines.
 func SerializeNote(n *Note) string {
 	var b strings.Builder
 	b.WriteString(n.Title)
+	if n.Body != "" {
+		b.WriteString("\n\n")
+		b.WriteString(n.Body)
+	}
 	b.WriteString("\n\n")
-	b.WriteString(n.Body)
-	b.WriteString("\n\n")
-	writeMetadata(&b, map[string]string{
+	writeMetadata(&b, NoteFields(n))
+	return b.String()
+}
+
+// NoteFields returns a Note's metadata fields formatted per Joplin's
+// serialize_format rules.
+func NoteFields(n *Note) map[string]string {
+	return map[string]string{
 		"id":                     n.ID,
 		"parent_id":              n.ParentID,
 		"created_time":           fmtTime(n.CreatedTime),
 		"updated_time":           fmtTime(n.UpdatedTime),
 		"is_conflict":            strconv.Itoa(n.IsConflict),
-		"latitude":               fmtFloat(n.Latitude),
-		"longitude":              fmtFloat(n.Longitude),
-		"altitude":               fmtFloat(n.Altitude),
+		"latitude":               fmtFloat(n.Latitude, 8),
+		"longitude":              fmtFloat(n.Longitude, 8),
+		"altitude":               fmtFloat(n.Altitude, 4),
 		"author":                 n.Author,
 		"source_url":             n.SourceURL,
 		"is_todo":                strconv.Itoa(n.IsTodo),
-		"todo_due":               fmtTime(n.TodoDue),
-		"todo_completed":         fmtTime(n.TodoCompleted),
+		"todo_due":               fmtMs(n.TodoDue),
+		"todo_completed":         fmtMs(n.TodoCompleted),
 		"source":                 n.Source,
 		"source_application":     n.SourceApplication,
 		"application_data":       n.ApplicationData,
-		"order":                  fmtTime(n.Order),
+		"order":                  fmtMs(n.Order),
 		"user_created_time":      fmtTime(n.UserCreatedTime),
 		"user_updated_time":      fmtTime(n.UserUpdatedTime),
 		"encryption_cipher_text": n.EncryptionCipherText,
@@ -41,10 +52,9 @@ func SerializeNote(n *Note) string {
 		"conflict_original_id":   n.ConflictOriginalID,
 		"master_key_id":          n.MasterKeyID,
 		"user_data":              n.UserData,
-		"deleted_time":           fmtTime(n.DeletedTime),
+		"deleted_time":           fmtMs(n.DeletedTime),
 		"type_":                  strconv.Itoa(TypeNote),
-	})
-	return b.String()
+	}
 }
 
 // SerializeFolder converts a Folder to Joplin's text format.
@@ -52,7 +62,13 @@ func SerializeFolder(f *Folder) string {
 	var b strings.Builder
 	b.WriteString(f.Title)
 	b.WriteString("\n\n")
-	writeMetadata(&b, map[string]string{
+	writeMetadata(&b, FolderFields(f))
+	return b.String()
+}
+
+// FolderFields returns a Folder's metadata fields formatted per Joplin's rules.
+func FolderFields(f *Folder) map[string]string {
+	return map[string]string{
 		"id":                     f.ID,
 		"created_time":           fmtTime(f.CreatedTime),
 		"updated_time":           fmtTime(f.UpdatedTime),
@@ -66,10 +82,9 @@ func SerializeFolder(f *Folder) string {
 		"master_key_id":          f.MasterKeyID,
 		"icon":                   f.Icon,
 		"user_data":              f.UserData,
-		"deleted_time":           fmtTime(f.DeletedTime),
+		"deleted_time":           fmtMs(f.DeletedTime),
 		"type_":                  strconv.Itoa(TypeFolder),
-	})
-	return b.String()
+	}
 }
 
 // SerializeTag converts a Tag to Joplin's text format.
@@ -77,7 +92,13 @@ func SerializeTag(t *Tag) string {
 	var b strings.Builder
 	b.WriteString(t.Title)
 	b.WriteString("\n\n")
-	writeMetadata(&b, map[string]string{
+	writeMetadata(&b, TagFields(t))
+	return b.String()
+}
+
+// TagFields returns a Tag's metadata fields formatted per Joplin's rules.
+func TagFields(t *Tag) map[string]string {
+	return map[string]string{
 		"id":                     t.ID,
 		"created_time":           fmtTime(t.CreatedTime),
 		"updated_time":           fmtTime(t.UpdatedTime),
@@ -89,14 +110,19 @@ func SerializeTag(t *Tag) string {
 		"parent_id":              t.ParentID,
 		"user_data":              t.UserData,
 		"type_":                  strconv.Itoa(TypeTag),
-	})
+	}
+}
+
+// SerializeNoteTag converts a NoteTag to Joplin's text format (metadata only).
+func SerializeNoteTag(nt *NoteTag) string {
+	var b strings.Builder
+	writeMetadata(&b, NoteTagFields(nt))
 	return b.String()
 }
 
-// SerializeNoteTag converts a NoteTag to Joplin's text format.
-func SerializeNoteTag(nt *NoteTag) string {
-	var b strings.Builder
-	writeMetadata(&b, map[string]string{
+// NoteTagFields returns a NoteTag's metadata fields formatted per Joplin's rules.
+func NoteTagFields(nt *NoteTag) map[string]string {
+	return map[string]string{
 		"id":                     nt.ID,
 		"note_id":                nt.NoteID,
 		"tag_id":                 nt.TagID,
@@ -108,8 +134,7 @@ func SerializeNoteTag(nt *NoteTag) string {
 		"encryption_applied":     strconv.Itoa(nt.EncryptionApplied),
 		"is_shared":              strconv.Itoa(nt.IsShared),
 		"type_":                  strconv.Itoa(TypeNoteTag),
-	})
-	return b.String()
+	}
 }
 
 // SerializeResource converts a Resource to Joplin's text format (metadata only).
@@ -117,27 +142,32 @@ func SerializeResource(r *Resource) string {
 	var b strings.Builder
 	b.WriteString(r.Title)
 	b.WriteString("\n\n")
-	writeMetadata(&b, map[string]string{
-		"id":                          r.ID,
-		"mime":                        r.Mime,
-		"filename":                    r.Filename,
-		"created_time":                fmtTime(r.CreatedTime),
-		"updated_time":                fmtTime(r.UpdatedTime),
-		"user_created_time":           fmtTime(r.UserCreatedTime),
-		"user_updated_time":           fmtTime(r.UserUpdatedTime),
-		"file_extension":              r.FileExtension,
-		"encryption_cipher_text":      r.EncryptionCipherText,
-		"encryption_applied":          strconv.Itoa(r.EncryptionApplied),
-		"encryption_blob_encrypted":   strconv.Itoa(r.EncryptionBlobEncrypted),
-		"size":                        strconv.FormatInt(r.Size, 10),
-		"is_shared":                   strconv.Itoa(r.IsShared),
-		"share_id":                    r.ShareID,
-		"master_key_id":               r.MasterKeyID,
-		"user_data":                   r.UserData,
-		"blob_updated_time":           fmtTime(r.BlobUpdatedTime),
-		"type_":                       strconv.Itoa(TypeResource),
-	})
+	writeMetadata(&b, ResourceFields(r))
 	return b.String()
+}
+
+// ResourceFields returns a Resource's metadata fields formatted per Joplin's rules.
+func ResourceFields(r *Resource) map[string]string {
+	return map[string]string{
+		"id":                        r.ID,
+		"mime":                      r.Mime,
+		"filename":                  r.Filename,
+		"created_time":              fmtTime(r.CreatedTime),
+		"updated_time":              fmtTime(r.UpdatedTime),
+		"user_created_time":         fmtTime(r.UserCreatedTime),
+		"user_updated_time":         fmtTime(r.UserUpdatedTime),
+		"file_extension":            r.FileExtension,
+		"encryption_cipher_text":    r.EncryptionCipherText,
+		"encryption_applied":        strconv.Itoa(r.EncryptionApplied),
+		"encryption_blob_encrypted": strconv.Itoa(r.EncryptionBlobEncrypted),
+		"size":                      strconv.FormatInt(r.Size, 10),
+		"is_shared":                 strconv.Itoa(r.IsShared),
+		"share_id":                  r.ShareID,
+		"master_key_id":             r.MasterKeyID,
+		"user_data":                 r.UserData,
+		"blob_updated_time":         fmtMs(r.BlobUpdatedTime),
+		"type_":                     strconv.Itoa(TypeResource),
+	}
 }
 
 // Deserialize parses Joplin's text format and returns the item type and a map of fields.
@@ -170,7 +200,7 @@ func Deserialize(content string) (int, map[string]string) {
 		line := lines[i]
 		if idx := strings.Index(line, ": "); idx > 0 {
 			key := line[:idx]
-			value := unescapeMetaValue(line[idx+2:])
+			value := unescapeMetaValue(key, line[idx+2:])
 			fields[key] = value
 		}
 	}
@@ -318,19 +348,26 @@ func DeserializeResource(content string) *Resource {
 	return r
 }
 
-// SerializeEncryptedEnvelope serializes a reduced item for sync (encrypted case): empty title/body + metadata only.
-// Used when uploading an encrypted item: only keep-keys and encryption fields are included.
+// SerializeEncryptedEnvelope serializes the reduced item Joplin writes for an
+// encrypted sync item: keep-keys and encryption fields only, metadata block
+// only (Joplin's serializeForSync drops the title/body sections for the
+// reduced item).
 func SerializeEncryptedEnvelope(meta map[string]string) string {
 	var b strings.Builder
-	b.WriteString("\n\n\n\n") // empty title, empty body, blank line before metadata
 	writeMetadata(&b, meta)
 	return b.String()
 }
 
-// SerializeMasterKey converts a MasterKey to Joplin's text format.
+// SerializeMasterKey converts a MasterKey to Joplin's text format (metadata only).
 func SerializeMasterKey(mk *MasterKey) string {
 	var b strings.Builder
-	writeMetadata(&b, map[string]string{
+	writeMetadata(&b, MasterKeyFields(mk))
+	return b.String()
+}
+
+// MasterKeyFields returns a MasterKey's metadata fields formatted per Joplin's rules.
+func MasterKeyFields(mk *MasterKey) map[string]string {
+	return map[string]string{
 		"id":                 mk.ID,
 		"created_time":       fmtTime(mk.CreatedTime),
 		"updated_time":       fmtTime(mk.UpdatedTime),
@@ -339,8 +376,7 @@ func SerializeMasterKey(mk *MasterKey) string {
 		"checksum":           mk.Checksum,
 		"content":            mk.Content,
 		"type_":              strconv.Itoa(TypeMasterKey),
-	})
-	return b.String()
+	}
 }
 
 // DeserializeMasterKey parses text content into a MasterKey.
@@ -357,7 +393,10 @@ func DeserializeMasterKey(content string) *MasterKey {
 	return mk
 }
 
-// Metadata key order for serialization (matching Joplin's order).
+// metadataKeyOrder for serialization. Mirrors Joplin's field order for the
+// fields our models carry; note that Joplin's Note also writes is_locked and
+// extracted_resource_ids, which our models don't have — those survive sync
+// through the raw-passthrough / RawItem unknown-key preservation instead.
 var metadataKeyOrder = []string{
 	"id", "parent_id", "note_id", "tag_id",
 	"created_time", "updated_time",
@@ -374,44 +413,39 @@ var metadataKeyOrder = []string{
 	"type_",
 }
 
-// escapeMetaValue escapes newlines in metadata values per Joplin format (\n -> \\n, \r -> \\r).
-func escapeMetaValue(val string) string {
-	val = strings.ReplaceAll(val, "\\", "\\\\")
+// escapeMetaValue escapes a metadata value exactly as Joplin's
+// serialize_format does: only literal \n / \r sequences and real newlines are
+// escaped; a bare backslash is left alone. Private keys (trailing "_", such as
+// type_) are emitted raw.
+func escapeMetaValue(key, val string) string {
+	if strings.HasSuffix(key, "_") {
+		return val
+	}
+	val = strings.ReplaceAll(val, "\\n", "\\\\n")
+	val = strings.ReplaceAll(val, "\\r", "\\\\r")
 	val = strings.ReplaceAll(val, "\n", "\\n")
 	val = strings.ReplaceAll(val, "\r", "\\r")
 	return val
 }
 
-// unescapeMetaValue reverses escapeMetaValue when parsing metadata (\\n -> \n, \\r -> \r).
-func unescapeMetaValue(val string) string {
-	var b strings.Builder
-	for i := 0; i < len(val); i++ {
-		if val[i] == '\\' && i+1 < len(val) {
-			switch val[i+1] {
-			case 'n':
-				b.WriteByte('\n')
-				i++
-				continue
-			case 'r':
-				b.WriteByte('\r')
-				i++
-				continue
-			case '\\':
-				b.WriteByte('\\')
-				i++
-				continue
-			}
-		}
-		b.WriteByte(val[i])
+// unescapeMetaValue reverses Joplin's unserialize_format escaping (the same
+// four-replacement chain Joplin applies, in order).
+func unescapeMetaValue(key, val string) string {
+	if strings.HasSuffix(key, "_") {
+		return val
 	}
-	return b.String()
+	val = strings.ReplaceAll(val, "\\n", "\n")
+	val = strings.ReplaceAll(val, "\\r", "\r")
+	val = strings.ReplaceAll(val, "\\\n", "\\n")
+	val = strings.ReplaceAll(val, "\\\r", "\\r")
+	return val
 }
 
 func writeMetadata(b *strings.Builder, meta map[string]string) {
 	var lines []string
 	for _, key := range metadataKeyOrder {
 		if val, ok := meta[key]; ok {
-			lines = append(lines, key+": "+escapeMetaValue(val))
+			lines = append(lines, key+": "+escapeMetaValue(key, val))
 		}
 	}
 	if len(lines) > 0 {
@@ -423,7 +457,9 @@ func fmtTime(t int64) string {
 	return FmtTimeForSync(t)
 }
 
-// FmtTimeForSync formats a timestamp as ISO 8601 UTC for sync (used by push and serialization).
+// FmtTimeForSync formats a timestamp the way Joplin serializes the five ISO
+// fields (created_time, updated_time, sync_time, user_created_time,
+// user_updated_time): ISO 8601 UTC with milliseconds, empty when zero.
 func FmtTimeForSync(t int64) string {
 	if t == 0 {
 		return ""
@@ -431,8 +467,17 @@ func FmtTimeForSync(t int64) string {
 	return time.Unix(0, t*int64(time.Millisecond)).UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-func fmtFloat(f float64) string {
-	return strconv.FormatFloat(f, 'f', 8, 64)
+// fmtMs formats a plain millisecond number field (order, todo_due,
+// todo_completed, deleted_time, blob_updated_time): Joplin writes these as
+// raw numbers ("0" when zero), never as ISO strings.
+func fmtMs(t int64) string {
+	return strconv.FormatInt(t, 10)
+}
+
+// fmtFloat formats a float field as Joplin's unserialize_format canonicalizes
+// it: fixed 8 decimals for latitude/longitude, 4 for altitude.
+func fmtFloat(f float64, places int) string {
+	return strconv.FormatFloat(f, 'f', places, 64)
 }
 
 func parseInt64(s string) int64 {
