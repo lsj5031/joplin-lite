@@ -1,3 +1,7 @@
+# Go build output
+/joplin-lite
+/joplin-lite.exe
+
 # dependencies & build output
 web/node_modules/
 web/dist/

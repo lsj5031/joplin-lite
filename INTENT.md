@@ -32,7 +32,7 @@ Verified against `reference/go-joplin`:
 |---|---|---|
 | `internal/e2ee` | JED01 + SJCL + KeyV1/StringV1/FileV1 decrypt, StringV1 encrypt | Keep frozen; one additive gap (`EncryptFile`) |
 | `internal/models` | serialize/unserialize for all item types | Keep, but **[gap]** round-trip is not byte-identical and unknown metadata keys are dropped |
-| `internal/store` | Joplin schema v49, FTS4, sync/deleted/item_changes tables | Keep; swap SQLite driver, drop RAG tables |
+| `internal/store` | Joplin schema v49, FTS4, sync/deleted/item_changes tables | Keep; SQLite driver swapped, RAG dropped — **[correction]** search index is now FTS5 (modernc ships no FTS4); local index only, not part of the sync format |
 | `internal/sync` | engine, delta, push, reconcile, locks (Joplin-Server only), S3 + Joplin Server drivers | Keep as the model; **[gap]** no conflict notes, weak lock enforcement, resource push unencrypted |
 | `internal/clipper` | full Data API on 41184, ping, CORS | Keep; **[gap]** auth auto-accepts (not the real handshake), no `/revisions` |
 | Build | **[verified]** does not build here as-is: `mattn/go-sqlite3` + `sqlite-vec` cgo fail without a C toolchain | M0 (cgo-free) is required, not optional |
@@ -209,7 +209,11 @@ We keep and build on:
 
 We cut for v1: `internal/mcp`, `internal/rag`, `internal/telemetry`, `store/rag.go`,
 `store/db.go`'s `InitRAG` + `sqlite-vec` init, and the MCP mount in `clipper/server.go`
-(drop the `mcp`/RAG parameters from `NewServer`).
+(drop the `mcp`/RAG parameters from `NewServer`). **[M0 note]** The mutation `Policy`
+moved *intact* into `internal/clipper` (nil-deny semantics preserved) rather than dying
+with `internal/mcp` — the clipper handlers depend on it; `NewServer` is now
+`(db, apiToken, apiKey, syncer, policy)`. `sync_state.go`'s `DeleteNoteRAGData` hook
+went with `store/rag.go`.
 
 **[gap] Losslessness work (M0, before anything trusts serialization):** `models/serialize.go`
 today is not byte-identical — `writeMetadata` emits only known keys (unknown metadata lines are
@@ -222,12 +226,7 @@ trailing whitespace is trimmed on parse. Plan:
   note-tag, resource, master key, conflict note) asserting `Serialize(Deserialize(x)) == x`
   byte-for-byte. This corpus is the format gate of every later milestone.
 
-**Our work:**
-1. Go **cgo-free**: drop `rag`/`mcp`, swap `mattn/go-sqlite3` → `modernc.org/sqlite`
-   (`CGO_ENABLED=0`; no MSVC; matches MyGO). FTS4 (used by `store/search.go`) is compiled
-   into the standard amalgamation, so search survives. DSN pragmas (`_journal_mode=WAL`,
-   `_busy_timeout`, `_foreign_keys`) must be re-checked for the modernc driver
-   (`_pragma=` form) in the M0 smoke test.
+**Our work:**1. Go **cgo-free**: drop `rag`/`mcp`, swap `mattn/go-sqlite3` → `modernc.org/sqlite` (`CGO_ENABLED=0`; no MSVC; matches MyGO). **[correction — verified in M0]** modernc's build ships `SQLITE_ENABLE_FTS5` only — **no FTS4** — so `notes_fts` migrated to FTS5 external content (`content='notes'`, canonical `'delete'`-command triggers); `search.go`'s join is unchanged and the index is local-only (not part of the sync format). DSN pragmas are the modernc `_pragma=` form (`_pragma=journal_mode(WAL)` etc.); WAL verified by the M0 smoke test.
 2. A **Dropbox** `SyncBackend` + Dropbox OAuth (details above).
 3. More drivers later behind the same interface.
 4. A **MyGO** shell + typed bindings + web UI.
@@ -262,10 +261,7 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - **E2EE gate:** decrypt a real note from my target, edit, re-encrypt, and **Joplin decrypts it back**.
 - **Sync gate:** edit here → sync → Joplin desktop shows it, and the reverse, with no loss;
   a deliberate double-edit produces a conflict note, not a silent overwrite.
-- **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.
-- Footprint: single cgo-free binary, starts in under a second. The "~7 MB" figure is an
-  aspiration, not a promise — modernc's SQLite adds several MB of Go; measure at M0 with
-  `-ldflags="-s -w"` and record the real number here.
+- **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.- Footprint: single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `-ldflags="-s -w"`] 24,385,024 bytes (23.3 MiB); startup (`--help`) 67–94 ms over 3 runs.** The "~7 MB" aspiration is dead — the real number is ~24 MB; decide at M5 (accept, strip, or reconsider the driver).
 
 ## Milestones
 
@@ -274,9 +270,10 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
   `go test ./...` green on Go 1.26 with `CGO_ENABLED=0` (today's build fails without a C
   toolchain — that failure is the starting point).
 - Golden-corpus round-trip tests + the raw-passthrough/unknown-key serialization fix.
-- Store smoke test: WAL, FTS4 search, resource blob round-trip through the new driver.
+- Store smoke test: WAL, FTS5 search, resource blob round-trip through the new driver.
 - Record binary size and startup time.
 - **Gate:** format gate green; all existing round-trip + e2ee tests green.
+- **Progress (2026-10-17):** bullets 1, 3, 4 done — the fork lives at the repo root (module `github.com/lsj5031/joplin-lite`), `CGO_ENABLED=0 go build ./...` and `go test ./...` green (clipper, config, e2ee, store, sync), smoke test added (`internal/store/db_smoke_test.go`: WAL + FTS5 insert/update/delete round-trip + resource blob), size/startup recorded under Success criteria. **Remaining: the golden corpus + raw-passthrough serialization fix — the format gate — which is the rest of M0.**
 
 **M1 — E2EE interop**
 - Load master keys from the master password (existing `DecryptPulledItems` flow), verify the

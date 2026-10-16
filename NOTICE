@@ -1,0 +1,11 @@
+joplin-lite
+===========
+
+This product is a fork of "go-joplin" (https://github.com/jescarri/go-joplin),
+Copyright (c) the go-joplin authors and contributors.
+
+go-joplin is licensed under the GNU Affero General Public License v3.0 or later
+(see LICENSE). joplin-lite is distributed under the same license
+(AGPL-3.0-or-later).
+
+Modifications and additions Copyright (c) 2026 joplin-lite contributors.
