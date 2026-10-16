@@ -91,6 +91,33 @@ func envelopeMeta(fields map[string]string, cipherText, masterKeyID string) map[
 	return out
 }
 
+// itemOverrides returns the formatted field map for the merge path, including
+// title/body so edits to the head section survive re-serialization.
+func noteOverrides(n *models.Note) map[string]string {
+	f := models.NoteFields(n)
+	f["title"] = n.Title
+	f["body"] = n.Body
+	return f
+}
+
+func folderOverrides(f *models.Folder) map[string]string {
+	m := models.FolderFields(f)
+	m["title"] = f.Title
+	return m
+}
+
+func tagOverrides(t *models.Tag) map[string]string {
+	m := models.TagFields(t)
+	m["title"] = t.Title
+	return m
+}
+
+func resourceOverrides(r *models.Resource) map[string]string {
+	m := models.ResourceFields(r)
+	m["title"] = r.Title
+	return m
+}
+
 // storePushedRaw records the serialized plaintext after a successful push of
 // newly serialized content, so later pushes of the unchanged item pass through
 // these exact bytes.
@@ -131,7 +158,7 @@ func pushNotes(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforeP
 			continue
 		}
 
-		plain, changed := itemPlain(db, id, note.UpdatedTime, models.NoteFields(note), models.SerializeNote(note))
+		plain, changed := itemPlain(db, id, note.UpdatedTime, noteOverrides(note), models.SerializeNote(note))
 		content := serializeNoteForSync(note, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
@@ -193,7 +220,7 @@ func pushFolders(backend SyncBackend, db *store.DB, syncTarget int, encryptBefor
 			continue
 		}
 
-		plain, changed := itemPlain(db, id, folder.UpdatedTime, models.FolderFields(folder), models.SerializeFolder(folder))
+		plain, changed := itemPlain(db, id, folder.UpdatedTime, folderOverrides(folder), models.SerializeFolder(folder))
 		content := serializeFolderForSync(folder, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
@@ -255,7 +282,7 @@ func pushTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePu
 			continue
 		}
 
-		plain, changed := itemPlain(db, id, tag.UpdatedTime, models.TagFields(tag), models.SerializeTag(tag))
+		plain, changed := itemPlain(db, id, tag.UpdatedTime, tagOverrides(tag), models.SerializeTag(tag))
 		content := serializeTagForSync(tag, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
 			continue
@@ -377,7 +404,7 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int) error {
 		}
 
 		// Push metadata (raw-passthrough like other items)
-		plain, changed := itemPlain(db, id, resource.UpdatedTime, models.ResourceFields(resource), models.SerializeResource(resource))
+		plain, changed := itemPlain(db, id, resource.UpdatedTime, resourceOverrides(resource), models.SerializeResource(resource))
 		storePushedRaw(db, id, plain, changed, resource.UpdatedTime)
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
