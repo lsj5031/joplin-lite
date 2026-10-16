@@ -1,0 +1,16 @@
+# dependencies & build output
+web/node_modules/
+web/dist/
+web/.output/
+web/.vinxi/
+web/.tanstack/
+web/.vite/
+
+# env & logs
+.env
+.env.*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

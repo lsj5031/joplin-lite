@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-16T23:20:00.000Z",
+  "title": "Design System: joplin-lite",
+  "extensions": {
+    "colorMeta": {
+      "ink-navy": {
+        "role": "neutral",
+        "displayName": "Ink Navy",
+        "canonical": "#16283C",
+        "tonalRamp": ["oklch(15% 0.05 250)", "oklch(22% 0.05 250)", "oklch(30% 0.05 250)", "oklch(40% 0.05 250)", "oklch(55% 0.05 250)", "oklch(70% 0.04 250)", "oklch(85% 0.03 250)", "oklch(95% 0.01 250)"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Map Paper",
+        "canonical": "#F6F4EE",
+        "tonalRamp": ["oklch(15% 0.01 90)", "oklch(25% 0.01 90)", "oklch(35% 0.01 90)", "oklch(50% 0.015 90)", "oklch(65% 0.015 90)", "oklch(80% 0.015 90)", "oklch(90% 0.012 90)", "oklch(96% 0.01 90)"]
+      },
+      "route-blue": {
+        "role": "primary",
+        "displayName": "Route Blue",
+        "canonical": "#1D5FA8",
+        "tonalRamp": ["oklch(18% 0.08 250)", "oklch(28% 0.1 250)", "oklch(38% 0.12 250)", "oklch(45% 0.13 250)", "oklch(55% 0.13 250)", "oklch(68% 0.11 250)", "oklch(82% 0.07 250)", "oklch(93% 0.03 250)"]
+      },
+      "moss": {
+        "role": "state",
+        "displayName": "Moss (synced)",
+        "canonical": "#276B43",
+        "tonalRamp": ["oklch(18% 0.06 150)", "oklch(28% 0.08 150)", "oklch(38% 0.09 150)", "oklch(45% 0.1 150)", "oklch(55% 0.1 150)", "oklch(68% 0.09 150)", "oklch(82% 0.06 150)", "oklch(93% 0.03 150)"]
+      },
+      "signal-red": {
+        "role": "state",
+        "displayName": "Signal Red (conflict)",
+        "canonical": "#C8322B",
+        "tonalRamp": ["oklch(20% 0.08 25)", "oklch(30% 0.12 25)", "oklch(42% 0.15 25)", "oklch(50% 0.17 25)", "oklch(58% 0.17 25)", "oklch(70% 0.13 25)", "oklch(83% 0.08 25)", "oklch(93% 0.04 25)"]
+      },
+      "amber-bright": {
+        "role": "state",
+        "displayName": "Amber (degraded / locked)",
+        "canonical": "#C9821B",
+        "tonalRamp": ["oklch(22% 0.06 70)", "oklch(32% 0.09 70)", "oklch(45% 0.11 70)", "oklch(55% 0.12 70)", "oklch(65% 0.13 70)", "oklch(75% 0.12 70)", "oklch(86% 0.08 70)", "oklch(94% 0.04 70)"]
+      },
+      "violet": {
+        "role": "state",
+        "displayName": "Violet (selection)",
+        "canonical": "#6B4E9B",
+        "tonalRamp": ["oklch(20% 0.08 295)", "oklch(30% 0.11 295)", "oklch(38% 0.13 295)", "oklch(45% 0.14 295)", "oklch(55% 0.13 295)", "oklch(68% 0.1 295)", "oklch(82% 0.06 295)", "oklch(93% 0.03 295)"]
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "Ink Soft (secondary)",
+        "canonical": "#4A5A6E",
+        "tonalRamp": ["oklch(15% 0.03 250)", "oklch(25% 0.035 250)", "oklch(35% 0.04 250)", "oklch(45% 0.04 250)", "oklch(55% 0.04 250)", "oklch(68% 0.035 250)", "oklch(83% 0.025 250)", "oklch(93% 0.012 250)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Rendered note titles in preview only." },
+      "title": { "displayName": "Title", "purpose": "The note title in the editor header." },
+      "body": { "displayName": "Body", "purpose": "Rendered note content and UI copy; 72ch measure." },
+      "label": { "displayName": "Label", "purpose": "Sidebar section labels and panel headings; uppercase, tracked +0.08em." },
+      "mono": { "displayName": "Mono", "purpose": "Machine-produced data only: times, counts, IDs, station labels, markdown source." }
+    },
+    "shadows": [
+      { "name": "popover", "value": "0 6px 18px rgba(15,29,45,0.22)", "purpose": "Transient overlays (settings popover) above the chrome. The only shadow in the system." }
+    ],
+    "motion": [
+      { "name": "transition-ui", "value": "color, background-color 100ms ease-out", "purpose": "Hover/focus state changes on controls and rows." },
+      { "name": "service-run", "value": "stroke-dashoffset 28 -> 0, 1.15s linear infinite", "purpose": "The one authored moment: a paper dash travels the syncing segment of the sync line." },
+      { "name": "station-pulse", "value": "r 4 <-> 5.5 with opacity 1 <-> 0.75, 1.6s ease-in-out infinite", "purpose": "Pulses the active station while syncing." },
+      { "name": "reduced-motion", "value": "prefers-reduced-motion: reduce disables service-run and station-pulse", "purpose": "Accessibility floor; content is visible by default, never gated behind animation." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single action class for committing moves: New note, Unlock vault.",
+      "html": "<button class=\"ds-btn-primary\">New note</button>",
+      "css": ".ds-btn-primary { background: var(--color-route-blue); color: var(--color-paper); font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 12.5px; font-weight: 600; padding: 6px 10px; border: none; border-radius: 6px; transition: opacity 100ms ease-out; } .ds-btn-primary:hover { opacity: 0.9; } .ds-btn-primary:focus-visible { outline: 2px solid var(--color-route-blue); outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "All non-committing actions; adapts border to paper or navy chrome.",
+      "html": "<button class=\"ds-btn-secondary\">Sync now</button>",
+      "css": ".ds-btn-secondary { background: transparent; color: var(--color-ink-navy); font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 12.5px; font-weight: 500; padding: 6px 10px; border: 1px solid var(--color-hairline-strong); border-radius: 6px; transition: background-color 100ms ease-out; } .ds-btn-secondary:hover { background: var(--color-paper-sunken); } .ds-btn-secondary:disabled { opacity: 0.5; }"
+    },
+    {
+      "name": "Tag Chip",
+      "kind": "chip",
+      "refersTo": "chip-tag",
+      "description": "Small metadata pill for tags; never a control at rest.",
+      "html": "<span class=\"ds-chip-tag\">e2ee</span>",
+      "css": ".ds-chip-tag { display: inline-block; background: var(--color-paper); color: var(--color-ink-soft); border: 1px solid var(--color-hairline-strong); border-radius: 999px; padding: 2px 8px; font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 11px; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Chrome-situated global search with mono kbd hint; the only dark input.",
+      "html": "<div class=\"ds-input-wrap\"><input class=\"ds-input-search\" placeholder=\"Search notes, notebooks, tags…\" /><kbd class=\"ds-kbd\">⌘K</kbd></div>",
+      "css": ".ds-input-wrap { position: relative; display: inline-block; } .ds-input-search { height: 32px; width: 320px; background: var(--color-navy-deep); color: var(--color-paper); border: 1px solid var(--color-navy-line); border-radius: 6px; padding: 0 44px 0 32px; font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 13px; caret-color: var(--color-violet); } .ds-input-search:focus { border-color: var(--color-route-blue); outline: none; } .ds-input-search::placeholder { color: var(--color-navy-text); } .ds-kbd { position: absolute; right: 8px; top: 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: var(--color-navy-text); border: 1px solid var(--color-navy-line); border-radius: 4px; padding: 1px 6px; }"
+    },
+    {
+      "name": "Sidebar Nav Row",
+      "kind": "nav",
+      "refersTo": "nav-row",
+      "description": "Notebook/tag row with right-aligned mono count; active row carries the violet selection tint and 1px violet edge.",
+      "html": "<button class=\"ds-nav-row is-active\"><span>All notes</span><span class=\"ds-count\">8</span></button>",
+      "css": ".ds-nav-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--color-ink-navy); font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 13px; text-align: left; transition: background-color 100ms ease-out; } .ds-nav-row:hover { background: var(--color-paper-sunken); } .ds-nav-row.is-active { background: color-mix(in srgb, var(--color-violet) 10%, transparent); border-color: var(--color-violet); font-weight: 600; } .ds-count { margin-left: auto; font-family: var(--font-mono, monospace); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--color-ink-soft); }"
+    },
+    {
+      "name": "Note List Row",
+      "kind": "card",
+      "refersTo": "list-row",
+      "description": "Timetable-dense note row: flag column, title/meta stack, mono updated time; hairline rule between rows.",
+      "html": "<button class=\"ds-list-row is-active\"><span class=\"ds-flags\"></span><span class=\"ds-row-main\"><span class=\"ds-row-title\">E2EE interop checklist (M1)</span><span class=\"ds-row-meta\">Specs &amp; interop · e2ee todo</span></span><span class=\"ds-row-time\">16 Oct 07:30</span></button>",
+      "css": ".ds-list-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 14px; background: transparent; border: none; border-bottom: 1px solid var(--color-hairline); border-left: 1px solid transparent; text-align: left; transition: background-color 100ms ease-out; } .ds-list-row:hover { background: var(--color-paper-sunken); } .ds-list-row.is-active { background: color-mix(in srgb, var(--color-violet) 10%, transparent); border-left-color: var(--color-violet); } .ds-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; } .ds-row-title { font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 13.5px; font-weight: 500; color: var(--color-ink-navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-row-meta { font-family: var(--font-sans, 'Overpass', sans-serif); font-size: 11.5px; color: var(--color-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-row-time { font-family: var(--font-mono, monospace); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--color-ink-soft); }"
+    },
+    {
+      "name": "Sync Line (signature)",
+      "kind": "custom",
+      "refersTo": "signature",
+      "description": "Beck-grammar route diagram of the library's network on navy chrome; segments and stations take service colors, the syncing segment runs a paper dash, conflicts mark the target with a red disruption cross.",
+      "html": "<svg class=\"ds-sync-line\" viewBox=\"0 0 720 76\" role=\"img\" aria-label=\"Sync network status: synced\"><path d=\"M80 40 L140 62 L232 62\" stroke=\"#33455C\" stroke-width=\"3\" fill=\"none\" stroke-linecap=\"round\"/><circle cx=\"232\" cy=\"62\" r=\"3.5\" fill=\"#33455C\"/><path d=\"M360 32 L392 12 L468 12\" stroke=\"#3E9B63\" stroke-width=\"3\" fill=\"none\" stroke-linecap=\"round\"/><circle cx=\"474\" cy=\"12\" r=\"4.5\" fill=\"#0F1D2D\" stroke=\"#3E9B63\" stroke-width=\"2.5\"/><path d=\"M80 32 L620 32\" stroke=\"#33455C\" stroke-width=\"3\" fill=\"none\" stroke-linecap=\"round\"/><path d=\"M80 32 L360 32\" stroke=\"#3E9B63\" stroke-width=\"3\" fill=\"none\" stroke-linecap=\"round\"/><circle cx=\"80\" cy=\"32\" r=\"5.5\" fill=\"#0F1D2D\" stroke=\"#3E9B63\" stroke-width=\"2.75\"/><circle cx=\"360\" cy=\"32\" r=\"5.5\" fill=\"#0F1D2D\" stroke=\"#3E9B63\" stroke-width=\"2.75\"/><circle cx=\"620\" cy=\"32\" r=\"4.5\" fill=\"#0F1D2D\" stroke=\"#33455C\" stroke-width=\"2.5\"/></svg>",
+      "css": ".ds-sync-line { height: 52px; width: 100%; min-width: 560px; } .ds-sync-line text { font-family: var(--font-mono, monospace); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Network Signage",
+    "overview": "joplin-lite is a working notes application drawn like a transit authority's service board: the library's sync network is a route line, every state is service status, and the work surfaces stay as standard and quiet as the platform allows. The world contributes type, palette, density, and exactly one signature move; it never contributes the layout, the navigation model, or the controls.\n\nDensity is timetable density: hairline-ruled rows, tight vertical rhythm, tabular figures for anything a machine produced. The chrome is bookended in ink navy over a map-paper ground, so the eye lands on the work between two calm bars. State color does real work and nothing else.",
+    "keyCharacteristics": [
+      "Ink-navy chrome bookending a warm map-paper ground (#F6F4EE).",
+      "Overpass / Overpass Mono (Highway Gothic lineage), self-hosted.",
+      "Transit line colors as a strict state vocabulary.",
+      "Hairline-ruled, timetable-dense lists with tabular figures.",
+      "One signature: the sync line — a Beck-grammar route diagram in the status strip."
+    ],
+    "rules": [
+      { "name": "The Service Color Rule", "body": "Line colors carry state and only state. An idle control is never colored like an alert; a state color never decorates a heading, a border, or an icon that isn't reporting that state.", "section": "colors" },
+      { "name": "The Two-Value Rule", "body": "Every state color exists in a paper-safe and a navy-safe value (e.g. moss #276B43 / moss-bright #3E9B63). Never place the paper value on chrome or vice versa.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Anything a machine produced — times, counts, sizes, IDs — is set in Overpass Mono with tabular figures. Mono is never used to signal \"technical\" on prose.", "section": "typography" },
+      { "name": "The Hairline Rule", "body": "Resting surfaces separate with 1px hairlines and tonal steps (paper → sunken → raised). If a new component wants a shadow, it wants a border.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep every state legible in the sync line before any copy explains it.",
+      "Do set all machine-produced data in Overpass Mono with tabular figures (times, counts, IDs).",
+      "Do use the state vocabulary exactly: moss = synced, route = moving/primary, signal = conflict, amber = waiting/locked, violet = selected.",
+      "Do collapse to icon-labeled chrome and stacked footer below 1024px rather than letting the shell overflow."
+    ],
+    "donts": [
+      "Don't spend a state color on decoration, or use the paper-safe value on navy chrome (see the Two-Value Rule).",
+      "Don't float resting surfaces with shadows; hairlines and tonal steps are the depth system.",
+      "Don't costume controls in the transit world — navigation, buttons, inputs, and tabs stay standard web controls.",
+      "Don't place the sync line anywhere but the status strip, and never animate it when no sync is running."
+    ]
+  }
+}

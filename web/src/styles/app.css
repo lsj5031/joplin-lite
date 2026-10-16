@@ -1,0 +1,270 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Overpass', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Overpass Mono', ui-monospace, 'Cascadia Mono', monospace;
+
+  /* Grounds */
+  --color-paper: #f6f4ee;
+  --color-paper-2: #ede8dd;
+  --color-paper-3: #fbfaf6;
+
+  /* Ink */
+  --color-ink: #16283c;
+  --color-ink-soft: #4a5a6e;
+  --color-line: #d9d2c4;
+  --color-line-strong: #beb5a3;
+
+  /* Chrome */
+  --color-navy: #16283c;
+  --color-navy-2: #0f1d2d;
+  --color-navy-line: #33455c;
+  --color-navy-text: #a8b4c4;
+  --color-navy-bright: #9cc1e8;
+
+  /* Transit line colors — each does a real job */
+  --color-route: #1d5fa8; /* primary / syncing */
+  --color-route-soft: #9cc1e8;
+  --color-moss: #276b43; /* synced (text-safe) */
+  --color-moss-bright: #3e9b63; /* synced (on navy / graphics) */
+  --color-signal: #c8322b; /* conflict / critical */
+  --color-signal-bright: #e05a52;
+  --color-amber: #8a5a12; /* degraded / locked (text-safe) */
+  --color-amber-bright: #c9821b;
+  --color-violet: #6b4e9b; /* selection */
+  --color-violet-soft: rgba(107, 78, 155, 0.1);
+}
+
+@layer base {
+  html {
+    height: 100%;
+  }
+
+  body {
+    min-height: 100%;
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgba(107, 78, 155, 0.22);
+    color: var(--color-ink);
+  }
+
+  textarea,
+  input {
+    caret-color: var(--color-violet);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-route);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border-radius: 6px;
+    border: 3px solid var(--color-paper);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-soft);
+  }
+}
+
+/* ---- utility layer ---- */
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* note body — rendered markdown */
+.prose-note {
+  max-width: 72ch;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--color-ink);
+}
+
+.prose-note h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 32px 0 12px;
+}
+
+.prose-note h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 28px 0 10px;
+}
+
+.prose-note h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 24px 0 8px;
+}
+
+.prose-note h1:first-child,
+.prose-note h2:first-child,
+.prose-note h3:first-child {
+  margin-top: 0;
+}
+
+.prose-note p {
+  margin: 0 0 14px;
+}
+
+.prose-note ul,
+.prose-note ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.prose-note ul {
+  list-style: square;
+}
+
+.prose-note ol {
+  list-style: decimal;
+}
+
+.prose-note li {
+  margin: 4px 0;
+}
+
+.prose-note li::marker {
+  color: var(--color-ink-soft);
+}
+
+.prose-note a {
+  color: var(--color-route);
+  text-underline-offset: 2px;
+}
+
+.prose-note strong {
+  font-weight: 650;
+}
+
+.prose-note code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.prose-note pre {
+  background: var(--color-navy);
+  color: var(--color-paper);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.prose-note pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.prose-note blockquote {
+  border-left: 2px solid var(--color-line-strong);
+  padding-left: 14px;
+  color: var(--color-ink-soft);
+  margin: 0 0 14px;
+}
+
+.prose-note hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 24px 0;
+}
+
+.prose-note table {
+  border-collapse: collapse;
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+
+.prose-note th,
+.prose-note td {
+  border: 1px solid var(--color-line);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.prose-note th {
+  background: var(--color-paper-2);
+  font-weight: 600;
+}
+
+/* ---- the sync line (signature move) ---- */
+
+@keyframes service-run {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.service-run {
+  stroke-dasharray: 10 18;
+  animation: service-run 1.15s linear infinite;
+}
+
+@keyframes station-pulse {
+  0%,
+  100% {
+    r: 4;
+    opacity: 1;
+  }
+  50% {
+    r: 5.5;
+    opacity: 0.75;
+  }
+}
+
+.station-pulse {
+  animation: station-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .service-run,
+  .station-pulse {
+    animation: none;
+  }
+}
