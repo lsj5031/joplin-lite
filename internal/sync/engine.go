@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/e2ee"
@@ -18,6 +19,10 @@ type Engine struct {
 	e2ee           *e2ee.Service
 	masterPassword string
 	triggerCh      chan struct{}
+
+	// syncMu is a try-lock: a trigger that arrives while a sync is running
+	// must not start a second overlapping pass over the same target and DB.
+	syncMu sync.Mutex
 }
 
 // NewEngine creates a new sync engine with the given sync backend (HTTP client or S3).
@@ -92,8 +97,16 @@ func startLockRefresh(r LockRefresher, lock interface{}) func() {
 	}
 }
 
-// Sync performs a full sync cycle.
+// Sync performs a full sync cycle. Overlapping calls are refused (not queued):
+// the buffered trigger already coalesces requests, and two passes racing on
+// one target is how duplicate pushes and lock churn happen.
 func (e *Engine) Sync(ctx context.Context) error {
+	if !e.syncMu.TryLock() {
+		slog.Info("sync already running; ignoring overlapping trigger")
+		return nil
+	}
+	defer e.syncMu.Unlock()
+
 	// Authenticate if needed
 	if !e.backend.IsAuthenticated() {
 		if err := e.backend.Authenticate(); err != nil {

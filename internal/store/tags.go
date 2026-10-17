@@ -147,7 +147,11 @@ func (db *DB) UpdateTag(t *models.Tag) error {
 
 // UpsertTag inserts or replaces a tag (used during sync).
 func (db *DB) UpsertTag(t *models.Tag) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO tags (id, title, created_time, updated_time,
+	return UpsertTagTx(db, t)
+}
+
+func UpsertTagTx(ex execer, t *models.Tag) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO tags (id, title, created_time, updated_time,
 		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied,
 		is_shared, parent_id, user_data)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -162,25 +166,27 @@ func (db *DB) UpsertTag(t *models.Tag) error {
 // note-tag links are queued in deleted_items first, so push propagates the
 // deletions.
 func (db *DB) DeleteTag(id string) error {
-	if err := db.recordDeletion(id, models.TypeTag); err != nil {
-		return err
-	}
-	ntIDs, err := db.noteTagIDs("tag_id", id)
-	if err != nil {
-		return err
-	}
-	for _, ntID := range ntIDs {
-		if err := db.recordDeletion(ntID, models.TypeNoteTag); err != nil {
+	return db.writeTx(func(ex execer) error {
+		if err := recordDeletionTx(ex, id, models.TypeTag); err != nil {
 			return err
 		}
-	}
-	if _, err := db.Exec("DELETE FROM note_tags WHERE tag_id = ?", id); err != nil {
-		return err
-	}
-	if _, err := db.Exec("DELETE FROM tags WHERE id = ?", id); err != nil {
-		return err
-	}
-	return db.recordItemChange(models.TypeTag, id, 3)
+		ntIDs, err := noteTagIDsTx(ex, "tag_id", id)
+		if err != nil {
+			return err
+		}
+		for _, ntID := range ntIDs {
+			if err := recordDeletionTx(ex, ntID, models.TypeNoteTag); err != nil {
+				return err
+			}
+		}
+		if _, err := ex.Exec("DELETE FROM note_tags WHERE tag_id = ?", id); err != nil {
+			return err
+		}
+		if _, err := ex.Exec("DELETE FROM tags WHERE id = ?", id); err != nil {
+			return err
+		}
+		return recordItemChangeTx(ex, models.TypeTag, id, 3)
+	})
 }
 
 // GetNoteTagsByNote returns tags for a given note.
@@ -309,7 +315,11 @@ func (db *DB) RemoveNoteTag(noteID, tagID string) error {
 
 // UpsertNoteTag inserts or replaces a note-tag (used during sync).
 func (db *DB) UpsertNoteTag(nt *models.NoteTag) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO note_tags (id, note_id, tag_id, created_time, updated_time,
+	return UpsertNoteTagTx(db, nt)
+}
+
+func UpsertNoteTagTx(ex execer, nt *models.NoteTag) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO note_tags (id, note_id, tag_id, created_time, updated_time,
 		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied, is_shared)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nt.ID, nt.NoteID, nt.TagID, nt.CreatedTime, nt.UpdatedTime,

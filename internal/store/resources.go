@@ -155,7 +155,11 @@ func (db *DB) CreateResource(r *models.Resource) error {
 
 // UpsertResource inserts or replaces a resource (used during sync).
 func (db *DB) UpsertResource(r *models.Resource) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO resources (id, title, mime, filename, created_time, updated_time,
+	return UpsertResourceTx(db, r)
+}
+
+func UpsertResourceTx(ex execer, r *models.Resource) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO resources (id, title, mime, filename, created_time, updated_time,
 		user_created_time, user_updated_time, file_extension, encryption_cipher_text,
 		encryption_applied, encryption_blob_encrypted, size, is_shared, share_id,
 		master_key_id, user_data, blob_updated_time)
@@ -171,17 +175,22 @@ func (db *DB) UpsertResource(r *models.Resource) error {
 // DeleteResource removes a resource and its file. The deletion is queued in
 // deleted_items so push removes both remote copies (metadata .md + blob).
 func (db *DB) DeleteResource(id string) error {
-	if err := db.recordDeletion(id, models.TypeResource); err != nil {
+	err := db.writeTx(func(ex execer) error {
+		if err := recordDeletionTx(ex, id, models.TypeResource); err != nil {
+			return err
+		}
+		if _, err := ex.Exec("DELETE FROM resources WHERE id = ?", id); err != nil {
+			return err
+		}
+		return recordItemChangeTx(ex, models.TypeResource, id, 3)
+	})
+	if err != nil {
 		return err
 	}
-	// Remove file
+	// Remove file after the row committed.
 	filePath := filepath.Join(db.ResourceDir(), id)
 	os.Remove(filePath)
-
-	if _, err := db.Exec("DELETE FROM resources WHERE id = ?", id); err != nil {
-		return err
-	}
-	return db.recordItemChange(models.TypeResource, id, 3)
+	return nil
 }
 
 // SaveResourceFile saves a resource's binary content to disk.

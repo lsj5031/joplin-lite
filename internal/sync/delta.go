@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
@@ -55,15 +56,53 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 		slog.Info("processing delta", "items", len(delta.Items), "has_more", delta.HasMore)
 
 		typeCounts := make(map[string]int)
-		for _, item := range delta.Items {
-			if item.Type == 3 {
-				typeCounts["delete"]++
-			} else if isResourceBlob(item.ItemName) {
-				typeCounts["resource_blob"]++
+
+		// Fetch item content in bounded parallel waves, then apply the wave
+		// sequentially. The network was the serial bottleneck (one blocking
+		// GET per item); DB writes and conflict decisions stay ordered, and a
+		// wave is capped so large resource blobs cannot pile up unbounded.
+		const deltaBatch = 8
+		for start := 0; start < len(delta.Items); start += deltaBatch {
+			end := start + deltaBatch
+			if end > len(delta.Items) {
+				end = len(delta.Items)
 			}
-			if err := applyDeltaItem(backend, db, syncTarget, item, nil); err != nil {
-				slog.Error("failed to apply delta item", "item_name", item.ItemName, "error", err)
-				continue
+			batch := delta.Items[start:end]
+			prefetched := make([][]byte, len(batch))
+			fetchErrs := make([]error, len(batch))
+			var mu sync.Mutex
+
+			_ = parallelEach(len(batch), deltaWorkers, func(i int) error {
+				item := batch[i]
+				if item.Type == 3 {
+					return nil
+				}
+				path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(item.ItemName))
+				content, err := backend.Get(path)
+				if err != nil {
+					mu.Lock()
+					fetchErrs[i] = err
+					mu.Unlock()
+					return nil
+				}
+				prefetched[i] = content
+				return nil
+			})
+
+			for i, item := range batch {
+				if fetchErrs[i] != nil {
+					slog.Error("failed to fetch delta item", "item_name", item.ItemName, "error", fetchErrs[i])
+					continue
+				}
+				if item.Type == 3 {
+					typeCounts["delete"]++
+				} else if isResourceBlob(item.ItemName) {
+					typeCounts["resource_blob"]++
+				}
+				if err := applyDeltaItem(backend, db, syncTarget, item, prefetched[i]); err != nil {
+					slog.Error("failed to apply delta item", "item_name", item.ItemName, "error", err)
+					continue
+				}
 			}
 		}
 		slog.Info("delta summary", "counts", typeCounts)
@@ -150,13 +189,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 				}
 			}
 		}
-		if err := db.UpsertNote(note); err != nil {
+		if err := db.ApplyPulledItem(note, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert note %s: %w", note.ID, err)
 		}
-		if err := db.UpsertSyncItem(note.ID, models.TypeNote, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(note.ID, content, note.UpdatedTime)
+		return nil
 
 	case models.TypeFolder:
 		folder := models.DeserializeFolder(string(content))
@@ -186,13 +222,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 				slog.Info("folder conflict: taking remote version", "id", folder.ID)
 			}
 		}
-		if err := db.UpsertFolder(folder); err != nil {
+		if err := db.ApplyPulledItem(folder, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert folder %s: %w", folder.ID, err)
 		}
-		if err := db.UpsertSyncItem(folder.ID, models.TypeFolder, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(folder.ID, content, folder.UpdatedTime)
+		return nil
 
 	case models.TypeTag:
 		tag := models.DeserializeTag(string(content))
@@ -222,13 +255,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 				slog.Info("tag conflict: taking remote version", "id", tag.ID)
 			}
 		}
-		if err := db.UpsertTag(tag); err != nil {
+		if err := db.ApplyPulledItem(tag, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert tag %s: %w", tag.ID, err)
 		}
-		if err := db.UpsertSyncItem(tag.ID, models.TypeTag, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(tag.ID, content, tag.UpdatedTime)
+		return nil
 
 	case models.TypeNoteTag:
 		nt := models.DeserializeNoteTag(string(content))
@@ -247,13 +277,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 			}
 			// Joplin's ItemConflict: junction rows take the remote version.
 		}
-		if err := db.UpsertNoteTag(nt); err != nil {
+		if err := db.ApplyPulledItem(nt, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert note_tag %s: %w", nt.ID, err)
 		}
-		if err := db.UpsertSyncItem(nt.ID, models.TypeNoteTag, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(nt.ID, content, nt.UpdatedTime)
+		return nil
 
 	case models.TypeResource:
 		resource := models.DeserializeResource(string(content))
@@ -282,26 +309,20 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 				}
 			}
 		}
-		if err := db.UpsertResource(resource); err != nil {
+		if err := db.ApplyPulledItem(resource, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert resource %s: %w", resource.ID, err)
 		}
-		if err := db.UpsertSyncItem(resource.ID, models.TypeResource, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(resource.ID, content, resource.UpdatedTime)
+		return nil
 
 	case models.TypeMasterKey:
 		mk := models.DeserializeMasterKey(string(content))
 		if mk.ID == "" {
 			return nil
 		}
-		if err := db.UpsertMasterKey(mk); err != nil {
+		if err := db.ApplyPulledItem(mk, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert master_key %s: %w", mk.ID, err)
 		}
-		if err := db.UpsertSyncItem(mk.ID, models.TypeMasterKey, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(mk.ID, content, mk.UpdatedTime)
+		return nil
 
 	case models.TypeRevision:
 		// Revisions (note history): indexed for the /revisions API, content
@@ -311,13 +332,10 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if rev == nil {
 			return nil
 		}
-		if err := db.UpsertRevision(rev); err != nil {
+		if err := db.ApplyPulledItem(rev, syncTarget, content); err != nil {
 			return fmt.Errorf("cannot upsert revision %s: %w", rev.ID, err)
 		}
-		if err := db.UpsertSyncItem(rev.ID, models.TypeRevision, syncTarget); err != nil {
-			return err
-		}
-		return db.SaveItemRaw(rev.ID, content, rev.UpdatedTime)
+		return nil
 
 	default:
 		slog.Warn("skipping unknown item type", "type", itemType, "name", item.ItemName)

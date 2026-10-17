@@ -192,7 +192,11 @@ func (db *DB) UpdateFolder(f *models.Folder) error {
 
 // UpsertFolder inserts or replaces a folder (used during sync).
 func (db *DB) UpsertFolder(f *models.Folder) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO folders (id, title, created_time, updated_time,
+	return UpsertFolderTx(db, f)
+}
+
+func UpsertFolderTx(ex execer, f *models.Folder) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO folders (id, title, created_time, updated_time,
 		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied,
 		parent_id, is_shared, share_id, master_key_id, icon, user_data, deleted_time)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -206,11 +210,13 @@ func (db *DB) UpsertFolder(f *models.Folder) error {
 // DeleteFolder removes a folder by ID. The deletion is queued in
 // deleted_items first, so push removes the remote copy.
 func (db *DB) DeleteFolder(id string) error {
-	if err := db.recordDeletion(id, models.TypeFolder); err != nil {
-		return err
-	}
-	if _, err := db.Exec("DELETE FROM folders WHERE id = ?", id); err != nil {
-		return err
-	}
-	return db.recordItemChange(models.TypeFolder, id, 3)
+	return db.writeTx(func(ex execer) error {
+		if err := recordDeletionTx(ex, id, models.TypeFolder); err != nil {
+			return err
+		}
+		if _, err := ex.Exec("DELETE FROM folders WHERE id = ?", id); err != nil {
+			return err
+		}
+		return recordItemChangeTx(ex, models.TypeFolder, id, 3)
+	})
 }

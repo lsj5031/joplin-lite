@@ -41,37 +41,44 @@ func (db *DB) SetActiveMasterKeyID(id string) error {
 
 // GetSyncItem returns the sync state for a specific item.
 func (db *DB) GetSyncItem(itemID string, syncTarget int) (*models.SyncItem, error) {
-	si := &models.SyncItem{}
-	err := db.QueryRow(`SELECT id, sync_target, sync_time, item_type, item_id,
+	// Hot path: called for every pulled item, so the statement is cached.
+	rows, err := db.queryStmt(`SELECT id, sync_target, sync_time, item_type, item_id,
 		sync_disabled, sync_disabled_reason, force_sync, item_location
-		FROM sync_items WHERE item_id = ? AND sync_target = ?`, itemID, syncTarget).Scan(
-		&si.ID, &si.SyncTarget, &si.SyncTime, &si.ItemType, &si.ItemID,
-		&si.SyncDisabled, &si.SyncDisabledReason, &si.ForceSync, &si.ItemLocation,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+		FROM sync_items WHERE item_id = ? AND sync_target = ?`, itemID, syncTarget)
 	if err != nil {
 		return nil, err
 	}
-	return si, nil
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	si := &models.SyncItem{}
+	if err := rows.Scan(
+		&si.ID, &si.SyncTarget, &si.SyncTime, &si.ItemType, &si.ItemID,
+		&si.SyncDisabled, &si.SyncDisabledReason, &si.ForceSync, &si.ItemLocation,
+	); err != nil {
+		return nil, err
+	}
+	return si, rows.Err()
 }
 
 // UpsertSyncItem records that an item has been synced.
 func (db *DB) UpsertSyncItem(itemID string, itemType, syncTarget int) error {
+	return upsertSyncItemTx(db, itemID, itemType, syncTarget)
+}
+
+func upsertSyncItemTx(ex execer, itemID string, itemType, syncTarget int) error {
 	now := time.Now().UnixMilli()
 
-	// Check if exists
-	existing, err := db.GetSyncItem(itemID, syncTarget)
-	if err != nil {
-		return err
-	}
-
-	if existing != nil {
-		_, err = db.Exec(`UPDATE sync_items SET sync_time = ? WHERE item_id = ? AND sync_target = ?`,
+	var one int
+	err := ex.QueryRow(`SELECT 1 FROM sync_items WHERE item_id = ? AND sync_target = ?`,
+		itemID, syncTarget).Scan(&one)
+	switch {
+	case err == nil:
+		_, err = ex.Exec(`UPDATE sync_items SET sync_time = ? WHERE item_id = ? AND sync_target = ?`,
 			now, itemID, syncTarget)
-	} else {
-		_, err = db.Exec(`INSERT INTO sync_items (sync_target, sync_time, item_type, item_id, sync_disabled, sync_disabled_reason, force_sync, item_location)
+	case err == sql.ErrNoRows:
+		_, err = ex.Exec(`INSERT INTO sync_items (sync_target, sync_time, item_type, item_id, sync_disabled, sync_disabled_reason, force_sync, item_location)
 			VALUES (?, ?, ?, ?, 0, '', 0, 0)`,
 			syncTarget, now, itemType, itemID)
 	}

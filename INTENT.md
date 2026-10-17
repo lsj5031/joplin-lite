@@ -350,7 +350,8 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - **E2EE gate:** decrypt a real note from my target, edit, re-encrypt, and **Joplin decrypts it back**.
 - **Sync gate:** edit here → sync → Joplin desktop shows it, and the reverse, with no loss;
   a deliberate double-edit produces a conflict note, not a silent overwrite.
-- **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.- Footprint: single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `-ldflags="-s -w"`] 24,385,024 bytes (23.3 MiB) at M0 → 24,571,392 bytes (23.4 MiB, +186 KB for the Dropbox/S3 drivers + clipper + service seam) at HEAD; startup (`--help`) 67–94 ms at M0 → 74–133 ms at HEAD over 3 runs.** The "~7 MB" aspiration is dead — the real number is ~24 MB; decide at M5 (accept, strip, or reconsider the driver).
+- **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.
+- **Footprint:** single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `go build -trimpath -ldflags="-s -w"`] the default (Dropbox / Joplin Server / local-folder) build is 16,351,232 bytes (15.6 MiB); the optional `-tags s3` build is 24,591,872 bytes (23.5 MiB) because it links aws-sdk-go-v2. Startup (`--help`) 74–133 ms over 3 runs (same code path as the M2 measurement).** `-trimpath` is part of the command: without it the byte count varies with the checkout path. The "~7 MB" aspiration is dead; ~16 MB is the default number and S3 is an opt-in build at M5.
 
 ## Milestones
 
@@ -443,10 +444,13 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - **Port 41184** collides with Joplin desktop; both cannot run at once.
 - **MyGO is ~3 weeks old** — pin the version; isolate it to the shell layer (already the plan:
   `service/` is the seam).
-- **Footprint** — cgo-free SQLite (modernc) inflates the binary; "~7 MB" may become
-  ~15–20 MB. Measure, then decide: accept, strip, or reconsider the driver.
+- **Footprint** — cgo-free SQLite (modernc) inflates the binary; "~7 MB" became
+  ~16 MB. S3/aws-sdk is now behind `-tags s3`, so the Dropbox-first default stays
+  at ~16 MB; decide at M5 whether that is acceptable or whether to strip further.
 
-## Open questions (verify on real targets, not in code)1. ~~Joplin's exact float formatting for `latitude/longitude/altitude` and `order`~~ **[resolved 2026-10-17 from `packages/lib/models/BaseItem.ts`]**: `order`, `todo_due`, `todo_completed`, `deleted_time`, `blob_updated_time` are plain millisecond numbers ("0" when zero) — never ISO; only `created_time`, `updated_time`, `user_created_time`, `user_updated_time` are ISO; floats serialize as fixed 8 decimals (4 for altitude), matching `unserialize_format`'s toFixed. Residual uncertainty: the float *text* form in real files (toFixed string vs bare number) is locked as toFixed(8/4); confirm on a real-target item at M1.
+## Open questions (verify on real targets, not in code)
+
+1. ~~Joplin's exact float formatting for `latitude/longitude/altitude` and `order`~~ **[resolved 2026-10-17 from `packages/lib/models/BaseItem.ts`]**: `order`, `todo_due`, `todo_completed`, `deleted_time`, `blob_updated_time` are plain millisecond numbers ("0" when zero) — never ISO; only `created_time`, `updated_time`, `user_created_time`, `user_updated_time` are ISO; floats serialize as fixed 8 decimals (4 for altitude), matching `unserialize_format`'s toFixed. Residual uncertainty: the float *text* form in real files (toFixed string vs bare number) is locked as toFixed(8/4); confirm on a real-target item at M1.
 2. Exact clipper route set + query semantics the extension exercises (port from
    `packages/lib/ClipperServer.ts`).
 3. Whether current Joplin ever writes `locks/` with legacy `sync_desktop_*` names (old

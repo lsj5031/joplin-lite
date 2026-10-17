@@ -157,10 +157,9 @@ func createNoteConflictCopy(db *store.DB, n *models.Note, remoteExists bool) (st
 	c.ShareID = ""
 
 	plain := conflictBytes(db, n.ID, noteOverrides(&c), models.SerializeNote(&c))
-	if err := db.CreateNote(&c); err != nil {
-		return "", err
-	}
-	if err := db.SaveItemRaw(c.ID, plain, c.UpdatedTime); err != nil {
+	// One transaction: the conflict note and the bytes we will push for it
+	// must not be able to land separately.
+	if err := db.CreateNoteAndRaw(&c, plain); err != nil {
 		return "", err
 	}
 	return c.ID, nil

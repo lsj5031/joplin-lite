@@ -20,7 +20,7 @@ joplin-lite is a small Go desktop client that is a genuine Joplin peer: it reads
 
 ## Positioning
 
-A real Joplin peer at a fraction of the footprint: full E2EE and multi-target sync interoperability plus a clipper-compatible server, in one ~7 MB binary — where every other lightweight option is read-only, format-lossy, or a sync-server of its own.
+A real Joplin peer at a fraction of the footprint: full E2EE and multi-target sync interoperability plus a clipper-compatible server, in one cgo-free single binary — where every other lightweight option is read-only, format-lossy, or a sync-server of its own.
 
 ## Operating Context
 

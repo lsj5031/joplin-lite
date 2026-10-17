@@ -31,8 +31,9 @@ disruption cross; a lock held by another client turns the line amber and refuses
 ![Target locked state — sync refused](docs/screenshots/state-locked.png)
 
 The prototype runs on synthetic mock data (labeled as such in the status strip). The
-footprint figures in the strip are the measured M0 numbers — 24.4 MB binary,
-67–94 ms startup (windows/amd64, 2026-10-17) — not placeholders.
+footprint figures in the strip are measured: 16.4 MB for the default binary (Dropbox /
+Joplin Server; rebuild with `-tags s3` for the S3 target, 24.6 MB) and 74–133 ms startup
+(windows/amd64, 2026-10-17, `go build -trimpath -ldflags="-s -w"`) — not placeholders.
 
 ## Build & test
 
@@ -43,13 +44,19 @@ CGO_ENABLED=0 go build ./...
 CGO_ENABLED=0 go test ./...
 ```
 
-Web prototype (TanStack Start + React + TS):
+Web UI (TanStack Start + React + TS, built as a **static SPA**):
 
 ```sh
 cd web
 npm install
-npm run dev
+npm run dev      # dev server on :3000
+npm run build    # static artifact in web/dist/client (index.html + assets)
 ```
+
+`npm run build` emits a directory of static files with an `index.html` fallback for
+client-side routes — there is no Node/Nitro server in production. The desktop shell
+embeds `web/dist/client` in the Go binary and serves it; during development the UI
+talks to the local clipper API (`VITE_GOJOPLIN_URL`, `VITE_GOJOPLIN_TOKEN`).
 
 ## Status
 
