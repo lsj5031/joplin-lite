@@ -14,11 +14,18 @@
 // Configure a live backend with:
 //   VITE_GOJOPLIN_URL=http://127.0.0.1:41888
 //   VITE_GOJOPLIN_TOKEN=<api token>
+//
+// The desktop shell (shell/) starts the API on an OS-assigned port with a
+// per-session token and injects both before this module loads, so the same
+// build runs in a browser (env) and in the app (runtime config) unchanged.
 import type { Note, Notebook, Tag } from './mock-data'
 
 const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {}
-const BASE: string = env.VITE_GOJOPLIN_URL ?? ''
-const TOKEN: string = env.VITE_GOJOPLIN_TOKEN ?? ''
+const runtime = (
+  globalThis as { __GOJOPLIN__?: { base?: string; token?: string } }
+).__GOJOPLIN__
+const BASE: string = (runtime?.base ?? env.VITE_GOJOPLIN_URL ?? '').replace(/\/+$/, '')
+const TOKEN: string = runtime?.token ?? env.VITE_GOJOPLIN_TOKEN ?? ''
 
 /** isLive reports whether a backend URL is configured. */
 export const isLive = (): boolean => BASE !== ''
