@@ -25,6 +25,14 @@ type yamlSync struct {
 	Target        int             `yaml:"target"`
 	S3            yamlS3          `yaml:"s3"`
 	JoplinServer  yamlJoplinServer `yaml:"joplin_server"`
+	Dropbox       yamlDropbox     `yaml:"dropbox"`
+}
+
+// yamlDropbox is the user's own Dropbox OAuth app (sync target 7). The app
+// secret is a secret — use ${GOJOPLIN_DROPBOX_APP_SECRET}.
+type yamlDropbox struct {
+	AppKey    string `yaml:"app_key"`
+	AppSecret string `yaml:"app_secret"`
 }
 
 type yamlS3 struct {
@@ -123,6 +131,10 @@ func loadFromYAML(data []byte) (*Config, error) {
 	cfg.ServerURL = y.Sync.JoplinServer.URL
 	cfg.Username = os.Getenv("GOJOPLIN_USERNAME")
 	cfg.Password = os.Getenv("GOJOPLIN_PASSWORD")
+
+	// Dropbox (target 7)
+	cfg.DropboxAppKey = ExpandEnv(y.Sync.Dropbox.AppKey)
+	cfg.DropboxAppSecret = ExpandEnv(y.Sync.Dropbox.AppSecret)
 
 	// API: expand ${VAR} so secrets come from env
 	cfg.APIToken = ExpandEnv(y.API.Token)
@@ -226,6 +238,12 @@ func applyOverridesAndEnv(cfg *Config, overrides Overrides) {
 	if v := strings.TrimSpace(os.Getenv("GOJOPLIN_API_KEY")); v != "" {
 		cfg.APIKey = v
 	}
+	if v := strings.TrimSpace(os.Getenv("GOJOPLIN_DROPBOX_APP_KEY")); v != "" {
+		cfg.DropboxAppKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("GOJOPLIN_DROPBOX_APP_SECRET")); v != "" {
+		cfg.DropboxAppSecret = v
+	}
 	if v := os.Getenv("GOJOPLIN_MASTER_PASSWORD"); v != "" {
 		cfg.MasterPassword = v
 	}
@@ -233,8 +251,13 @@ func applyOverridesAndEnv(cfg *Config, overrides Overrides) {
 
 // validateConfig returns an error if cfg is invalid.
 func validateConfig(cfg *Config) error {
-	if cfg.SyncTarget != 8 && cfg.SyncTarget != 9 {
-		return fmt.Errorf("unsupported sync target %d (only S3 target 8 and Joplin Server target 9 are supported)", cfg.SyncTarget)
+	if cfg.SyncTarget != 7 && cfg.SyncTarget != 8 && cfg.SyncTarget != 9 {
+		return fmt.Errorf("unsupported sync target %d (Dropbox target 7, S3 target 8 and Joplin Server target 9 are supported)", cfg.SyncTarget)
+	}
+	if cfg.SyncTarget == 7 {
+		if cfg.DropboxAppKey == "" {
+			return fmt.Errorf("sync.7.appKey (Dropbox app key) is required for Dropbox sync")
+		}
 	}
 	if cfg.SyncTarget == 9 {
 		if cfg.ServerURL == "" {

@@ -33,7 +33,7 @@ Verified against `reference/go-joplin`:
 | `internal/e2ee` | JED01 + SJCL + KeyV1/StringV1/FileV1 decrypt, StringV1 encrypt | Keep frozen; one additive gap (`EncryptFile`) |
 | `internal/models` | serialize/unserialize for all item types | Keep, but **[gap]** round-trip is not byte-identical and unknown metadata keys are dropped |
 | `internal/store` | Joplin schema v49, FTS4, sync/deleted/item_changes tables | Keep; SQLite driver swapped, RAG dropped — **[correction]** search index is now FTS5 (modernc ships no FTS4); local index only, not part of the sync format |
-| `internal/sync` | engine, delta, push, reconcile, locks (Joplin-Server only), S3 + Joplin Server drivers | Keep as the model; **[gap]** no conflict notes, weak lock enforcement, resource push unencrypted |
+| `internal/sync` | engine, delta, push, reconcile, locks (Joplin-Server only), S3 + Joplin Server drivers | Keep as the model; **[gap]** no conflict notes, weak lock enforcement, resource push unencrypted — all three **[done 2026-10-17]** (see Conflicts, Locks, E2EE notes below) |
 | `internal/clipper` | full Data API on 41184, ping, CORS | Keep; **[gap]** auth auto-accepts (not the real handshake), no `/revisions` |
 | Build | **[verified]** does not build here as-is: `mattn/go-sqlite3` + `sqlite-vec` cgo fail without a C toolchain | M0 (cgo-free) is required, not optional |
 
@@ -134,12 +134,30 @@ Coexist with Joplin desktop/mobile on the same target.
   against a 3-min TTL; refuse to sync while an active EXCLUSIVE lock exists; while we hold a
   SYNC lock, refresh it during long syncs. On Joplin Server the fork's `/api/locks` client
   already implements built-in locks — keep it for the Joplin Server driver.
-  **[gap]** the engine currently logs and continues when locking fails; that must become a
-  refusal for file targets.
+  **[update 2026-10-17 — done]** `internal/sync/filelock.go` implements the flat-file
+  protocol for LocalFolder and Dropbox (shared `lockStore` interface; S3 still has its
+  no-op lock). The engine now **refuses** the sync on any lock failure for file targets
+  (2/7/8) — an active foreign EXCLUSIVE lock surfaces `ErrExclusiveLock` before anything
+  touches the target. Semantics **[verified]** against `LockHandler.ts`: activity is judged
+  by the file's updated time on the target (3-min TTL; the JSON body's `updatedTime` is not
+  authoritative), a SYNC lock is shared, our own active lock is refreshed instead of
+  refused, and among active EXCLUSIVE locks the winner is the oldest `updatedTime`, then
+  smallest `clientId` (Joplin `activeLock` sorts ascending and takes the first). A refused
+  acquire deletes our own lock file again (Joplin's catch → releaseLock). Refresh runs
+  every 60 s; an expired lock is never re-acquired (`ErrLockExpired`).
 - **Target version check** via `info.json` (`version`, `appMinVersion`): refuse to sync if
-  `version` is newer than we support. **[gap]** the fork reads `info.json` but neither
-  enforces the version nor ever writes `info.json` — M2 must write it (e2ee flag, active
-  master key, master keys) when those change.
+  `version` is newer than we support. **[update 2026-10-17 — done]** `syncinfo.go` enforces
+  both (`ErrSyncTargetUnsupported` refuses the sync; missing `version` is invalid, matching
+  Joplin's `fetchSyncInfo`) and `PushSyncInfo` writes `info.json` when local master keys /
+  active key are missing on the target. Facts **[verified]** against `syncInfoUtils.ts`:
+  the file is tab-indented JSON; `e2ee`/`activeMasterKeyId` are `{value, updatedTime}`
+  pairs (`e2ee.value` is a boolean); `version` is Joplin's hidden `syncVersion` (**3**);
+  `appMinVersion` is the format floor (Joplin 3.7 writes **3.7.0** — we publish the same);
+  master keys are full entities **including `content`/`checksum`**; unknown keys (`ppk`,
+  `noteLockKey`, `revisionService*`) must survive a rewrite. The write is therefore a
+  merge: remote entries win on id collision and remote values win when we have no change
+  timestamp for ours (Joplin `mergeSyncInfos` prefers the newer `updatedTime`; "no
+  timestamp" must lose — otherwise a stale local value would disable the target's E2EE).
 
 ## Requirement: sync targets
 
@@ -177,6 +195,22 @@ Coexist with Joplin desktop/mobile on the same target.
     (+ `files.metadata.read` if listing demands it — verify in the app console);
   - Dropbox app registration: scoped app, **App folder** permission; my app key/secret;
     auth token persisted in our config (`sync.7.auth` JSON), refreshed on expiry.
+  **[update 2026-10-17 — implemented]** `internal/sync/dropbox_backend.go` (API v2:
+  `files/upload`, `files/download`, `files/list_folder`+`continue` for the delta/children
+  emulation, `files/delete_v2`) + `dropbox_auth.go`/`dropbox_flow.go` (PKCE flow with
+  loopback redirect, default `http://127.0.0.1:41723` — must be registered in the app
+  console) + `cmd/dropbox-auth`. `SyncTarget() == 7`, flat-file locks via `locks/`.
+  Decisions: scopes are `files.content.read files.content.write files.metadata.read`
+  (the delta emulation lists the app folder — `files.metadata.read` is needed for
+  `files/list_folder`; verify in the app console); the token is persisted at
+  `<dataDir>/dropbox_token.json` (0600) with a `sync.7.auth` JSON bootstrap (we do not
+  rewrite Joplin's settings.json); refresh runs when the access token is within 60 s of
+  expiry (and once on a 401). Config: `sync.7.appKey` / `sync.7.appSecret`
+  (`GOJOPLIN_DROPBOX_APP_KEY`/`GOJOPLIN_DROPBOX_APP_SECRET`); the app secret is optional
+  (PKCE public client). Tested against a fake Dropbox API (round-trip incl.
+  `.resource/<id>` name escaping, delta paging + cursor boundary, lock protocol, token
+  refresh, full PKCE loopback with verifier↔challenge linkage). **Gate still needs the real
+  app + Dropbox.**
 - Then, one at a time: **local folder, WebDAV/Nextcloud, S3, Joplin Server/Joplin Cloud,
   OneDrive**. "All of them" is a roadmap, not a milestone.
 
@@ -243,7 +277,7 @@ went with `store/rag.go`.
 **[gap] Losslessness work (M0, before anything trusts serialization):** `models/serialize.go`
 today is not byte-identical — `writeMetadata` emits only known keys (unknown metadata lines are
 dropped), `order` is formatted through the time formatter, floats are fixed at 8 decimals, and
-trailing whitespace is trimmed on parse. Plan:- keep the **raw item text** for anything pulled and unmodified, and push those exact bytes back (losslessness by construction) — **[M0 done]** `item_raw` sidecar table (`internal/store/raw.go`) + `RawItem` (`internal/models/rawitem.go`); `sync/delta.go` captures raw bytes on pull, `sync/push.go` passes them through when `updated_time` is unchanged;
+trailing whitespace is trimmed on parse. Plan:- keep the **raw item text** for anything pulled and unmodified, and push those exact bytes back (losslessness by construction) —  **[M0 done]** `item_raw` sidecar table (`internal/store/raw.go`) + `RawItem` (`internal/models/rawitem.go`); `sync/delta.go` captures raw bytes on pull, `sync/push.go` passes them through when `updated_time` is unchanged; **[2026-10-17]** after the decrypt pass the raw copy is replaced with the **decrypted plaintext** (`sync/decrypt.go` `saveDecryptedRaw`) — keeping the pulled envelope there made the merge path re-serialize an envelope as a plaintext item and drop unknown keys from inside the cipher text (pinned by `TestE2EE_EditKeepsUnknownKeys`);
 - when we do re-serialize, emit unknown metadata lines verbatim in their original position — **[M0 done]** `RawItem.SerializeWithOverrides` keeps unknown keys (e.g. Joplin's `is_locked`, `extracted_resource_ids`, which our model lacks) verbatim at their original positions and re-emits known keys only when the value changed;
 - lock the rest with a **golden corpus**: real items from my target (note, todo, folder, tag, note-tag, resource, master key, conflict note) asserting `Serialize(Deserialize(x)) == x` byte-for-byte. This corpus is the format gate of every later milestone. — **[M0 done, synthetic]** `internal/models/testdata/golden/` (14 fixtures incl. empty-body, unicode, escaping quirks, unknown keys, both envelope forms) asserting raw/merge/typed byte-identical round-trips; **M1 replaces/extends these with real items from the target — that was the corpus's intent.**
 
@@ -310,12 +344,18 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 
 **M2 — Dropbox sync**
 - Dropbox OAuth app + PKCE flow + token refresh; `dropbox_backend.go` translating the API
-  paths (model: `s3_backend.go`); `SyncTarget() == 7`.
+  paths (model: `s3_backend.go`); `SyncTarget() == 7`. **[done 2026-10-17 — see the
+  sync-targets section; code complete and tested against a fake Dropbox API]**.
 - File-based locking (`locks/1_1_<clientId>.json`, 60 s refresh, EXCLUSIVE refusal),
-  `info.json` read *and* write + version enforcement.
+  `info.json` read *and* write + version enforcement. **[done 2026-10-17 — see the Locks
+  and Target-version sections; `internal/sync/filelock_test.go`, `syncinfo_test.go`]**.
 - Conflict-note pass (never-lose-data) **[done 2026-10-17 — see the Conflicts section above;
   the local-folder rehearsal covers the double-edit and remote-delete legs]**,
-  encrypted resource push (metadata + blob).
+  encrypted resource push (metadata + blob) **[done 2026-10-17]**: `pushResources` encrypts
+  the metadata (StringV1 envelope) and the blob (FileV1 via `EncryptFile`), the pushed
+  plaintext carries `encryption_blob_encrypted: 1`, and the decrypt side now handles
+  resource metadata envelopes (`GetEncryptedItems` + `decryptItem`) with the blob pass
+  already decrypting JED01 blobs (`TestE2EE_ResourcePushPullRoundTrip`).
 - **Gate (the sync gate):** on a throwaway Dropbox app folder — edit here → sync → Joplin
   desktop shows it, and the reverse; double-edit yields a conflict note; deletion propagates
   both ways; a Joplin-desktop-held EXCLUSIVE lock blocks our sync.

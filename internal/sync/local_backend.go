@@ -21,14 +21,17 @@ import (
 // not reconstructable from mtimes, so they surface through the reconcile pass
 // (PullMissingItems), which is also how a missed delta delete is handled.
 type LocalFolderBackend struct {
-	dir         string
-	clientID    string
+	dir           string
+	clientID      string
 	authenticated bool
+	locks         *fileLockManager
 }
 
 // NewLocalFolderBackend creates a backend rooted at dir.
 func NewLocalFolderBackend(dir string) *LocalFolderBackend {
-	return &LocalFolderBackend{dir: dir, clientID: "joplin-lite"}
+	b := &LocalFolderBackend{dir: dir, clientID: "joplin-lite"}
+	b.locks = newFileLockManager(b, LockClientTypeCLI, b.clientID)
+	return b
 }
 
 func (b *LocalFolderBackend) Authenticate() error {
@@ -45,35 +48,77 @@ func (b *LocalFolderBackend) SyncTarget() int {
 	return 2
 }
 
-// AcquireLock writes the flat-file lock Joplin uses on file targets
-// (locks/<type>_<clientType>_<clientId>.json). TTL/refresh semantics are M2
-// work shared with the Dropbox driver.
+// AcquireLock acquires the flat-file SYNC lock Joplin uses on file targets
+// (locks/<type>_<clientType>_<clientId>.json). It returns ErrExclusiveLock
+// when another client holds an active EXCLUSIVE lock.
 func (b *LocalFolderBackend) AcquireLock() (interface{}, error) {
-	lock := &Lock{Type: 1, ClientType: 3, ClientID: b.clientID}
-	data, err := json.Marshal(lock)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Join(b.dir, "locks"), 0o755); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(b.lockPath(lock), data, 0o644); err != nil {
-		return nil, err
-	}
-	return lock, nil
+	return b.locks.Acquire()
 }
 
 func (b *LocalFolderBackend) ReleaseLock(lock interface{}) error {
-	l, _ := lock.(*Lock)
-	if l == nil {
+	if lock == nil {
 		return nil
 	}
-	_ = os.Remove(b.lockPath(l))
-	return nil
+	return b.locks.Release()
 }
 
-func (b *LocalFolderBackend) lockPath(l *Lock) string {
-	return filepath.Join(b.dir, "locks", fmt.Sprintf("%d_%d_%s.json", l.Type, l.ClientType, l.ClientID))
+// RefreshLock refreshes our held lock while it is still active.
+func (b *LocalFolderBackend) RefreshLock(lock interface{}) error {
+	if lock == nil {
+		return nil
+	}
+	return b.locks.Refresh()
+}
+
+// lockStore implementation (flat-file lock protocol).
+
+func (b *LocalFolderBackend) lockPath(name string) string {
+	return filepath.Join(b.dir, "locks", filepath.FromSlash(name))
+}
+
+func (b *LocalFolderBackend) getLock(name string) ([]byte, error) {
+	data, err := os.ReadFile(b.lockPath(name))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return data, err
+}
+
+func (b *LocalFolderBackend) putLock(name string, data []byte) error {
+	if err := os.MkdirAll(filepath.Join(b.dir, "locks"), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(b.lockPath(name), data, 0o644)
+}
+
+func (b *LocalFolderBackend) deleteLock(name string) error {
+	err := os.Remove(b.lockPath(name))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func (b *LocalFolderBackend) listLocks() ([]LockFile, error) {
+	entries, err := os.ReadDir(filepath.Join(b.dir, "locks"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []LockFile
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, LockFile{Name: e.Name(), UpdatedTime: info.ModTime().UnixMilli()})
+	}
+	return out, nil
 }
 
 // itemNameFromPath extracts the item name from a Joplin-Server-style content

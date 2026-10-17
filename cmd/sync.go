@@ -31,6 +31,11 @@ var syncCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("S3 backend: %w", err)
 			}
+		} else if cfg.SyncTarget == 7 {
+			backend, err = sync.NewDropboxBackend(cfg)
+			if err != nil {
+				return fmt.Errorf("Dropbox backend: %w", err)
+			}
 		} else {
 			backend, err = sync.NewClient(cfg)
 			if err != nil {

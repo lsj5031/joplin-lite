@@ -68,6 +68,10 @@ type Config struct {
 	S3AccessKey      string `json:"sync.8.username"`
 	S3SecretKey      string `json:"sync.8.password"`
 	S3ForcePathStyle bool   `json:"sync.8.forcePathStyle"`
+	// Dropbox (sync target 7) — the user's own Dropbox OAuth app.
+	DropboxAppKey    string `json:"sync.7.appKey"`
+	DropboxAppSecret string `json:"sync.7.appSecret"`
+	DropboxAuth      string `json:"sync.7.auth"` // OAuth token JSON (Joplin's key), bootstrap for the token store
 	//
 	APIToken       string `json:"api.token"`
 	APIKey         string `json:"-"`
@@ -231,6 +235,9 @@ func loadFromJoplinJSON(data []byte) (*Config, error) {
 	cfg.S3AccessKey = getString("sync.8.username")
 	cfg.S3SecretKey = getString("sync.8.password")
 	cfg.S3ForcePathStyle = getBool("sync.8.forcePathStyle")
+	cfg.DropboxAppKey = getString("sync.7.appKey")
+	cfg.DropboxAppSecret = getString("sync.7.appSecret")
+	cfg.DropboxAuth = getString("sync.7.auth")
 	cfg.APIToken = getString("api.token")
 	return cfg, nil
 }

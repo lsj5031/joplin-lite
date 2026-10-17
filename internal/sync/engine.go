@@ -2,8 +2,10 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/e2ee"
 	"github.com/lsj5031/joplin-lite/internal/store"
@@ -43,6 +45,53 @@ func (e *Engine) TriggerCh() <-chan struct{} {
 	return e.triggerCh
 }
 
+// usesFileLocks reports whether a sync target uses flat-file locks
+// (locks/<type>_<clientType>_<clientId>.json): 2 = file system,
+// 7 = Dropbox, 8 = S3. Joplin Server (9) and Joplin Cloud (10) have built-in
+// locks through /api/locks.
+func usesFileLocks(syncTarget int) bool {
+	switch syncTarget {
+	case 2, 7, 8:
+		return true
+	}
+	return false
+}
+
+// LockRefresher is optionally implemented by backends with TTL locks so the
+// engine can refresh the held lock during long syncs (Joplin: every 60 s
+// against a 3-minute TTL).
+type LockRefresher interface {
+	RefreshLock(lock interface{}) error
+}
+
+// startLockRefresh refreshes the held lock until the returned stop is called.
+// An expired lock is not re-acquired — the failure is reported and the loop
+// stops (Joplin 'lockExpired' cancels the operation).
+func startLockRefresh(r LockRefresher, lock interface{}) func() {
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(LockRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				if err := r.RefreshLock(lock); err != nil {
+					slog.Error("lock refresh failed", "error", err)
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		close(stopCh)
+		<-done
+	}
+}
+
 // Sync performs a full sync cycle.
 func (e *Engine) Sync(ctx context.Context) error {
 	// Authenticate if needed
@@ -52,17 +101,27 @@ func (e *Engine) Sync(ctx context.Context) error {
 		}
 	}
 
-	// Acquire lock
+	// Acquire lock. On file targets an active EXCLUSIVE lock (or any lock
+	// failure) refuses the sync — proceeding unlocked risks data loss on a
+	// shared target. Joplin Server/Cloud keep the lenient fallback because
+	// some server versions don't support locks.
 	lock, err := e.backend.AcquireLock()
 	if err != nil {
+		if usesFileLocks(e.backend.SyncTarget()) {
+			return fmt.Errorf("sync refused: %w", err)
+		}
 		slog.Warn("cannot acquire sync lock, proceeding without lock", "error", err)
-		// Continue without lock - some server versions don't support it
 	}
 	defer func() {
 		if lock != nil {
 			e.backend.ReleaseLock(lock)
 		}
 	}()
+	if lock != nil {
+		if refresher, ok := e.backend.(LockRefresher); ok {
+			defer startLockRefresh(refresher, lock)()
+		}
+	}
 
 	// Check for cancellation
 	select {
@@ -82,8 +141,12 @@ func (e *Engine) Sync(ctx context.Context) error {
 		slog.Warn("reconciliation failed", "error", err)
 	}
 
-	// Fetch master keys from info.json (Joplin stores them there, not as .md items)
+	// Fetch master keys from info.json (Joplin stores them there, not as .md
+	// items) and enforce the target format version.
 	if err := PullSyncInfo(e.backend, e.db); err != nil {
+		if errors.Is(err, ErrSyncTargetUnsupported) {
+			return fmt.Errorf("sync refused: %w", err)
+		}
 		slog.Warn("cannot pull sync info", "error", err)
 	}
 
@@ -101,6 +164,12 @@ func (e *Engine) Sync(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	// Publish local master keys / e2ee state to info.json before pushing
+	// items encrypted with those keys, so other clients can decrypt them.
+	if err := PushSyncInfo(e.backend, e.db); err != nil {
+		return fmt.Errorf("push sync info failed: %w", err)
 	}
 
 	// Push local changes to server

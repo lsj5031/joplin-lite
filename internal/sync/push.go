@@ -39,7 +39,7 @@ func PushChanges(backend SyncBackend, db *store.DB, e2eeSvc *e2ee.Service) error
 	}
 
 	// Push changed resources
-	if err := pushResources(backend, db, syncTarget); err != nil {
+	if err := pushResources(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID); err != nil {
 		return err
 	}
 
@@ -362,6 +362,20 @@ func pushNoteTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBefo
 	return nil
 }
 
+func serializeResourceForSync(r *models.Resource, plain []byte, changed bool, db *store.DB, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
+	if encrypt && r.EncryptionApplied == 0 && e2eeSvc != nil && masterKeyID != "" {
+		cipherText, err := e2eeSvc.EncryptString(masterKeyID, string(plain))
+		if err != nil {
+			slog.Error("failed to encrypt resource for sync", "id", r.ID, "error", err)
+			return nil
+		}
+		storePushedRaw(db, r.ID, plain, changed, r.UpdatedTime)
+		return []byte(models.SerializeEncryptedEnvelope(envelopeMeta(models.ResourceFields(r), cipherText, masterKeyID)))
+	}
+	storePushedRaw(db, r.ID, plain, changed, r.UpdatedTime)
+	return plain
+}
+
 func serializeNoteTagForSync(nt *models.NoteTag, plain []byte, changed bool, db *store.DB, encrypt bool, e2eeSvc *e2ee.Service, masterKeyID string) []byte {
 	if encrypt && nt.EncryptionApplied == 0 && e2eeSvc != nil && masterKeyID != "" {
 		cipherText, err := e2eeSvc.EncryptString(masterKeyID, string(plain))
@@ -376,7 +390,7 @@ func serializeNoteTagForSync(nt *models.NoteTag, plain []byte, changed bool, db 
 	return plain
 }
 
-func pushResources(backend SyncBackend, db *store.DB, syncTarget int) error {
+func pushResources(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePush bool, e2eeSvc *e2ee.Service, activeMasterKeyID string) error {
 	rows, err := db.Query(`SELECT r.id FROM resources r
 		LEFT JOIN sync_items si ON si.item_id = r.id AND si.sync_target = ?
 		WHERE si.id IS NULL OR r.updated_time > si.sync_time`, syncTarget)
@@ -403,13 +417,28 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int) error {
 			continue
 		}
 
+		// With E2EE the blob pushed below is FileV1-encrypted, and the item
+		// plaintext must say so (encryption_blob_encrypted = 1) — that flag is
+		// how the pulling client knows the blob needs decrypting. The local
+		// record keeps 0: the on-disk blob stays plaintext (plaintext at rest).
+		encrypt := encryptBeforePush && resource.EncryptionApplied == 0 && e2eeSvc != nil && activeMasterKeyID != ""
+		pushRes := resource
+		if encrypt {
+			r := *resource
+			r.EncryptionBlobEncrypted = 1
+			pushRes = &r
+		}
+
 		// Push metadata (raw-passthrough like other items)
-		plain, changed := itemPlain(db, id, resource.UpdatedTime, resourceOverrides(resource), models.SerializeResource(resource))
-		storePushedRaw(db, id, plain, changed, resource.UpdatedTime)
+		plain, changed := itemPlain(db, id, resource.UpdatedTime, resourceOverrides(pushRes), models.SerializeResource(pushRes))
+		content := serializeResourceForSync(resource, plain, changed, db, encrypt, e2eeSvc, activeMasterKeyID)
+		if content == nil {
+			continue
+		}
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
-		if err := backend.Put(path, plain); err != nil {
+		if err := backend.Put(path, content); err != nil {
 			slog.Error("failed to push resource metadata", "id", id, "error", err)
 			continue
 		}
@@ -417,6 +446,14 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int) error {
 		// Push blob if exists
 		blobPath := db.GetResourceFile(id)
 		if blobData, err := os.ReadFile(blobPath); err == nil {
+			if encrypt {
+				cipherText, err := e2eeSvc.EncryptFile(activeMasterKeyID, blobData)
+				if err != nil {
+					slog.Error("failed to encrypt resource blob", "id", id, "error", err)
+					continue
+				}
+				blobData = []byte(cipherText)
+			}
 			blobItemName := ".resource/" + id
 			blobAPIPath := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(blobItemName))
 			if err := backend.Put(blobAPIPath, blobData); err != nil {

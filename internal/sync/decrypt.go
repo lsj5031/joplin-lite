@@ -86,25 +86,59 @@ func decryptItem(db *store.DB, svc *e2ee.Service, item store.EncryptedItem) erro
 		note.ID = item.ID
 		note.EncryptionCipherText = ""
 		note.EncryptionApplied = 0
-		return db.UpsertNote(note)
+		if err := db.UpsertNote(note); err != nil {
+			return err
+		}
+		return saveDecryptedRaw(db, item.ID, plaintext, note.UpdatedTime)
 
 	case models.TypeFolder:
 		folder := models.DeserializeFolder(plaintext)
 		folder.ID = item.ID
 		folder.EncryptionCipherText = ""
 		folder.EncryptionApplied = 0
-		return db.UpsertFolder(folder)
+		if err := db.UpsertFolder(folder); err != nil {
+			return err
+		}
+		return saveDecryptedRaw(db, item.ID, plaintext, folder.UpdatedTime)
 
 	case models.TypeTag:
 		tag := models.DeserializeTag(plaintext)
 		tag.ID = item.ID
 		tag.EncryptionCipherText = ""
 		tag.EncryptionApplied = 0
-		return db.UpsertTag(tag)
+		if err := db.UpsertTag(tag); err != nil {
+			return err
+		}
+		return saveDecryptedRaw(db, item.ID, plaintext, tag.UpdatedTime)
+
+	case models.TypeResource:
+		resource := models.DeserializeResource(plaintext)
+		resource.ID = item.ID
+		resource.EncryptionCipherText = ""
+		resource.EncryptionApplied = 0
+		// encryption_blob_encrypted stays as decrypted from the plaintext: it
+		// marks the blob at the target as FileV1-encrypted and drives the blob
+		// decryption pass below.
+		if err := db.UpsertResource(resource); err != nil {
+			return err
+		}
+		return saveDecryptedRaw(db, item.ID, plaintext, resource.UpdatedTime)
 
 	default:
 		return fmt.Errorf("unsupported item type %d for decryption", item.ItemType)
 	}
+}
+
+// saveDecryptedRaw replaces the raw sidecar with the decrypted plaintext.
+// The pull path stored the envelope bytes; keeping those would make the
+// merge path re-serialize an envelope as if it were a plaintext item (and
+// push would encrypt it twice). The plaintext is the canonical source for
+// later re-serialization — same role the raw copy has for plain pulls.
+func saveDecryptedRaw(db *store.DB, id, plaintext string, updatedTime int64) error {
+	if err := db.SaveItemRaw(id, []byte(plaintext), updatedTime); err != nil {
+		slog.Error("failed to store decrypted raw copy", "id", id, "error", err)
+	}
+	return nil
 }
 
 func decryptResourceBlob(db *store.DB, svc *e2ee.Service, resourceID string) error {

@@ -6,11 +6,13 @@ import (
 	"log/slog"
 )
 
-// Lock represents a Joplin Server sync lock.
+// Lock represents a sync lock. On Joplin Server it is the /api/locks body;
+// on flat-file targets it is the body and name of locks/<type>_<clientType>_<clientId>.json.
 type Lock struct {
-	Type       int    `json:"type"`
-	ClientType int    `json:"clientType"`
-	ClientID   string `json:"clientId"`
+	Type        int    `json:"type"`
+	ClientType  int    `json:"clientType"`
+	ClientID    string `json:"clientId"`
+	UpdatedTime int64  `json:"updatedTime,omitempty"`
 }
 
 // AcquireLock acquires a sync lock on the Joplin Server (SyncBackend interface).

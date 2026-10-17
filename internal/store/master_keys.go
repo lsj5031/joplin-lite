@@ -112,6 +112,22 @@ func (db *DB) GetEncryptedItems() ([]EncryptedItem, error) {
 	}
 	rows.Close()
 
+	// Resources (metadata envelope; the blob is handled separately)
+	rows, err = db.Query(`SELECT id, encryption_cipher_text FROM resources WHERE encryption_applied = 1 AND encryption_cipher_text != ''`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var ei EncryptedItem
+		ei.ItemType = models.TypeResource
+		if err := rows.Scan(&ei.ID, &ei.CipherText); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		items = append(items, ei)
+	}
+	rows.Close()
+
 	return items, nil
 }
 
