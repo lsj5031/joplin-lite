@@ -158,8 +158,22 @@ func (db *DB) UpsertTag(t *models.Tag) error {
 	return err
 }
 
-// DeleteTag removes a tag and its note associations.
+// DeleteTag removes a tag and its note associations. The tag and its
+// note-tag links are queued in deleted_items first, so push propagates the
+// deletions.
 func (db *DB) DeleteTag(id string) error {
+	if err := db.recordDeletion(id, models.TypeTag); err != nil {
+		return err
+	}
+	ntIDs, err := db.noteTagIDs("tag_id", id)
+	if err != nil {
+		return err
+	}
+	for _, ntID := range ntIDs {
+		if err := db.recordDeletion(ntID, models.TypeNoteTag); err != nil {
+			return err
+		}
+	}
 	if _, err := db.Exec("DELETE FROM note_tags WHERE tag_id = ?", id); err != nil {
 		return err
 	}
@@ -284,6 +298,9 @@ func (db *DB) RemoveNoteTag(noteID, tagID string) error {
 		return err
 	}
 
+	if err := db.recordDeletion(ntID, models.TypeNoteTag); err != nil {
+		return err
+	}
 	if _, err := db.Exec("DELETE FROM note_tags WHERE id = ?", ntID); err != nil {
 		return err
 	}

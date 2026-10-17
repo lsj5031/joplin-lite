@@ -203,8 +203,12 @@ func (db *DB) UpsertFolder(f *models.Folder) error {
 	return err
 }
 
-// DeleteFolder removes a folder by ID.
+// DeleteFolder removes a folder by ID. The deletion is queued in
+// deleted_items first, so push removes the remote copy.
 func (db *DB) DeleteFolder(id string) error {
+	if err := db.recordDeletion(id, models.TypeFolder); err != nil {
+		return err
+	}
 	if _, err := db.Exec("DELETE FROM folders WHERE id = ?", id); err != nil {
 		return err
 	}

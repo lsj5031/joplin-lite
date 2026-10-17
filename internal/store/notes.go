@@ -224,8 +224,22 @@ func (db *DB) UpsertNote(n *models.Note) error {
 	return err
 }
 
-// DeleteNote removes a note by ID.
+// DeleteNote removes a note by ID. The note and its note-tag links are
+// queued in deleted_items first, so push propagates the deletion to every
+// sync target that has seen them.
 func (db *DB) DeleteNote(id string) error {
+	if err := db.recordDeletion(id, models.TypeNote); err != nil {
+		return err
+	}
+	ntIDs, err := db.noteTagIDs("note_id", id)
+	if err != nil {
+		return err
+	}
+	for _, ntID := range ntIDs {
+		if err := db.recordDeletion(ntID, models.TypeNoteTag); err != nil {
+			return err
+		}
+	}
 	if _, err := db.Exec("DELETE FROM notes WHERE id = ?", id); err != nil {
 		return err
 	}

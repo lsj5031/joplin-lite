@@ -168,8 +168,12 @@ func (db *DB) UpsertResource(r *models.Resource) error {
 	return err
 }
 
-// DeleteResource removes a resource and its file.
+// DeleteResource removes a resource and its file. The deletion is queued in
+// deleted_items so push removes both remote copies (metadata .md + blob).
 func (db *DB) DeleteResource(id string) error {
+	if err := db.recordDeletion(id, models.TypeResource); err != nil {
+		return err
+	}
 	// Remove file
 	filePath := filepath.Join(db.ResourceDir(), id)
 	os.Remove(filePath)

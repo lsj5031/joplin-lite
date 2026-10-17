@@ -16,9 +16,9 @@ import (
 // Two clients share one target through create -> sync -> pull, edit -> sync ->
 // pull, and delete -> sync -> prune.
 //
-// Note: local deletions reach deleted_items via AddDeletedItem explicitly
-// here; wiring AddDeletedItem into the store/clipper delete paths is M2 work
-// ("deletion propagates both ways" is an M2 gate).
+// The delete leg runs end-to-end: DeleteNote queues deleted_items rows (the
+// store's delete paths do this now), push turns them into remote deletes, and
+// the other client prunes ("deletion propagates both ways" is an M2 gate).
 func TestEngineLocalFolderRehearsal(t *testing.T) {
 	remote := t.TempDir()
 	openStore := func() *store.DB {
@@ -118,9 +118,6 @@ func TestEngineLocalFolderRehearsal(t *testing.T) {
 	// --- Client A deletes the note; it disappears from the target and from B.
 	if err := dbA.DeleteNote(noteID); err != nil {
 		t.Fatalf("A DeleteNote: %v", err)
-	}
-	if err := dbA.AddDeletedItem(noteID, models.TypeNote, NewLocalFolderBackend(remote).SyncTarget()); err != nil {
-		t.Fatalf("A AddDeletedItem: %v", err)
 	}
 	if err := engA.Sync(ctx); err != nil {
 		t.Fatalf("A sync (push delete): %v", err)

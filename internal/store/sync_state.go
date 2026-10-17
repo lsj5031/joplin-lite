@@ -147,6 +147,13 @@ func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
 		itemType = resolved
 	}
 
+	// Clear sync_items before the typed delete: the typed paths queue remote
+	// deletions based on sync_items rows, and a delete that came from the
+	// server must never echo back to it.
+	if _, err := db.Exec("DELETE FROM sync_items WHERE item_id = ?", itemID); err != nil {
+		return err
+	}
+
 	var err error
 	switch itemType {
 	case models.TypeNote:
@@ -164,9 +171,5 @@ func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
 		return err
 	}
 
-	_, err = db.Exec("DELETE FROM sync_items WHERE item_id = ?", itemID)
-	if err != nil {
-		return err
-	}
 	return db.DeleteItemRaw(itemID)
 }
