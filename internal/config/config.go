@@ -80,6 +80,11 @@ type Config struct {
 	Port           int    `json:"-"`
 	ListenHost     string `json:"-"` // bind address host (default: localhost)
 
+	// NoSync runs the server local-only: no sync backend, no remote. Used to
+	// browse/operate on a local database (e.g. a Joplin profile copy) without
+	// configuring a target. Set via `serve --no-sync` or GOJOPLIN_NO_SYNC.
+	NoSync bool `json:"-"`
+
 	// Observability (tracing + metrics). Filled from env in Load().
 	Observability ObservabilityConfig `json:"-"`
 
@@ -127,6 +132,8 @@ type Overrides struct {
 	Password       string
 	APIKey         string
 	MasterPassword string
+	// NoSync disables the sync engine for this run (local-only serve).
+	NoSync bool
 }
 
 // Load reads the config file and returns a Config.

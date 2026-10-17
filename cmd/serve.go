@@ -40,52 +40,60 @@ var serveCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		var backend sync.SyncBackend
-		if cfg.SyncTarget == 8 {
-			b, err := sync.NewS3Backend(cfg)
-			if err != nil {
-				return fmt.Errorf("S3 backend: %w", err)
-			}
-			backend = sync.NewTracedBackend(b, "s3")
-		} else {
-			c, err := sync.NewClient(cfg)
-			if err != nil {
-				return err
-			}
-			backend = sync.NewTracedBackend(c, "joplin_server")
-		}
-
-		engine := sync.NewEngine(backend, db, cfg.MasterPassword)
-
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		go func() {
-			ticker := time.NewTicker(10 * time.Minute)
-			defer ticker.Stop()
-
-			if err := engine.Sync(ctx); err != nil {
-				slog.Error("initial sync failed", "error", err)
+		// syncer stays nil in local-only mode: the server is read/write against
+		// the local database, it just never talks to a remote.
+		var syncer clipper.SyncTrigger
+		if cfg.NoSync {
+			slog.Info("sync disabled (--no-sync): serving the local database only")
+		} else {
+			var backend sync.SyncBackend
+			if cfg.SyncTarget == 8 {
+				b, err := sync.NewS3Backend(cfg)
+				if err != nil {
+					return fmt.Errorf("S3 backend: %w", err)
+				}
+				backend = sync.NewTracedBackend(b, "s3")
+			} else {
+				c, err := sync.NewClient(cfg)
+				if err != nil {
+					return err
+				}
+				backend = sync.NewTracedBackend(c, "joplin_server")
 			}
 
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if err := engine.Sync(ctx); err != nil {
-						slog.Error("sync failed", "error", err)
-					}
-				case <-engine.TriggerCh():
-					if err := engine.Sync(ctx); err != nil {
-						slog.Error("triggered sync failed", "error", err)
+			engine := sync.NewEngine(backend, db, cfg.MasterPassword)
+			syncer = engine
+
+			go func() {
+				ticker := time.NewTicker(10 * time.Minute)
+				defer ticker.Stop()
+
+				if err := engine.Sync(ctx); err != nil {
+					slog.Error("initial sync failed", "error", err)
+				}
+
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if err := engine.Sync(ctx); err != nil {
+							slog.Error("sync failed", "error", err)
+						}
+					case <-engine.TriggerCh():
+						if err := engine.Sync(ctx); err != nil {
+							slog.Error("triggered sync failed", "error", err)
+						}
 					}
 				}
-			}
-		}()
+			}()
+		}
 
 		policy := clipper.NewPolicy(cfg)
-		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, policy, consoleAuthPrompt{out: os.Stdout})
+		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, syncer, policy, consoleAuthPrompt{out: os.Stdout})
 		addr := cfg.ListenAddr()
 		slog.Info("starting clipper server", "addr", addr)
 		slog.Info("clipper API token (paste into the extension or settings)", "token", cfg.APIToken)
@@ -134,5 +142,6 @@ func (p consoleAuthPrompt) PromptAuth(authToken string) bool {
 }
 
 func init() {
+	serveCmd.Flags().BoolVar(&noSync, "no-sync", false, "serve the local database without a sync remote (no background sync)")
 	rootCmd.AddCommand(serveCmd)
 }

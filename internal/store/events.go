@@ -9,8 +9,12 @@ import (
 
 // recordItemChange inserts an item_change record.
 func (db *DB) recordItemChange(itemType int, itemID string, changeType int) error {
+	return recordItemChangeTx(db, itemType, itemID, changeType)
+}
+
+func recordItemChangeTx(ex execer, itemType int, itemID string, changeType int) error {
 	now := time.Now().UnixMilli()
-	_, err := db.Exec(`INSERT INTO item_changes (item_type, item_id, type, created_time)
+	_, err := ex.Exec(`INSERT INTO item_changes (item_type, item_id, type, created_time)
 		VALUES (?, ?, ?, ?)`, itemType, itemID, changeType, now)
 	return err
 }

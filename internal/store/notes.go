@@ -62,7 +62,7 @@ func (db *DB) ListNotes(orderBy string, orderDir string, includeConflicts bool, 
 		master_key_id, user_data, deleted_time
 		FROM notes %sORDER BY %s %s LIMIT ? OFFSET ?`, where, sanitizeColumn(orderBy), sanitizeDir(orderDir))
 
-	rows, err := db.Query(query, limit+1, offset)
+	rows, err := db.queryStmt(query, limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}
@@ -117,7 +117,7 @@ func (db *DB) ListNotesByFolder(folderID string, includeConflicts bool, orderBy 
 		master_key_id, user_data, deleted_time
 		FROM notes WHERE %sORDER BY %s %s LIMIT ? OFFSET ?`, where, sanitizeColumn(orderBy), sanitizeDir(orderDir))
 
-	rows, err := db.Query(query, folderID, limit+1, offset)
+	rows, err := db.queryStmt(query, folderID, limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}
@@ -162,7 +162,7 @@ func (db *DB) ListConflictNotes(limit, offset int) ([]*models.Note, bool, error)
 		master_key_id, user_data, deleted_time
 		FROM notes WHERE is_conflict = 1 ORDER BY updated_time DESC LIMIT ? OFFSET ?`
 
-	rows, err := db.Query(query, limit+1, offset)
+	rows, err := db.queryStmt(query, limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}
@@ -214,7 +214,15 @@ func (db *DB) CreateNote(n *models.Note) error {
 		n.MarkupLanguage = 1 // Markdown
 	}
 
-	_, err := db.Exec(`INSERT INTO notes (id, parent_id, title, body, created_time, updated_time,
+	return db.writeTx(func(ex execer) error {
+		return createNoteTx(ex, n)
+	})
+}
+
+// createNoteTx inserts the note and its event row. It is shared by CreateNote
+// and the conflict-copy path so a note and its raw bytes commit together.
+func createNoteTx(ex execer, n *models.Note) error {
+	_, err := ex.Exec(`INSERT INTO notes (id, parent_id, title, body, created_time, updated_time,
 		is_conflict, latitude, longitude, altitude, author, source_url,
 		is_todo, todo_due, todo_completed, source, source_application, application_data,
 		"order", user_created_time, user_updated_time, encryption_cipher_text,
@@ -231,8 +239,18 @@ func (db *DB) CreateNote(n *models.Note) error {
 	if err != nil {
 		return err
 	}
+	return recordItemChangeTx(ex, models.TypeNote, n.ID, 1)
+}
 
-	return db.recordItemChange(models.TypeNote, n.ID, 1)
+// CreateNoteAndRaw inserts a note and stores the exact bytes that should be
+// pushed for it in one transaction — the conflict-copy shape.
+func (db *DB) CreateNoteAndRaw(n *models.Note, raw []byte) error {
+	return db.writeTx(func(ex execer) error {
+		if err := createNoteTx(ex, n); err != nil {
+			return err
+		}
+		return saveItemRawTx(ex, n.ID, raw, n.UpdatedTime)
+	})
 }
 
 // UpdateNote updates an existing note.
@@ -240,31 +258,36 @@ func (db *DB) UpdateNote(n *models.Note) error {
 	n.UpdatedTime = time.Now().UnixMilli()
 	n.UserUpdatedTime = n.UpdatedTime
 
-	_, err := db.Exec(`UPDATE notes SET parent_id=?, title=?, body=?, updated_time=?,
-		is_conflict=?, latitude=?, longitude=?, altitude=?, author=?, source_url=?,
-		is_todo=?, todo_due=?, todo_completed=?, source=?, source_application=?, application_data=?,
-		"order"=?, user_updated_time=?, encryption_cipher_text=?,
-		encryption_applied=?, markup_language=?, is_shared=?, share_id=?, conflict_original_id=?,
-		master_key_id=?, user_data=?, deleted_time=?
-		WHERE id = ?`,
-		n.ParentID, n.Title, n.Body, n.UpdatedTime,
-		n.IsConflict, n.Latitude, n.Longitude, n.Altitude, n.Author, n.SourceURL,
-		n.IsTodo, n.TodoDue, n.TodoCompleted, n.Source, n.SourceApplication, n.ApplicationData,
-		n.Order, n.UserUpdatedTime, n.EncryptionCipherText,
-		n.EncryptionApplied, n.MarkupLanguage, n.IsShared, n.ShareID, n.ConflictOriginalID,
-		n.MasterKeyID, n.UserData, n.DeletedTime,
-		n.ID,
-	)
-	if err != nil {
-		return err
-	}
-
-	return db.recordItemChange(models.TypeNote, n.ID, 2)
+	return db.writeTx(func(ex execer) error {
+		_, err := ex.Exec(`UPDATE notes SET parent_id=?, title=?, body=?, updated_time=?,
+			is_conflict=?, latitude=?, longitude=?, altitude=?, author=?, source_url=?,
+			is_todo=?, todo_due=?, todo_completed=?, source=?, source_application=?, application_data=?,
+			"order"=?, user_updated_time=?, encryption_cipher_text=?,
+			encryption_applied=?, markup_language=?, is_shared=?, share_id=?, conflict_original_id=?,
+			master_key_id=?, user_data=?, deleted_time=?
+			WHERE id = ?`,
+			n.ParentID, n.Title, n.Body, n.UpdatedTime,
+			n.IsConflict, n.Latitude, n.Longitude, n.Altitude, n.Author, n.SourceURL,
+			n.IsTodo, n.TodoDue, n.TodoCompleted, n.Source, n.SourceApplication, n.ApplicationData,
+			n.Order, n.UserUpdatedTime, n.EncryptionCipherText,
+			n.EncryptionApplied, n.MarkupLanguage, n.IsShared, n.ShareID, n.ConflictOriginalID,
+			n.MasterKeyID, n.UserData, n.DeletedTime,
+			n.ID,
+		)
+		if err != nil {
+			return err
+		}
+		return recordItemChangeTx(ex, models.TypeNote, n.ID, 2)
+	})
 }
 
 // UpsertNote inserts or replaces a note (used during sync).
 func (db *DB) UpsertNote(n *models.Note) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO notes (id, parent_id, title, body, created_time, updated_time,
+	return UpsertNoteTx(db, n)
+}
+
+func UpsertNoteTx(ex execer, n *models.Note) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO notes (id, parent_id, title, body, created_time, updated_time,
 		is_conflict, latitude, longitude, altitude, author, source_url,
 		is_todo, todo_due, todo_completed, source, source_application, application_data,
 		"order", user_created_time, user_updated_time, encryption_cipher_text,
@@ -285,26 +308,28 @@ func (db *DB) UpsertNote(n *models.Note) error {
 // queued in deleted_items first, so push propagates the deletion to every
 // sync target that has seen them.
 func (db *DB) DeleteNote(id string) error {
-	if err := db.recordDeletion(id, models.TypeNote); err != nil {
-		return err
-	}
-	ntIDs, err := db.noteTagIDs("note_id", id)
-	if err != nil {
-		return err
-	}
-	for _, ntID := range ntIDs {
-		if err := db.recordDeletion(ntID, models.TypeNoteTag); err != nil {
+	return db.writeTx(func(ex execer) error {
+		if err := recordDeletionTx(ex, id, models.TypeNote); err != nil {
 			return err
 		}
-	}
-	if _, err := db.Exec("DELETE FROM notes WHERE id = ?", id); err != nil {
-		return err
-	}
-	// Also remove note-tag associations
-	if _, err := db.Exec("DELETE FROM note_tags WHERE note_id = ?", id); err != nil {
-		return err
-	}
-	return db.recordItemChange(models.TypeNote, id, 3)
+		ntIDs, err := noteTagIDsTx(ex, "note_id", id)
+		if err != nil {
+			return err
+		}
+		for _, ntID := range ntIDs {
+			if err := recordDeletionTx(ex, ntID, models.TypeNoteTag); err != nil {
+				return err
+			}
+		}
+		if _, err := ex.Exec("DELETE FROM notes WHERE id = ?", id); err != nil {
+			return err
+		}
+		// Also remove note-tag associations
+		if _, err := ex.Exec("DELETE FROM note_tags WHERE note_id = ?", id); err != nil {
+			return err
+		}
+		return recordItemChangeTx(ex, models.TypeNote, id, 3)
+	})
 }
 
 func sanitizeColumn(col string) string {

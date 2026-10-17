@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
+	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +41,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writePaginated(w, tags, hasMore, p.Fields)
 
 	default: // "note" or empty defaults to note search
+		if p.Summary {
+			sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{Query: query}, p.Limit, p.Cursor)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeCursorPage(w, sums, hasMore, next)
+			return
+		}
+
 		var notes []*models.Note
 		var hasMore bool
 		var err error

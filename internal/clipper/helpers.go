@@ -23,12 +23,19 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 // paginationParams extracts pagination parameters from a request.
+//
+// Summary/Cursor are joplin-lite extensions to the Data API: `summary=1` asks
+// for list rows (no body, plus an excerpt) and `cursor=` pages them by keyset
+// instead of OFFSET. Joplin clients never send either, so the page/limit
+// contract they rely on is unchanged.
 type paginationParams struct {
 	Page     int
 	Limit    int
 	OrderBy  string
 	OrderDir string
 	Fields   []string
+	Summary  bool
+	Cursor   string
 }
 
 func parsePagination(r *http.Request) paginationParams {
@@ -52,12 +59,25 @@ func parsePagination(r *http.Request) paginationParams {
 	if fields := r.URL.Query().Get("fields"); fields != "" {
 		p.Fields = strings.Split(fields, ",")
 	}
+	p.Summary = r.URL.Query().Get("summary") == "1"
+	p.Cursor = r.URL.Query().Get("cursor")
 
 	return p
 }
 
 func (p paginationParams) offset() int {
 	return (p.Page - 1) * p.Limit
+}
+
+// writeCursorPage writes a keyset-paginated response. next_cursor is
+// additive: Joplin clients ignore it, while the UI passes it back as
+// `cursor=` to fetch the next page without scanning past the rows it has.
+func writeCursorPage(w http.ResponseWriter, items interface{}, hasMore bool, nextCursor string) {
+	writeJSON(w, http.StatusOK, models.PaginatedResponse{
+		Items:      items,
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+	})
 }
 
 // writePaginated writes a paginated response.

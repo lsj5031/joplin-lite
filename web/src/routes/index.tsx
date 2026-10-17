@@ -1,14 +1,7 @@
 import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import {
-  notebooks,
-  notes as mockNotes,
-  notebookTitle,
-  tagTitle,
-  type Note,
-  type SyncState,
-  type VaultState,
-} from '~/lib/mock-data'
+import type { Note, SyncState, VaultState } from '~/lib/mock-data'
+import { VaultProvider, useVault } from '~/lib/vault'
 import { TopBar } from '~/components/TopBar'
 import { Sidebar } from '~/components/Sidebar'
 import { NoteList } from '~/components/NoteList'
@@ -22,25 +15,34 @@ export const Route = createFileRoute('/')({
   validateSearch: (search: Record<string, unknown>): { state?: string } => ({
     state: typeof search.state === 'string' ? search.state : undefined,
   }),
-  component: Workspace,
+  component: WorkspaceRoute,
 })
+
+function WorkspaceRoute() {
+  return (
+    <VaultProvider>
+      <Workspace />
+    </VaultProvider>
+  )
+}
 
 const SYNC_STATES = ['synced', 'syncing', 'conflict', 'error', 'locked'] as const
 const isSyncState = (s: string | undefined): s is SyncState =>
   SYNC_STATES.includes(s as SyncState)
 
 function Workspace() {
-  const [notes, setNotes] = React.useState<Note[]>(mockNotes)
-  const [selectedId, setSelectedId] = React.useState<string | null>('3f2a91c4e5b84d17a6c0f2b9d8e45a11')
+  const vault = useVault()
+  const { notes, notebooks, notebookTitle, tagTitle, source, activeNote, listLoading, hasMore } = vault
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
   const [notebookFilter, setNotebookFilter] = React.useState<string | null>(null)
   const [tagFilter, setTagFilter] = React.useState<string | null>(null)
-  const [vault, setVault] = React.useState<VaultState>('unlocked')
+  const [vaultState, setVaultState] = React.useState<VaultState>('unlocked')
   const { state: previewState } = Route.useSearch()
   const [syncState, setSyncState] = React.useState<SyncState>(
     isSyncState(previewState) ? previewState : 'synced',
   )
-  const [lastSync, setLastSync] = React.useState<number>(Date.now() - 4 * 60_000)
+  const [lastSync, setLastSync] = React.useState<number>(0)
   const [navOpen, setNavOpen] = React.useState(false)
   const [mobileView, setMobileView] = React.useState<'list' | 'edit'>('list')
   const searchRef = React.useRef<HTMLInputElement | null>(null)
@@ -58,35 +60,50 @@ function Workspace() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // The backend owns filtering and search. Debounce typing so a keystroke
+  // does not turn into a request per character; filters apply immediately.
+  React.useEffect(() => {
+    const delay = query.trim() ? 250 : 0
+    const t = window.setTimeout(() => {
+      void vault.loadList({
+        query: query.trim(),
+        notebookId: notebookFilter,
+        tagId: tagFilter,
+      })
+    }, delay)
+    return () => window.clearTimeout(t)
+  }, [query, notebookFilter, tagFilter, vault.loadList])
+
+  // Keep a valid selection as the list loads/changes, and load its body once.
+  React.useEffect(() => {
+    if (selectedId && notes.some((n) => n.id === selectedId)) return
+    setSelectedId(notes[0]?.id ?? null)
+  }, [notes, selectedId])
+  React.useEffect(() => {
+    if (!selectedId) return
+    void vault.selectNote(selectedId)
+  }, [selectedId, vault.selectNote])
+
+  // Set after mount so SSR and first client render agree (avoids a hydration mismatch).
+  React.useEffect(() => {
+    setLastSync(Date.now() - 4 * 60_000)
+  }, [])
+
   const runSync = () => {
     setSyncState('syncing')
     window.setTimeout(() => {
       setLastSync(Date.now())
-      setSyncState(notes.some((n) => n.isConflict) ? 'conflict' : 'synced')
-    }, 2400)
+      if (source === 'live') {
+        vault.reload()
+        setSyncState('synced')
+      } else {
+        setSyncState(notes.some((n) => n.isConflict) ? 'conflict' : 'synced')
+      }
+    }, source === 'live' ? 400 : 2400)
   }
 
-  const q = query.trim().toLowerCase()
-  const filtered = notes.filter((n) => {
-    if (notebookFilter) {
-      const nb = notebooks.find((b) => b.id === notebookFilter)
-      const scope = [notebookFilter, ...notebooks.filter((b) => b.parentId === notebookFilter).map((b) => b.id)]
-      if (!scope.includes(n.notebookId) && nb) return false
-    }
-    if (tagFilter && !n.tagIds.includes(tagFilter)) return false
-    if (!q) return true
-    const haystack = [
-      n.title,
-      n.body,
-      notebookTitle(n.notebookId),
-      ...n.tagIds.map(tagTitle),
-    ]
-      .join(' ')
-      .toLowerCase()
-    return haystack.includes(q)
-  })
-
-  const selected = notes.find((n) => n.id === selectedId) ?? null
+  const q = query.trim()
+  const selected = activeNote
 
   const selectNote = (id: string) => {
     setSelectedId(id)
@@ -94,42 +111,26 @@ function Workspace() {
   }
 
   const listTitle = q
-    ? `Search “${query.trim()}”`
+    ? `Search “${q}”`
     : tagFilter
       ? `Tag: ${tagTitle(tagFilter)}`
       : notebookFilter
         ? notebookTitle(notebookFilter)
         : 'All notes'
 
-  const createNote = () => {
-    const id = crypto.randomUUID().replace(/-/g, '').slice(0, 32)
-    const now = Date.now()
-    const fresh: Note = {
-      id,
-      title: 'Untitled note',
-      body: '# Untitled note\n\n',
-      notebookId: notebookFilter ?? 'nb-inbox',
-      tagIds: [],
-      createdTime: now,
-      updatedTime: now,
-      isTodo: false,
-      todoCompleted: false,
-      todoDue: null,
-      isConflict: false,
-      conflictOriginalTitle: null,
-    }
-    setNotes((prev) => [fresh, ...prev])
+  const createNote = async () => {
+    const id = await vault.createNote({ notebookId: notebookFilter ?? '' })
     setSelectedId(id)
     setMobileView('edit')
   }
 
-  const toggleTodo = (id: string) =>
-    setNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, todoCompleted: !n.todoCompleted, updatedTime: Date.now() } : n)),
-    )
+  const toggleTodo = (id: string) => {
+    void vault.toggleTodo(id)
+  }
 
-  const changeBody = (id: string, body: string) =>
-    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, body, updatedTime: Date.now() } : n)))
+  const changeBody = (id: string, body: string) => {
+    void vault.patchNote(id, { body })
+  }
 
   return (
     <div className="flex h-dvh flex-col">
@@ -138,9 +139,9 @@ function Workspace() {
         onQuery={setQuery}
         syncState={syncState}
         onSync={runSync}
-        vault={vault}
-        onToggleVault={() => setVault((v) => (v === 'unlocked' ? 'locked' : 'unlocked'))}
-        onNewNote={createNote}
+        vault={vaultState}
+        onToggleVault={() => setVaultState((v) => (v === 'unlocked' ? 'locked' : 'unlocked'))}
+        onNewNote={() => void createNote()}
         onPreviewState={setSyncState}
         searchRef={searchRef}
       />
@@ -176,21 +177,25 @@ function Workspace() {
 
         <div className={`min-h-0 min-w-0 ${mobileView === 'edit' ? 'hidden lg:block' : 'block'}`}>
           <NoteList
-            notes={filtered}
+            notes={notes}
             selectedId={selectedId}
             onSelect={selectNote}
             query={q}
             onClearQuery={() => setQuery('')}
             listTitle={listTitle}
             onOpenNav={() => setNavOpen(true)}
+            hasMore={hasMore}
+            loading={listLoading}
+            onLoadMore={() => void vault.loadMore()}
           />
         </div>
 
         <div className={`min-h-0 min-w-0 ${mobileView === 'list' ? 'hidden lg:block' : 'block'}`}>
           <EditorPane
             note={selected}
-            vault={vault}
-            onUnlock={() => setVault('unlocked')}
+            loading={vault.activeLoading}
+            vault={vaultState}
+            onUnlock={() => setVaultState('unlocked')}
             onToggleTodo={toggleTodo}
             onChangeBody={changeBody}
             onBack={() => setMobileView('list')}
@@ -203,6 +208,9 @@ function Workspace() {
         lastSync={lastSync}
         noteCount={notes.length}
         notebookCount={notebooks.length}
+        hasMore={hasMore}
+        source={source}
+        error={vault.error}
       />
     </div>
   )

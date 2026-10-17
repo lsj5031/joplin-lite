@@ -32,7 +32,10 @@ type Note struct {
 	Source            string `json:"source"`
 	SourceApplication string `json:"source_application"`
 	ApplicationData   string `json:"application_data"`
-	Order             int64  `json:"order"`
+	// Order is Joplin's manual-sort key. It is usually an integer but Joplin
+	// stores fractional values (e.g. conflict ordering), so it is a float64 to
+	// match the real `notes.order` NUMERIC column.
+	Order float64 `json:"order"`
 	UserCreatedTime   int64  `json:"user_created_time"`
 	UserUpdatedTime   int64  `json:"user_updated_time"`
 	EncryptionCipherText string `json:"encryption_cipher_text"`
@@ -46,6 +49,28 @@ type Note struct {
 	DeletedTime       int64  `json:"deleted_time"`
 
 	// Virtual fields for API responses
+	Type_ int `json:"type_,omitempty"`
+}
+
+// NoteSummary is the list-row projection of a note: what a list renders and
+// nothing else. It never carries the body — lists ship an excerpt and the
+// full note is fetched with GetNote when the user selects it, so a 100-row
+// page cannot move megabytes of text that will never be displayed.
+type NoteSummary struct {
+	ID                 string   `json:"id"`
+	ParentID           string   `json:"parent_id"`
+	Title              string   `json:"title"`
+	Excerpt            string   `json:"excerpt"`
+	CreatedTime        int64    `json:"created_time"`
+	UpdatedTime        int64    `json:"updated_time"`
+	IsConflict         int      `json:"is_conflict"`
+	IsTodo             int      `json:"is_todo"`
+	TodoDue            int64    `json:"todo_due"`
+	TodoCompleted      int64    `json:"todo_completed"`
+	ConflictOriginalID string   `json:"conflict_original_id"`
+	TagIDs             []string `json:"tag_ids,omitempty"`
+
+	// Type_ keeps summary rows shaped like the Data API's note objects.
 	Type_ int `json:"type_,omitempty"`
 }
 
@@ -172,8 +197,10 @@ type MasterKey struct {
 	Content           string `json:"content"` // encrypted master key content (JSON)
 }
 
-// PaginatedResponse wraps paginated API responses.
+// PaginatedResponse wraps paginated API responses. NextCursor is set for the
+// keyset-paginated summary extensions; Data API clients ignore it.
 type PaginatedResponse struct {
-	Items   interface{} `json:"items"`
-	HasMore bool        `json:"has_more"`
+	Items      interface{} `json:"items"`
+	HasMore    bool        `json:"has_more"`
+	NextCursor string      `json:"next_cursor,omitempty"`
 }

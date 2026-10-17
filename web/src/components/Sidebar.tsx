@@ -1,4 +1,4 @@
-import { notebooks, noteCountByNotebook, tags, notes } from '~/lib/mock-data'
+import { useVault } from '~/lib/vault'
 import { IconChevron, IconNotebook, IconTag } from './icons'
 
 type Props = {
@@ -9,8 +9,13 @@ type Props = {
 }
 
 export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSelectTag }: Props) {
+  const { notebooks, tags, notes, noteCountByNotebook, countsExact } = useVault()
   const roots = notebooks.filter((n) => n.parentId === null)
   const allCount = notes.length
+  // Per-notebook/tag counts are only meaningful when the loaded rows are the
+  // whole library; a summary page must not present page-limited counts as
+  // totals.
+  const count = (n: number) => (countsExact ? <span className="mono text-[11px] text-ink-soft">{n}</span> : null)
 
   const row = (active: boolean) =>
     `flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13px] transition-colors duration-100 ${
@@ -28,7 +33,7 @@ export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSel
             <button type="button" className={row(selectedNotebook === null && selectedTag === null)} onClick={() => { onSelectNotebook(null); onSelectTag(null) }}>
               <IconNotebook className="shrink-0 text-ink-soft" />
               <span className="flex-1 truncate">All notes</span>
-              <span className="mono text-[11px] text-ink-soft">{allCount}</span>
+              <span className="mono text-[11px] text-ink-soft">{allCount}{countsExact ? '' : '+'}</span>
             </button>
           </li>
           {roots.map((nb) => {
@@ -42,7 +47,7 @@ export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSel
                     <span className="w-3 shrink-0" />
                   )}
                   <span className="flex-1 truncate">{nb.title}</span>
-                  <span className="mono text-[11px] text-ink-soft">{noteCountByNotebook(nb.id)}</span>
+                  {count(noteCountByNotebook(nb.id))}
                 </button>
                 {children.length > 0 && (
                   <ul className="mt-0.5 ml-[15px] space-y-0.5 border-l border-line pl-1.5">
@@ -50,7 +55,7 @@ export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSel
                       <li key={c.id}>
                         <button type="button" className={row(selectedNotebook === c.id)} onClick={() => { onSelectNotebook(c.id); onSelectTag(null) }}>
                           <span className="flex-1 truncate">{c.title}</span>
-                          <span className="mono text-[11px] text-ink-soft">{noteCountByNotebook(c.id)}</span>
+                          {count(noteCountByNotebook(c.id))}
                         </button>
                       </li>
                     ))}
@@ -66,13 +71,13 @@ export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSel
         <h2 className="label px-2 pb-1.5 text-ink-soft">Tags</h2>
         <ul className="space-y-0.5">
           {tags.map((t) => {
-            const count = notes.filter((n) => n.tagIds.includes(t.id)).length
+            const noteCount = notes.filter((n) => n.tagIds.includes(t.id)).length
             return (
               <li key={t.id}>
                 <button type="button" className={row(selectedTag === t.id)} onClick={() => { onSelectTag(selectedTag === t.id ? null : t.id); onSelectNotebook(null) }}>
                   <IconTag className="shrink-0 text-ink-soft" />
                   <span className="flex-1 truncate">{t.title}</span>
-                  <span className="mono text-[11px] text-ink-soft">{count}</span>
+                  {count(noteCount)}
                 </button>
               </li>
             )

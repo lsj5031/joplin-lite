@@ -6,11 +6,31 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lsj5031/joplin-lite/internal/models"
+	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
 func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	p := parsePagination(r)
 	includeConflicts := r.URL.Query().Get("include_conflicts") == "1"
+
+	// Summary mode: list rows only, keyset-paginated. The Data API still gets
+	// full notes below because its clients expect body on /notes.
+	if p.Summary {
+		q := store.NoteQuery{
+			FolderID:         r.URL.Query().Get("parent_id"),
+			TagID:            r.URL.Query().Get("tag_id"),
+			Query:            r.URL.Query().Get("query"),
+			IncludeConflicts: includeConflicts,
+		}
+		sums, hasMore, next, err := s.db.ListNoteSummaries(q, p.Limit, p.Cursor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeCursorPage(w, sums, hasMore, next)
+		return
+	}
+
 	notes, hasMore, err := s.db.ListNotes(p.OrderBy, p.OrderDir, includeConflicts, p.Limit, p.offset())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -198,7 +218,7 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	if v, ok := updates["order"]; ok {
 		if n, ok := v.(float64); ok {
-			existing.Order = int64(n)
+			existing.Order = n
 		}
 	}
 

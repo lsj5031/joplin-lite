@@ -8,7 +8,11 @@ import (
 
 // UpsertMasterKey inserts or updates a master key.
 func (db *DB) UpsertMasterKey(mk *models.MasterKey) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO master_keys
+	return UpsertMasterKeyTx(db, mk)
+}
+
+func UpsertMasterKeyTx(ex execer, mk *models.MasterKey) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO master_keys
 		(id, created_time, updated_time, source_application, encryption_method, checksum, content)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		mk.ID, mk.CreatedTime, mk.UpdatedTime, mk.SourceApplication,
@@ -113,7 +117,7 @@ func (db *DB) GetEncryptedItems() ([]EncryptedItem, error) {
 	rows.Close()
 
 	// Revisions (note history envelopes)
-	rows, err = db.Query(`SELECT id, encryption_cipher_text FROM revisions WHERE encryption_applied = 1 AND encryption_cipher_text != ''`)
+	rows, err = db.Query(`SELECT id, encryption_cipher_text FROM jl_revisions WHERE encryption_applied = 1 AND encryption_cipher_text != ''`)
 	if err != nil {
 		return nil, err
 	}

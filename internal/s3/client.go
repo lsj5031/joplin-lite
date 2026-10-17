@@ -1,3 +1,5 @@
+//go:build s3
+
 package s3
 
 import (

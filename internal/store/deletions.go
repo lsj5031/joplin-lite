@@ -11,7 +11,11 @@ import (
 // and clears the rows. Items that never synced produce no rows — the server
 // has never seen them, so there is nothing to delete.
 func (db *DB) recordDeletion(itemID string, itemType int) error {
-	_, err := db.Exec(`INSERT INTO deleted_items (item_type, item_id, deleted_time, sync_target)
+	return recordDeletionTx(db, itemID, itemType)
+}
+
+func recordDeletionTx(ex execer, itemID string, itemType int) error {
+	_, err := ex.Exec(`INSERT INTO deleted_items (item_type, item_id, deleted_time, sync_target)
 		SELECT DISTINCT ?, ?, ?, sync_target FROM sync_items WHERE item_id = ?`,
 		itemType, itemID, time.Now().UnixMilli(), itemID)
 	return err
@@ -22,10 +26,14 @@ func (db *DB) recordDeletion(itemID string, itemType int) error {
 // before the rows are removed. The column argument is restricted to those two
 // literals — it is never user input.
 func (db *DB) noteTagIDs(column, value string) ([]string, error) {
+	return noteTagIDsTx(db, column, value)
+}
+
+func noteTagIDsTx(ex execer, column, value string) ([]string, error) {
 	if column != "note_id" && column != "tag_id" {
 		return nil, fmt.Errorf("store: invalid note_tags column %q", column)
 	}
-	rows, err := db.Query("SELECT id FROM note_tags WHERE "+column+" = ?", value)
+	rows, err := ex.Query("SELECT id FROM note_tags WHERE "+column+" = ?", value)
 	if err != nil {
 		return nil, err
 	}

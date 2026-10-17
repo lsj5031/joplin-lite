@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lsj5031/joplin-lite/internal/models"
+	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
 func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +134,19 @@ func (s *Server) handleGetFolderNotes(w http.ResponseWriter, r *http.Request) {
 	p := parsePagination(r)
 
 	includeConflicts := r.URL.Query().Get("include_conflicts") == "1"
+	if p.Summary {
+		sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{
+			FolderID:         id,
+			IncludeConflicts: includeConflicts,
+		}, p.Limit, p.Cursor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeCursorPage(w, sums, hasMore, next)
+		return
+	}
+
 	notes, hasMore, err := s.db.ListNotesByFolder(id, includeConflicts, p.OrderBy, p.OrderDir, p.Limit, p.offset())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +42,7 @@ func NoteFields(n *Note) map[string]string {
 		"source":                 n.Source,
 		"source_application":     n.SourceApplication,
 		"application_data":       n.ApplicationData,
-		"order":                  fmtMs(n.Order),
+		"order":                  fmtOrder(n.Order),
 		"user_created_time":      fmtTime(n.UserCreatedTime),
 		"user_updated_time":      fmtTime(n.UserUpdatedTime),
 		"encryption_cipher_text": n.EncryptionCipherText,
@@ -251,7 +252,7 @@ func DeserializeNote(content string) *Note {
 	n.Source = fields["source"]
 	n.SourceApplication = fields["source_application"]
 	n.ApplicationData = fields["application_data"]
-	n.Order = parseTime(fields["order"])
+	n.Order, _ = strconv.ParseFloat(fields["order"], 64)
 	n.UserCreatedTime = parseTime(fields["user_created_time"])
 	n.UserUpdatedTime = parseTime(fields["user_updated_time"])
 	n.EncryptionCipherText = fields["encryption_cipher_text"]
@@ -472,6 +473,16 @@ func FmtTimeForSync(t int64) string {
 // raw numbers ("0" when zero), never as ISO strings.
 func fmtMs(t int64) string {
 	return strconv.FormatInt(t, 10)
+}
+
+// fmtOrder formats the note order field. It is normally an integer, but Joplin
+// stores fractional values for conflict ordering, so whole numbers print
+// without a decimal point and fractions print as-is.
+func fmtOrder(f float64) string {
+	if f == math.Trunc(f) {
+		return strconv.FormatInt(int64(f), 10)
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 // fmtFloat formats a float field as Joplin's unserialize_format canonicalizes

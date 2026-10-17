@@ -4,23 +4,32 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/models"
 )
 
-// SearchNotes performs a full-text search on notes using FTS5.
+// SearchNotes performs a full-text search on notes using the local FTS5 index
+// (jl_notes_fts — distinct from a real Joplin profile's FTS4 notes_fts).
 func (db *DB) SearchNotes(query string, limit, offset int) ([]*models.Note, bool, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 
-	rows, err := db.Query(`SELECT n.id, n.parent_id, n.title, n.body, n.created_time, n.updated_time,
+	fts := ftsQuery(query)
+	if fts == "" {
+		return []*models.Note{}, false, nil
+	}
+
+	// External-content FTS5 rows are joined by rowid, not by the content
+	// table's id: `id` is declared UNINDEXED, so `n.id = fts.id` forces a
+	// full scan of the index. rowid is the join key the table is built on.
+	rows, err := db.queryStmt(`SELECT n.id, n.parent_id, n.title, n.body, n.created_time, n.updated_time,
 		n.is_conflict, n.latitude, n.longitude, n.altitude, n.author, n.source_url,
 		n.is_todo, n.todo_due, n.todo_completed, n.source, n.source_application, n.application_data,
 		n."order", n.user_created_time, n.user_updated_time, n.encryption_cipher_text,
 		n.encryption_applied, n.markup_language, n.is_shared, n.share_id, n.conflict_original_id,
 		n.master_key_id, n.user_data, n.deleted_time
 		FROM notes n
-		JOIN notes_fts fts ON n.id = fts.id
-		WHERE notes_fts MATCH ?
+		JOIN jl_notes_fts ON n.rowid = jl_notes_fts.rowid
+		WHERE jl_notes_fts MATCH ?
 		ORDER BY n.updated_time DESC
-		LIMIT ? OFFSET ?`, query, limit+1, offset)
+		LIMIT ? OFFSET ?`, fts, limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}
@@ -56,11 +65,14 @@ func (db *DB) SearchFolders(query string, limit, offset int) ([]*models.Folder, 
 		limit = 10
 	}
 
-	rows, err := db.Query(`SELECT id, title, created_time, updated_time,
+	// Prefix matching (query%) can use the title index; "%query%" cannot and
+	// scanned every folder. Titles are short, so prefix is also the more
+	// predictable result set for the sidebar.
+	rows, err := db.queryStmt(`SELECT id, title, created_time, updated_time,
 		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied,
 		parent_id, is_shared, share_id, master_key_id, icon, user_data, deleted_time
-		FROM folders WHERE title LIKE ? ORDER BY title ASC LIMIT ? OFFSET ?`,
-		"%"+query+"%", limit+1, offset)
+		FROM folders WHERE title LIKE ? COLLATE NOCASE ORDER BY title ASC LIMIT ? OFFSET ?`,
+		query+"%", limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}
@@ -93,11 +105,12 @@ func (db *DB) SearchTags(query string, limit, offset int) ([]*models.Tag, bool, 
 		limit = 10
 	}
 
-	rows, err := db.Query(`SELECT id, title, created_time, updated_time,
+	// Prefix like folders: indexed and predictable.
+	rows, err := db.queryStmt(`SELECT id, title, created_time, updated_time,
 		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied,
 		is_shared, parent_id, user_data
-		FROM tags WHERE title LIKE ? ORDER BY title ASC LIMIT ? OFFSET ?`,
-		"%"+query+"%", limit+1, offset)
+		FROM tags WHERE title LIKE ? COLLATE NOCASE ORDER BY title ASC LIMIT ? OFFSET ?`,
+		query+"%", limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}

@@ -13,6 +13,8 @@ export type Note = {
   id: string
   title: string
   body: string
+  /** excerpt is the list-row preview; live summary rows omit the body. */
+  excerpt?: string
   notebookId: string
   tagIds: string[]
   createdTime: number

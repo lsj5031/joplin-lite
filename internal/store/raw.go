@@ -10,7 +10,11 @@ import "database/sql"
 // SaveItemRaw stores the exact bytes of an item along with the item's
 // updated_time at capture time.
 func (db *DB) SaveItemRaw(id string, raw []byte, updatedTime int64) error {
-	_, err := db.Exec(`INSERT OR REPLACE INTO item_raw (id, raw, updated_time) VALUES (?, ?, ?)`, id, raw, updatedTime)
+	return saveItemRawTx(db, id, raw, updatedTime)
+}
+
+func saveItemRawTx(ex execer, id string, raw []byte, updatedTime int64) error {
+	_, err := ex.Exec(`INSERT OR REPLACE INTO item_raw (id, raw, updated_time) VALUES (?, ?, ?)`, id, raw, updatedTime)
 	return err
 }
 

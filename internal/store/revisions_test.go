@@ -16,7 +16,7 @@ func TestRevisionsTable_MigratesExistingDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := db.Exec(`DROP TABLE revisions`); err != nil {
+	if _, err := db.Exec(`DROP TABLE jl_revisions`); err != nil {
 		t.Fatalf("drop revisions: %v", err)
 	}
 	if err := db.Close(); err != nil {

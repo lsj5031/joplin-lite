@@ -1,0 +1,7 @@
+# Golden corpus fixtures are compared byte-for-byte. Never let a checkout
+# rewrite their line endings (Windows autocrlf turns the LF fixtures into CRLF
+# and the whole format gate fails for reasons unrelated to the code).
+internal/models/testdata/** -text
+
+# Keep shell scripts and Go files on their committed line endings.
+*.sh text eol=lf

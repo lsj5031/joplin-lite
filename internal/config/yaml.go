@@ -247,10 +247,26 @@ func applyOverridesAndEnv(cfg *Config, overrides Overrides) {
 	if v := os.Getenv("GOJOPLIN_MASTER_PASSWORD"); v != "" {
 		cfg.MasterPassword = v
 	}
+	if overrides.NoSync || isTruthyEnv(os.Getenv("GOJOPLIN_NO_SYNC")) {
+		cfg.NoSync = true
+	}
+}
+
+// isTruthyEnv reports whether an env var is set to a truthy value.
+func isTruthyEnv(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // validateConfig returns an error if cfg is invalid.
 func validateConfig(cfg *Config) error {
+	if cfg.NoSync {
+		// Local-only: no sync target is required or validated.
+		return nil
+	}
 	if cfg.SyncTarget != 7 && cfg.SyncTarget != 8 && cfg.SyncTarget != 9 {
 		return fmt.Errorf("unsupported sync target %d (Dropbox target 7, S3 target 8 and Joplin Server target 9 are supported)", cfg.SyncTarget)
 	}

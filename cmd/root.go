@@ -14,6 +14,7 @@ var (
 	password       string
 	apiKey         string
 	masterPassword string
+	noSync         bool
 )
 
 var rootCmd = &cobra.Command{
@@ -28,6 +29,7 @@ func loadConfig() (*config.Config, error) {
 		Password:       password,
 		APIKey:         apiKey,
 		MasterPassword: masterPassword,
+		NoSync:         noSync,
 	})
 }
 

@@ -2,13 +2,15 @@ import * as React from 'react'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import type { Note, VaultState } from '~/lib/mock-data'
-import { notebookTitle, notebooks, tagTitle } from '~/lib/mock-data'
+import { useVault } from '~/lib/vault'
 import { IconBack, IconConflict, IconLock, IconTodo } from './icons'
 
 const md = new MarkdownIt({ linkify: true })
 
 type Props = {
   note: Note | null
+  /** loading is true while the selected note's body is being fetched. */
+  loading?: boolean
   vault: VaultState
   onUnlock: () => void
   onToggleTodo: (id: string) => void
@@ -16,7 +18,8 @@ type Props = {
   onBack: () => void
 }
 
-export function EditorPane({ note, vault, onUnlock, onToggleTodo, onChangeBody, onBack }: Props) {
+export function EditorPane({ note, loading, vault, onUnlock, onToggleTodo, onChangeBody, onBack }: Props) {
+  const { notebookTitle, tagTitle } = useVault()
   const [tab, setTab] = React.useState<'write' | 'preview'>('write')
   const [html, setHtml] = React.useState('')
 
@@ -29,7 +32,9 @@ export function EditorPane({ note, vault, onUnlock, onToggleTodo, onChangeBody, 
   if (!note) {
     return (
       <section className="flex h-full flex-1 items-center justify-center bg-paper-3">
-        <p className="text-[14px] text-ink-soft">Select a note to start reading.</p>
+        <p className="text-[14px] text-ink-soft">
+          {loading ? 'Loading note…' : 'Select a note to start reading.'}
+        </p>
       </section>
     )
   }
@@ -119,6 +124,12 @@ export function EditorPane({ note, vault, onUnlock, onToggleTodo, onChangeBody, 
               Keep synced version
             </button>
           </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mono border-b border-line bg-paper-2 px-6 py-1.5 text-[11px] text-ink-soft">
+          Loading note body…
         </div>
       )}
 

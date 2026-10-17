@@ -1,5 +1,5 @@
 import type { Note } from '~/lib/mock-data'
-import { notebookTitle, tagTitle } from '~/lib/mock-data'
+import { useVault } from '~/lib/vault'
 import { IconConflict, IconTodo } from './icons'
 
 type Props = {
@@ -10,6 +10,9 @@ type Props = {
   onClearQuery: () => void
   listTitle: string
   onOpenNav?: () => void
+  hasMore?: boolean
+  loading?: boolean
+  onLoadMore?: () => void
 }
 
 const fmtWhen = (ts: number) => {
@@ -22,7 +25,8 @@ const fmtWhen = (ts: number) => {
   }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-export function NoteList({ notes, selectedId, onSelect, query, onClearQuery, listTitle, onOpenNav }: Props) {
+export function NoteList({ notes, selectedId, onSelect, query, onClearQuery, listTitle, onOpenNav, hasMore, loading, onLoadMore }: Props) {
+  const { notebookTitle, tagTitle } = useVault()
   return (
     <section className="flex h-full min-w-0 flex-col border-r border-line bg-paper" aria-label="Note list">
       <header className="flex items-baseline justify-between gap-2 border-b border-line px-4 py-2.5">
@@ -38,14 +42,17 @@ export function NoteList({ notes, selectedId, onSelect, query, onClearQuery, lis
           )}
           <h2 className="truncate text-[13px] font-semibold text-ink">{listTitle}</h2>
         </div>
-        <span className="mono shrink-0 text-[11px] text-ink-soft">{notes.length} shown</span>
+        <span className="mono shrink-0 text-[11px] text-ink-soft">
+          {notes.length}
+          {hasMore ? '+' : ''} shown
+        </span>
       </header>
 
       {notes.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="text-[15px] font-semibold text-ink">No notes match {query ? `“${query}”` : 'this filter'}</p>
           <p className="max-w-[36ch] text-[13px] text-ink-soft">
-            Search looks at titles, note bodies, notebooks, and tags. Try a shorter phrase.
+            Search runs over note titles and bodies on the local index. Try a shorter phrase.
           </p>
           <button
             type="button"
@@ -83,6 +90,9 @@ export function NoteList({ notes, selectedId, onSelect, query, onClearQuery, lis
                     <span className={`block truncate text-[13.5px] ${active ? 'font-semibold text-ink' : 'font-medium text-ink'}`}>
                       {n.title}
                     </span>
+                    {n.excerpt && (
+                      <span className="block truncate text-[11.5px] text-ink-soft/90">{n.excerpt}</span>
+                    )}
                     <span className="block truncate text-[11.5px] text-ink-soft">
                       {notebookTitle(n.notebookId)}
                       {n.tagIds.length > 0 && ` · ${n.tagIds.map(tagTitle).join(' ')}`}
@@ -97,6 +107,19 @@ export function NoteList({ notes, selectedId, onSelect, query, onClearQuery, lis
             )
           })}
         </ul>
+      )}
+
+      {hasMore && onLoadMore && (
+        <div className="border-t border-line p-2">
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loading}
+            className="w-full rounded-[6px] border border-line-strong bg-paper-3 px-3 py-1.5 text-[12.5px] font-medium text-ink transition-colors duration-100 hover:bg-paper-2 disabled:opacity-50"
+          >
+            {loading ? 'Loading…' : 'Load more notes'}
+          </button>
+        </div>
       )}
     </section>
   )

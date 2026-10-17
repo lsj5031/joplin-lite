@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lsj5031/joplin-lite/internal/models"
+	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +115,16 @@ func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetTagNotes(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	p := parsePagination(r)
+
+	if p.Summary {
+		sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{TagID: id}, p.Limit, p.Cursor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeCursorPage(w, sums, hasMore, next)
+		return
+	}
 
 	notes, hasMore, err := s.db.GetNotesByTag(id, p.Limit, p.offset())
 	if err != nil {

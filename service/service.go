@@ -36,9 +36,13 @@ type Page struct {
 // several are set: Query, then ConflictOnly, then FolderID.
 type NoteFilter struct {
 	FolderID     string `json:"folder_id,omitempty"`
+	TagID        string `json:"tag_id,omitempty"`
 	Query        string `json:"query,omitempty"`
 	ConflictOnly bool   `json:"conflict_only,omitempty"`
 	Page         Page   `json:"page"`
+	// Cursor is the keyset position for ListNoteSummaries (empty = first
+	// page). The page/offset fields remain for the full-note Data API.
+	Cursor string `json:"cursor,omitempty"`
 }
 
 // NotePage is a page of notes.
@@ -71,6 +75,34 @@ func (s *Service) ListNotes(f NoteFilter) (NotePage, error) {
 		notes = []*models.Note{}
 	}
 	return NotePage{Notes: notes, HasMore: hasMore}, nil
+}
+
+// SummaryPage is a keyset-paginated page of list rows. It is the list DTO for
+// the UI shell: bodies are deliberately absent and fetched per selection.
+type SummaryPage struct {
+	Notes      []*models.NoteSummary `json:"notes"`
+	HasMore    bool                  `json:"has_more"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+}
+
+// ListNoteSummaries lists note rows without bodies. Cursor paging is keyset
+// (updated_time, id), so page N does not scan N×limit rows. Same filter
+// precedence as ListNotes: Query, then ConflictOnly, then FolderID/TagID.
+func (s *Service) ListNoteSummaries(f NoteFilter) (SummaryPage, error) {
+	q := store.NoteQuery{
+		FolderID:     f.FolderID,
+		TagID:        f.TagID,
+		Query:        f.Query,
+		ConflictOnly: f.ConflictOnly,
+	}
+	notes, hasMore, next, err := s.db.ListNoteSummaries(q, f.Page.Limit, f.Cursor)
+	if err != nil {
+		return SummaryPage{}, err
+	}
+	if notes == nil {
+		notes = []*models.NoteSummary{}
+	}
+	return SummaryPage{Notes: notes, HasMore: hasMore, NextCursor: next}, nil
 }
 
 // Search is shorthand for ListNotes with a query.
