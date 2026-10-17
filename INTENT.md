@@ -350,7 +350,7 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - **E2EE gate:** decrypt a real note from my target, edit, re-encrypt, and **Joplin decrypts it back**.
 - **Sync gate:** edit here → sync → Joplin desktop shows it, and the reverse, with no loss;
   a deliberate double-edit produces a conflict note, not a silent overwrite.
-- **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.- Footprint: single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `-ldflags="-s -w"`] 24,385,024 bytes (23.3 MiB); startup (`--help`) 67–94 ms over 3 runs.** The "~7 MB" aspiration is dead — the real number is ~24 MB; decide at M5 (accept, strip, or reconsider the driver).
+- **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.- Footprint: single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `-ldflags="-s -w"`] 24,385,024 bytes (23.3 MiB) at M0 → 24,571,392 bytes (23.4 MiB, +186 KB for the Dropbox/S3 drivers + clipper + service seam) at HEAD; startup (`--help`) 67–94 ms at M0 → 74–133 ms at HEAD over 3 runs.** The "~7 MB" aspiration is dead — the real number is ~24 MB; decide at M5 (accept, strip, or reconsider the driver).
 
 ## Milestones
 
