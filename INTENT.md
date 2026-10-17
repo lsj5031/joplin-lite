@@ -339,9 +339,11 @@ joplin-lite/                    # Go module (fork of go-joplin, AGPL-3.0-or-late
 
 UI stack decision: the prototype and product UI are **TanStack Start + React + TS** in `web/`
 (user direction). All data access goes through a thin `lib/api` layer with two implementations
-— mock (prototype, today) and MyGO typed bindings (M4) — so components stay shell-agnostic.
-Open item for M4: whether the shipped webview loads Start's static SPA build (likely) or the
-Start server runs inside the Go process; the mock/bindings split keeps both open. Editor
+— mock (prototype) and the live Data API (desktop shell) — so components stay shell-agnostic.
+**[resolved 2026-10-17]** the shipped webview loads the static SPA build (no Start/Nitro
+server) and talks to the clipper/Data API running **in the same Go process**; the shell
+injects the launch-time base URL and token into `index.html` before the bundle runs. Typed
+MyGO bindings remain the plan for settings/sync control (they need Go, not just the store). Editor
 stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 
 ## Success criteria
@@ -351,7 +353,7 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - **Sync gate:** edit here → sync → Joplin desktop shows it, and the reverse, with no loss;
   a deliberate double-edit produces a conflict note, not a silent overwrite.
 - **Clipper gate:** the official extension clips a page in, and it survives a sync round-trip.
-- **Footprint:** single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `go build -trimpath -ldflags="-s -w"`] the default (Dropbox / Joplin Server / local-folder) build is 16,351,232 bytes (15.6 MiB); the optional `-tags s3` build is 24,591,872 bytes (23.5 MiB) because it links aws-sdk-go-v2. Startup (`--help`) 74–133 ms over 3 runs (same code path as the M2 measurement).** `-trimpath` is part of the command: without it the byte count varies with the checkout path. The "~7 MB" aspiration is dead; ~16 MB is the default number and S3 is an opt-in build at M5.
+- **Footprint:** single cgo-free binary, starts in under a second. **[measured 2026-10-17 — windows/amd64, Go 1.26.4, modernc.org/sqlite v1.60.1, `go build -trimpath -ldflags="-s -w"`] the default (Dropbox / Joplin Server / local-folder) build is 16,351,232 bytes (15.6 MiB); the optional `-tags s3` build is 24,591,872 bytes (23.5 MiB) because it links aws-sdk-go-v2. Startup (`--help`) 74–133 ms over 3 runs (same code path as the M2 measurement).** `-trimpath` is part of the command: without it the byte count varies with the checkout path. The "~7 MB" aspiration is dead; ~16 MB is the default number and S3 is an opt-in build at M5. **[measured 2026-10-17 — desktop shell]** `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"` with the staged 989 KB SPA embedded is 16,866,816 bytes (16.1 MiB) on windows/amd64/Go 1.27.1: the webview shell costs ~0.5 MB over the headless binary.
 
 ## Milestones
 
@@ -417,6 +419,17 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
   reason. Still missing for the gate: bindings for the runtime pieces (sync target, master
   password, clipper token) — those need the config + sync engine, not just the store.
 - Requires Go 1.27 + Bun per MyGO's requirements (pin the MyGO version).
+- **[update 2026-10-17 — desktop shell runs]** `shell/` is a Go 1.27 module pinning
+  `github.com/egoist/mygo v0.5.5` (no CLI required): a native window over the embedded
+  `web/dist/client` SPA, with the clipper/Data API in-process on the configured/OS-assigned
+  loopback address. Runtime config is injected into the page, closing the build-time
+  localhost coupling; closing the window shuts the API down and closes SQLite. Web-clipper
+  pairing now has a native Accept/Reject dialog. Verified end-to-end in the real webview:
+  page at `app://localhost`, live notes rendered (`50+ shown`), authenticated GET, and
+  cross-origin POST/DELETE preflights (create+delete a probe note) all succeed; a
+  screenshot capture and unit tests for the SPA handler live in `shell/`. Still open for
+  the gate: typed bindings for settings/sync target/master password, a wired sync-now
+  control, the conflicts view, and the real-target loops.
 - **Gate:** the full loop works from the UI alone: edit → sync → clipper → conflict visible.
 
 **M4a — UI prototype (this repo, in progress)**

@@ -54,9 +54,23 @@ npm run build    # static artifact in web/dist/client (index.html + assets)
 ```
 
 `npm run build` emits a directory of static files with an `index.html` fallback for
-client-side routes — there is no Node/Nitro server in production. The desktop shell
-embeds `web/dist/client` in the Go binary and serves it; during development the UI
-talks to the local clipper API (`VITE_GOJOPLIN_URL`, `VITE_GOJOPLIN_TOKEN`).
+client-side routes — there is no Node/Nitro server in production. During development
+the UI talks to the local clipper API (`VITE_GOJOPLIN_URL`, `VITE_GOJOPLIN_TOKEN`).
+
+### Desktop app
+
+The MyGO shell in [`shell/`](shell/README.md) embeds that build, starts the clipper
+API in the same process, and shows the UI in the system webview:
+
+```sh
+bash shell/build.sh
+./tmp/gojoplin-desktop.exe -config tmp/try-config.yaml -no-sync
+```
+
+Go 1.27+ (pinned via the toolchain) and WebView2 on Windows are the only extra
+requirements; the MyGO CLI is not needed. The API address is chosen at launch and
+injected into the page, so there is no build-time localhost wiring. Closing the
+window stops the server and closes SQLite.
 
 ## Status
 
@@ -67,7 +81,9 @@ talks to the local clipper API (`VITE_GOJOPLIN_URL`, `VITE_GOJOPLIN_TOKEN`).
   against fakes and local rehearsals; the real-target gates (Joplin desktop decrypts,
   Dropbox round-trip, extension clip) are still ahead.
 - **M4** — the `service/` typed seam (notes, notebooks, tags, search, conflicts, settings)
-  is in; MyGO bindings + shell come next. See [INTENT.md](INTENT.md) for the gates.
+  is in, and a runnable MyGO desktop shell now serves the real UI from an in-process
+  API (`shell/`). Remaining for the gate: typed bindings for settings/sync control and
+  the real-target loops. See [INTENT.md](INTENT.md).
 
 ## License
 
