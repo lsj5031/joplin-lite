@@ -20,10 +20,10 @@ type DeltaResponse struct {
 
 // DeltaItem represents a single item in a delta response.
 type DeltaItem struct {
-	ID        string `json:"id"`
-	ItemName  string `json:"item_name"`
-	Type      int    `json:"type"` // 1=put, 3=delete
-	UpdatedTime int64 `json:"updated_time"`
+	ID          string `json:"id"`
+	ItemName    string `json:"item_name"`
+	Type        int    `json:"type"` // 1=put, 3=delete
+	UpdatedTime int64  `json:"updated_time"`
 }
 
 // PullChanges fetches all changes from the server since the last sync cursor
@@ -304,13 +304,20 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		return db.SaveItemRaw(mk.ID, content, mk.UpdatedTime)
 
 	case models.TypeRevision:
-		// Revisions (note history) are synced by Joplin but we don't persist their content.
-		// Record as synced so we don't re-fetch them every cycle.
-		itemID, _ := parseItemName(item.ItemName)
-		if itemID != "" {
-			return db.UpsertSyncItem(itemID, models.TypeRevision, syncTarget)
+		// Revisions (note history): indexed for the /revisions API, content
+		// kept raw (item_raw) and re-pushed byte-for-byte — there is no
+		// revision serializer, losslessness is by construction.
+		rev := models.DeserializeRevision(string(content))
+		if rev == nil {
+			return nil
 		}
-		return nil
+		if err := db.UpsertRevision(rev); err != nil {
+			return fmt.Errorf("cannot upsert revision %s: %w", rev.ID, err)
+		}
+		if err := db.UpsertSyncItem(rev.ID, models.TypeRevision, syncTarget); err != nil {
+			return err
+		}
+		return db.SaveItemRaw(rev.ID, content, rev.UpdatedTime)
 
 	default:
 		slog.Warn("skipping unknown item type", "type", itemType, "name", item.ItemName)

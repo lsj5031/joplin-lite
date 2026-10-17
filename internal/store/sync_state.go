@@ -166,6 +166,8 @@ func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
 		_, err = db.Exec("DELETE FROM note_tags WHERE id = ?", itemID)
 	case models.TypeResource:
 		err = db.DeleteResource(itemID)
+	case models.TypeRevision:
+		err = db.DeleteRevision(itemID)
 	}
 	if err != nil {
 		return err

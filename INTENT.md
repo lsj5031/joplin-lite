@@ -135,8 +135,9 @@ Coexist with Joplin desktop/mobile on the same target.
   SYNC lock, refresh it during long syncs. On Joplin Server the fork's `/api/locks` client
   already implements built-in locks — keep it for the Joplin Server driver.
   **[update 2026-10-17 — done]** `internal/sync/filelock.go` implements the flat-file
-  protocol for LocalFolder and Dropbox (shared `lockStore` interface; S3 still has its
-  no-op lock). The engine now **refuses** the sync on any lock failure for file targets
+  protocol for LocalFolder, Dropbox **and S3** (shared `lockStore` interface; S3 gets it
+  over its object store and the item listings now skip `locks/`, `temp/`, `info.json`).
+  The engine now **refuses** the sync on any lock failure for file targets
   (2/7/8) — an active foreign EXCLUSIVE lock surfaces `ErrExclusiveLock` before anything
   touches the target. Semantics **[verified]** against `LockHandler.ts`: activity is judged
   by the file's updated time on the target (3-min TTL; the JSON body's `updatedTime` is not
@@ -244,11 +245,17 @@ Clipper server compatible with the official Joplin Web Clipper:
   `/search`, `/events`, `/revisions`. **[gap closed 2026-10-17]** route set pinned against
   Joplin's `Api.ts` (`resourceNameToRoute_`: ping, notes, folders, tags, resources,
   master_keys, search, auth, events, revisions, services, mcp) and `/revisions` added.
-  **[limitation]** our `/revisions` serves an empty collection: joplin-lite persists no
-  revisions yet (the sync pass records pulled revision items as synced without content, and
-  the store has no revisions table) — the route exists so the API matches Joplin's set.
-  `nounce` request-dedup and `master_keys`/`services` routes are not ported (the extension
-  doesn't need them for clipping).
+  **[update 2026-10-17 — revisions are real now]** pulled revision items (type 13) are
+  persisted: an index table (`revisions`) for listing/filtering plus the **exact item bytes**
+  in `item_raw` — the entity served by `/revisions` is the raw item's metadata (diff fields
+  `title_diff`/`body_diff`/`metadata_diff` and all) with API typing per the serialization
+  rules (ISO times → unix-ms numbers). There is deliberately **no revision serializer**:
+  re-serializing a diff-carrying item risks mangling it, so losslessness stays by
+  construction (raw passthrough). `DELETE /revisions/{id}` queues the remote delete like
+  every other item. **[edge]** an *encrypted* revision (envelope) is indexed with the fields
+  in the clear (id/parent_id) and served undecrypted — the decrypt pass doesn't handle
+  revision envelopes yet. `nounce` request-dedup and `master_keys`/`services` routes are not
+  ported (the extension doesn't need them for clipping).
 - Permissive **CORS + preflight** (fork already does this via chi/cors).
 - **Cannot coexist with Joplin desktop on port 41184** — surface that clearly in the UI and
   logs (bind failure = explicit "Joplin desktop is using this port" message).

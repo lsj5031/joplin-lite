@@ -11,11 +11,29 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/s3"
 )
 
+// s3Objects is the object-store surface the backend needs (satisfied by
+// *s3.Client; tests use an in-memory fake).
+type s3Objects interface {
+	GetObject(ctx context.Context, key string) ([]byte, error)
+	PutObject(ctx context.Context, key string, body []byte) error
+	DeleteObject(ctx context.Context, key string) error
+	ListObjects(ctx context.Context, prefix, continuationToken string, maxKeys int32) (keys []string, updatedTimes []int64, nextToken string, err error)
+}
+
 // S3Backend implements SyncBackend by translating Joplin Server-style API paths
 // to S3 operations. Compatible with AWS S3 and S3-compatible storage (e.g. MinIO).
+// Locks use the shared flat-file protocol under locks/ (like Dropbox and the
+// local folder target).
 type S3Backend struct {
-	client *s3.Client
+	client s3Objects
 	target int
+	locks  *fileLockManager
+}
+
+func newS3Backend(client s3Objects) *S3Backend {
+	b := &S3Backend{client: client, target: 8}
+	b.locks = newFileLockManager(b, LockClientTypeCLI, "joplin-lite")
+	return b
 }
 
 // NewS3Backend creates an S3 sync backend. Credentials come from env vars (if set) or
@@ -33,7 +51,7 @@ func NewS3Backend(cfg *config.Config) (*S3Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &S3Backend{client: client, target: 8}, nil
+	return newS3Backend(client), nil
 }
 
 // Authenticate is a no-op for S3 (credentials from env).
@@ -42,11 +60,68 @@ func (b *S3Backend) Authenticate() error { return nil }
 // IsAuthenticated is always true for S3 once the client is created.
 func (b *S3Backend) IsAuthenticated() bool { return true }
 
-// AcquireLock is a no-op for S3 (no server-side lock API).
-func (b *S3Backend) AcquireLock() (interface{}, error) { return nil, nil }
+// AcquireLock acquires the flat-file SYNC lock (ErrExclusiveLock when another
+// client holds an active EXCLUSIVE lock).
+func (b *S3Backend) AcquireLock() (interface{}, error) {
+	return b.locks.Acquire()
+}
 
-// ReleaseLock is a no-op for S3.
-func (b *S3Backend) ReleaseLock(interface{}) error { return nil }
+// ReleaseLock releases our lock.
+func (b *S3Backend) ReleaseLock(lock interface{}) error {
+	if lock == nil {
+		return nil
+	}
+	return b.locks.Release()
+}
+
+// RefreshLock refreshes our held lock while it is still active.
+func (b *S3Backend) RefreshLock(lock interface{}) error {
+	if lock == nil {
+		return nil
+	}
+	return b.locks.Refresh()
+}
+
+// lockStore implementation (flat-file lock protocol over S3 objects).
+
+func (b *S3Backend) getLock(name string) ([]byte, error) {
+	return b.client.GetObject(context.Background(), "locks/"+name)
+}
+
+func (b *S3Backend) putLock(name string, data []byte) error {
+	return b.client.PutObject(context.Background(), "locks/"+name, data)
+}
+
+func (b *S3Backend) deleteLock(name string) error {
+	// S3 delete is idempotent — a missing lock file is fine.
+	return b.client.DeleteObject(context.Background(), "locks/"+name)
+}
+
+func (b *S3Backend) listLocks() ([]LockFile, error) {
+	var out []LockFile
+	token := ""
+	for {
+		keys, times, next, err := b.client.ListObjects(context.Background(), "locks/", token, 1000)
+		if err != nil {
+			return nil, err
+		}
+		for i, k := range keys {
+			name := strings.TrimPrefix(k, "locks/")
+			if name == k || strings.Contains(name, "/") {
+				continue
+			}
+			var ts int64
+			if i < len(times) {
+				ts = times[i]
+			}
+			out = append(out, LockFile{Name: name, UpdatedTime: ts})
+		}
+		if next == "" {
+			return out, nil
+		}
+		token = next
+	}
+}
 
 // SyncTarget returns 8 (S3).
 func (b *S3Backend) SyncTarget() int { return b.target }
@@ -86,6 +161,15 @@ func (b *S3Backend) Delete(path string) error {
 	}
 	key = b.decodeKey(key)
 	return b.client.DeleteObject(context.Background(), key)
+}
+
+// isSystemPath reports whether an object key is target bookkeeping rather
+// than a sync item (mirrors LocalFolderBackend.listItems).
+func isSystemPath(key string) bool {
+	return key == "info.json" ||
+		strings.HasPrefix(key, "locks/") ||
+		strings.HasPrefix(key, "temp/") ||
+		strings.HasPrefix(key, ".sync/")
 }
 
 // decodeKey reverses url.PathEscape so the S3 key matches the key in the bucket.
@@ -141,6 +225,9 @@ func (b *S3Backend) getDelta(rawQuery string) ([]byte, error) {
 	}
 	items := make([]DeltaItem, 0, len(keys))
 	for i, k := range keys {
+		if isSystemPath(k) {
+			continue
+		}
 		ts := int64(0)
 		if i < len(updatedTimes) {
 			ts = updatedTimes[i]
@@ -171,6 +258,9 @@ func (b *S3Backend) getChildren(rawQuery string) ([]byte, error) {
 	}
 	items := make([]ChildItem, 0, len(keys))
 	for _, k := range keys {
+		if isSystemPath(k) {
+			continue
+		}
 		items = append(items, ChildItem{Name: k})
 	}
 	resp := ChildrenResponse{

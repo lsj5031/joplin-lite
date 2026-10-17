@@ -257,7 +257,8 @@ func TestClipperTokenAuth(t *testing.T) {
 }
 
 // TestClipperRevisionsRoute: the route set includes /revisions (Joplin's
-// does); joplin-lite serves an empty collection until revisions persist.
+// does). A fresh store serves an empty collection and 404s unknown ids —
+// seeded history is covered by TestClipperRevisionsAPI.
 func TestClipperRevisionsRoute(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 

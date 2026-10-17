@@ -257,6 +257,19 @@ var schemaStatements = []string{
 		updated_time INT NOT NULL DEFAULT 0
 	)`,
 
+	// Note-history index (revisions): the full serialized item — including
+	// the diff fields — stays in item_raw (raw passthrough); this table
+	// indexes what listing/filtering needs.
+	`CREATE TABLE IF NOT EXISTS revisions (
+		id TEXT PRIMARY KEY,
+		parent_id TEXT NOT NULL DEFAULT '',
+		item_id TEXT NOT NULL DEFAULT '',
+		item_type INT NOT NULL DEFAULT 0,
+		item_updated_time INT NOT NULL DEFAULT 0,
+		created_time INT NOT NULL DEFAULT 0,
+		updated_time INT NOT NULL DEFAULT 0
+	)`,
+
 	// FTS for notes search. FTS5, not FTS4: the cgo-free modernc.org/sqlite
 	// build ships SQLITE_ENABLE_FTS5 only (no FTS3/4). This table is a local
 	// search index and is not part of the Joplin sync format.
@@ -295,7 +308,6 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_deleted_items_sync_target ON deleted_items(sync_target)`,
 	`CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes(item_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_item_changes_created_time ON item_changes(created_time)`,
-
 }
 
 func (db *DB) getKV(key string) string {
