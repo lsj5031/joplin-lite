@@ -252,10 +252,15 @@ Clipper server compatible with the official Joplin Web Clipper:
   rules (ISO times → unix-ms numbers). There is deliberately **no revision serializer**:
   re-serializing a diff-carrying item risks mangling it, so losslessness stays by
   construction (raw passthrough). `DELETE /revisions/{id}` queues the remote delete like
-  every other item. **[edge]** an *encrypted* revision (envelope) is indexed with the fields
-  in the clear (id/parent_id) and served undecrypted — the decrypt pass doesn't handle
-  revision envelopes yet. `nounce` request-dedup and `master_keys`/`services` routes are not
-  ported (the extension doesn't need them for clipping).
+  every other item. **[update 2026-10-17 — revision envelopes decrypt now]** the `revisions`
+  table carries `encryption_cipher_text`/`encryption_applied` (additive migration) and the
+  decrypt pass handles revision envelopes like notes (`GetEncryptedItems` + `sync/decrypt.go`,
+  pinned end-to-end by `internal/sync/revisions_test.go`), so `/revisions` serves encrypted
+  revisions decrypted. Fixing it surfaced that `migrate()`'s `version >= 49` early-return
+  skipped `ensureSidecarSchema` on existing databases — sidecar columns are now applied on
+  every open (`internal/store/revisions_test.go` pins an upgraded v49 database).
+  `nounce` request-dedup and `master_keys`/`services` routes are not ported (the extension
+  doesn't need them for clipping).
 - Permissive **CORS + preflight** (fork already does this via chi/cors).
 - **Cannot coexist with Joplin desktop on port 41184** — surface that clearly in the UI and
   logs (bind failure = explicit "Joplin desktop is using this port" message).
@@ -401,6 +406,15 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 - `service/` typed bindings; the `web/` UI (prototype → product) wired to bindings; read/write
   notes, notebooks, tags, search, settings (sync target, master password, clipper token,
   conflict notes view).
+- **[update 2026-10-17 — `service/` seam landed]** `service/` is the typed Go API the MyGO
+  bindings wrap: notes (CRUD, list/filter), notebooks (tree/list/CRUD), tags (link/unlink,
+  notes-by-tag, tags-by-note), search, the conflict-notes view, and settings
+  (`GetSetting`/`SetSetting` over `key_values`) — pinned by `service/service_test.go`.
+  Note lists follow Joplin's `include_conflicts` semantics (conflict copies excluded from
+  folder/all-notes views, visible in the Conflicts view); the Data API's `GET /notes` and
+  `GET /folders/{id}/notes` honor the `include_conflicts` query parameter for the same
+  reason. Still missing for the gate: bindings for the runtime pieces (sync target, master
+  password, clipper token) — those need the config + sync engine, not just the store.
 - Requires Go 1.27 + Bun per MyGO's requirements (pin the MyGO version).
 - **Gate:** the full loop works from the UI alone: edit → sync → clipper → conflict visible.
 

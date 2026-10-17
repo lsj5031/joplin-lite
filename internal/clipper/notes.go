@@ -10,7 +10,8 @@ import (
 
 func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	p := parsePagination(r)
-	notes, hasMore, err := s.db.ListNotes(p.OrderBy, p.OrderDir, p.Limit, p.offset())
+	includeConflicts := r.URL.Query().Get("include_conflicts") == "1"
+	notes, hasMore, err := s.db.ListNotes(p.OrderBy, p.OrderDir, includeConflicts, p.Limit, p.offset())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

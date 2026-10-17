@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -67,7 +68,9 @@ func (db *DB) migrate() error {
 	}
 
 	if version >= 49 {
-		return nil
+		// Already migrated — sidecar tables can still be missing on older
+		// databases, so keep them in shape.
+		return db.ensureSidecarSchema()
 	}
 
 	slog.Info("running migrations", "from_version", version, "to_version", 49)
@@ -89,8 +92,61 @@ func (db *DB) migrate() error {
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return db.ensureSidecarSchema()
 }
+
+// ensureSidecarSchema creates/updates the joplin-lite sidecar tables. It runs
+// on every open: schemaStatements only execute below v49, so a database
+// created before a sidecar table existed (e.g. `revisions`) would otherwise
+// never get it.
+func (db *DB) ensureSidecarSchema() error {
+	for _, stmt := range []string{createItemRawSQL, createRevisionsSQL} {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("sidecar schema statement failed: %w\nSQL: %s", err, stmt)
+		}
+	}
+	// Guarded columns: databases that created `revisions` before the
+	// encryption columns existed.
+	for _, col := range []string{
+		"encryption_applied INT NOT NULL DEFAULT 0",
+		"encryption_cipher_text TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec(`ALTER TABLE revisions ADD COLUMN ` + col); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+const (
+	// createItemRawSQL is the raw passthrough store (joplin-lite sidecar, not
+	// part of the Joplin v49 schema): exact bytes of pulled items, pushed
+	// back unmodified.
+	createItemRawSQL = `CREATE TABLE IF NOT EXISTS item_raw (
+		id TEXT PRIMARY KEY,
+		raw BLOB NOT NULL,
+		updated_time INT NOT NULL DEFAULT 0
+	)`
+
+	// createRevisionsSQL is the note-history index: the full serialized item
+	// — including the diff fields — stays in item_raw (raw passthrough);
+	// this table indexes what listing/filtering and the decrypt pass need.
+	createRevisionsSQL = `CREATE TABLE IF NOT EXISTS revisions (
+		id TEXT PRIMARY KEY,
+		parent_id TEXT NOT NULL DEFAULT '',
+		item_id TEXT NOT NULL DEFAULT '',
+		item_type INT NOT NULL DEFAULT 0,
+		item_updated_time INT NOT NULL DEFAULT 0,
+		created_time INT NOT NULL DEFAULT 0,
+		updated_time INT NOT NULL DEFAULT 0,
+		encryption_applied INT NOT NULL DEFAULT 0,
+		encryption_cipher_text TEXT NOT NULL DEFAULT ''
+	)`
+)
 
 // schemaStatements creates the Joplin v49 schema.
 var schemaStatements = []string{
@@ -249,26 +305,8 @@ var schemaStatements = []string{
 		created_time INT NOT NULL DEFAULT 0
 	)`,
 
-	// Raw passthrough store (joplin-lite sidecar, not part of the Joplin v49
-	// schema): exact bytes of pulled items, pushed back unmodified.
-	`CREATE TABLE IF NOT EXISTS item_raw (
-		id TEXT PRIMARY KEY,
-		raw BLOB NOT NULL,
-		updated_time INT NOT NULL DEFAULT 0
-	)`,
-
-	// Note-history index (revisions): the full serialized item — including
-	// the diff fields — stays in item_raw (raw passthrough); this table
-	// indexes what listing/filtering needs.
-	`CREATE TABLE IF NOT EXISTS revisions (
-		id TEXT PRIMARY KEY,
-		parent_id TEXT NOT NULL DEFAULT '',
-		item_id TEXT NOT NULL DEFAULT '',
-		item_type INT NOT NULL DEFAULT 0,
-		item_updated_time INT NOT NULL DEFAULT 0,
-		created_time INT NOT NULL DEFAULT 0,
-		updated_time INT NOT NULL DEFAULT 0
-	)`,
+	createItemRawSQL,
+	createRevisionsSQL,
 
 	// FTS for notes search. FTS5, not FTS4: the cgo-free modernc.org/sqlite
 	// build ships SQLITE_ENABLE_FTS5 only (no FTS3/4). This table is a local
@@ -322,4 +360,21 @@ func (db *DB) getKV(key string) string {
 func (db *DB) setKV(key, value string) error {
 	_, err := db.Exec(`INSERT OR REPLACE INTO key_values (key, value, type, updated_time) VALUES (?, ?, 1, strftime('%s','now') * 1000)`, key, value)
 	return err
+}
+
+// GetSetting returns a key_values entry ("" when unset). Unlike getKV it
+// reports errors: this is the exported settings seam for the UI service
+// layer (sync target, clipper token, master password reference).
+func (db *DB) GetSetting(key string) (string, error) {
+	var val string
+	err := db.QueryRow("SELECT value FROM key_values WHERE key = ?", key).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return val, err
+}
+
+// SetSetting stores a key_values entry.
+func (db *DB) SetSetting(key, value string) error {
+	return db.setKV(key, value)
 }

@@ -12,9 +12,11 @@ import (
 // UpsertRevision stores a revision index row.
 func (db *DB) UpsertRevision(r *models.Revision) error {
 	_, err := db.Exec(`INSERT OR REPLACE INTO revisions
-		(id, parent_id, item_id, item_type, item_updated_time, created_time, updated_time)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		(id, parent_id, item_id, item_type, item_updated_time, created_time, updated_time,
+		encryption_applied, encryption_cipher_text)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentID, r.ItemID, r.ItemType, r.ItemUpdatedTime, r.CreatedTime, r.UpdatedTime,
+		r.EncryptionApplied, r.EncryptionCipherText,
 	)
 	return err
 }
@@ -23,9 +25,10 @@ func (db *DB) UpsertRevision(r *models.Revision) error {
 func (db *DB) GetRevision(id string) (*models.Revision, error) {
 	r := &models.Revision{}
 	err := db.QueryRow(`SELECT id, parent_id, item_id, item_type, item_updated_time,
-		created_time, updated_time FROM revisions WHERE id = ?`, id).Scan(
+		created_time, updated_time, encryption_applied, encryption_cipher_text
+		FROM revisions WHERE id = ?`, id).Scan(
 		&r.ID, &r.ParentID, &r.ItemID, &r.ItemType, &r.ItemUpdatedTime,
-		&r.CreatedTime, &r.UpdatedTime,
+		&r.CreatedTime, &r.UpdatedTime, &r.EncryptionApplied, &r.EncryptionCipherText,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -39,7 +42,7 @@ func (db *DB) GetRevision(id string) (*models.Revision, error) {
 // ListRevisions returns revision index rows, newest first.
 func (db *DB) ListRevisions(limit, offset int) ([]*models.Revision, error) {
 	rows, err := db.Query(`SELECT id, parent_id, item_id, item_type, item_updated_time,
-		created_time, updated_time FROM revisions
+		created_time, updated_time, encryption_applied, encryption_cipher_text FROM revisions
 		ORDER BY item_updated_time DESC, id ASC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -49,7 +52,7 @@ func (db *DB) ListRevisions(limit, offset int) ([]*models.Revision, error) {
 	for rows.Next() {
 		r := &models.Revision{}
 		if err := rows.Scan(&r.ID, &r.ParentID, &r.ItemID, &r.ItemType, &r.ItemUpdatedTime,
-			&r.CreatedTime, &r.UpdatedTime); err != nil {
+			&r.CreatedTime, &r.UpdatedTime, &r.EncryptionApplied, &r.EncryptionCipherText); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

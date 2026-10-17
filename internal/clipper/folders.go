@@ -132,7 +132,8 @@ func (s *Server) handleGetFolderNotes(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	p := parsePagination(r)
 
-	notes, hasMore, err := s.db.ListNotesByFolder(id, p.OrderBy, p.OrderDir, p.Limit, p.offset())
+	includeConflicts := r.URL.Query().Get("include_conflicts") == "1"
+	notes, hasMore, err := s.db.ListNotesByFolder(id, includeConflicts, p.OrderBy, p.OrderDir, p.Limit, p.offset())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

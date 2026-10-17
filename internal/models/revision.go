@@ -11,15 +11,19 @@ package models
 // serializer on purpose: re-serializing a revision would risk mangling the
 // patch fields, and losslessness is by construction.
 
-// Revision fields — see the note above.
+// Revision fields — see the note above. On an encrypted target the item
+// arrives as an envelope: only id/parent_id/updated_time are in the clear
+// and the index fields are filled after the decrypt pass.
 type Revision struct {
-	ID              string `json:"id"`
-	ParentID        string `json:"parent_id"` // previous revision in the chain
-	ItemID          string `json:"item_id"`
-	ItemType        int    `json:"item_type"`
-	ItemUpdatedTime int64  `json:"item_updated_time"`
-	CreatedTime     int64  `json:"created_time"`
-	UpdatedTime     int64  `json:"updated_time"`
+	ID                   string `json:"id"`
+	ParentID             string `json:"parent_id"` // previous revision in the chain
+	ItemID               string `json:"item_id"`
+	ItemType             int    `json:"item_type"`
+	ItemUpdatedTime      int64  `json:"item_updated_time"`
+	CreatedTime          int64  `json:"created_time"`
+	UpdatedTime          int64  `json:"updated_time"`
+	EncryptionCipherText string `json:"encryption_cipher_text"`
+	EncryptionApplied    int    `json:"encryption_applied"`
 }
 
 // DeserializeRevision parses a serialized revision item (or its encrypted
@@ -32,13 +36,15 @@ func DeserializeRevision(content string) *Revision {
 // RevisionFromFields maps parsed metadata fields to a Revision.
 func RevisionFromFields(fields map[string]string) *Revision {
 	r := &Revision{
-		ID:              fields["id"],
-		ParentID:        fields["parent_id"],
-		ItemID:          fields["item_id"],
-		ItemType:        parseInt(fields["item_type"]),
-		ItemUpdatedTime: parseInt64(fields["item_updated_time"]),
-		CreatedTime:     parseTime(fields["created_time"]),
-		UpdatedTime:     parseTime(fields["updated_time"]),
+		ID:                   fields["id"],
+		ParentID:             fields["parent_id"],
+		ItemID:               fields["item_id"],
+		ItemType:             parseInt(fields["item_type"]),
+		ItemUpdatedTime:      parseInt64(fields["item_updated_time"]),
+		CreatedTime:          parseTime(fields["created_time"]),
+		UpdatedTime:          parseTime(fields["updated_time"]),
+		EncryptionCipherText: fields["encryption_cipher_text"],
+		EncryptionApplied:    parseInt(fields["encryption_applied"]),
 	}
 	if r.ID == "" {
 		return nil

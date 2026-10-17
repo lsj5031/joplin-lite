@@ -56,8 +56,11 @@ npm run dev
 - **M0** (headless, cgo-free, lossless baseline) — done: golden-corpus format gate
   green, raw-passthrough serialization, sync engine rehearsed against a local folder
   backend.
-- **M1** E2EE interop → **M2** Dropbox sync → **M3** clipper → **M4** shell — see
-  [INTENT.md](INTENT.md) for the gates.
+- **M1** (E2EE) / **M2** (Dropbox sync) / **M3** (clipper) — code complete and tested
+  against fakes and local rehearsals; the real-target gates (Joplin desktop decrypts,
+  Dropbox round-trip, extension clip) are still ahead.
+- **M4** — the `service/` typed seam (notes, notebooks, tags, search, conflicts, settings)
+  is in; MyGO bindings + shell come next. See [INTENT.md](INTENT.md) for the gates.
 
 ## License
 

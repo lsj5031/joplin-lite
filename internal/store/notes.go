@@ -35,8 +35,11 @@ func (db *DB) GetNote(id string) (*models.Note, error) {
 	return n, nil
 }
 
-// ListNotes returns notes with pagination.
-func (db *DB) ListNotes(orderBy string, orderDir string, limit, offset int) ([]*models.Note, bool, error) {
+// ListNotes returns notes with pagination. Conflict notes (is_conflict = 1)
+// are excluded unless includeConflicts is set, matching the Data API's
+// include_conflicts semantics: conflict copies live in the virtual
+// Conflicts notebook, not in normal note lists.
+func (db *DB) ListNotes(orderBy string, orderDir string, includeConflicts bool, limit, offset int) ([]*models.Note, bool, error) {
 	if orderBy == "" {
 		orderBy = "updated_time"
 	}
@@ -47,13 +50,17 @@ func (db *DB) ListNotes(orderBy string, orderDir string, limit, offset int) ([]*
 		limit = 10
 	}
 
+	where := ""
+	if !includeConflicts {
+		where = "WHERE is_conflict = 0 "
+	}
 	query := fmt.Sprintf(`SELECT id, parent_id, title, body, created_time, updated_time,
 		is_conflict, latitude, longitude, altitude, author, source_url,
 		is_todo, todo_due, todo_completed, source, source_application, application_data,
 		"order", user_created_time, user_updated_time, encryption_cipher_text,
 		encryption_applied, markup_language, is_shared, share_id, conflict_original_id,
 		master_key_id, user_data, deleted_time
-		FROM notes ORDER BY %s %s LIMIT ? OFFSET ?`, sanitizeColumn(orderBy), sanitizeDir(orderDir))
+		FROM notes %sORDER BY %s %s LIMIT ? OFFSET ?`, where, sanitizeColumn(orderBy), sanitizeDir(orderDir))
 
 	rows, err := db.Query(query, limit+1, offset)
 	if err != nil {
@@ -85,8 +92,9 @@ func (db *DB) ListNotes(orderBy string, orderDir string, limit, offset int) ([]*
 	return notes, hasMore, nil
 }
 
-// ListNotesByFolder returns notes in a specific folder.
-func (db *DB) ListNotesByFolder(folderID string, orderBy string, orderDir string, limit, offset int) ([]*models.Note, bool, error) {
+// ListNotesByFolder returns notes in a specific folder. Conflict notes are
+// excluded unless includeConflicts is set (see ListNotes).
+func (db *DB) ListNotesByFolder(folderID string, includeConflicts bool, orderBy string, orderDir string, limit, offset int) ([]*models.Note, bool, error) {
 	if orderBy == "" {
 		orderBy = "updated_time"
 	}
@@ -97,15 +105,64 @@ func (db *DB) ListNotesByFolder(folderID string, orderBy string, orderDir string
 		limit = 10
 	}
 
+	where := "parent_id = ? "
+	if !includeConflicts {
+		where += "AND is_conflict = 0 "
+	}
 	query := fmt.Sprintf(`SELECT id, parent_id, title, body, created_time, updated_time,
 		is_conflict, latitude, longitude, altitude, author, source_url,
 		is_todo, todo_due, todo_completed, source, source_application, application_data,
 		"order", user_created_time, user_updated_time, encryption_cipher_text,
 		encryption_applied, markup_language, is_shared, share_id, conflict_original_id,
 		master_key_id, user_data, deleted_time
-		FROM notes WHERE parent_id = ? ORDER BY %s %s LIMIT ? OFFSET ?`, sanitizeColumn(orderBy), sanitizeDir(orderDir))
+		FROM notes WHERE %sORDER BY %s %s LIMIT ? OFFSET ?`, where, sanitizeColumn(orderBy), sanitizeDir(orderDir))
 
 	rows, err := db.Query(query, folderID, limit+1, offset)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	var notes []*models.Note
+	for rows.Next() {
+		n := &models.Note{}
+		if err := rows.Scan(
+			&n.ID, &n.ParentID, &n.Title, &n.Body, &n.CreatedTime, &n.UpdatedTime,
+			&n.IsConflict, &n.Latitude, &n.Longitude, &n.Altitude, &n.Author, &n.SourceURL,
+			&n.IsTodo, &n.TodoDue, &n.TodoCompleted, &n.Source, &n.SourceApplication, &n.ApplicationData,
+			&n.Order, &n.UserCreatedTime, &n.UserUpdatedTime, &n.EncryptionCipherText,
+			&n.EncryptionApplied, &n.MarkupLanguage, &n.IsShared, &n.ShareID, &n.ConflictOriginalID,
+			&n.MasterKeyID, &n.UserData, &n.DeletedTime,
+		); err != nil {
+			return nil, false, err
+		}
+		n.Type_ = models.TypeNote
+		notes = append(notes, n)
+	}
+
+	hasMore := len(notes) > limit
+	if hasMore {
+		notes = notes[:limit]
+	}
+	return notes, hasMore, nil
+}
+
+// ListConflictNotes returns conflict notes (Joplin's virtual Conflicts
+// notebook: is_conflict = 1), newest first.
+func (db *DB) ListConflictNotes(limit, offset int) ([]*models.Note, bool, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `SELECT id, parent_id, title, body, created_time, updated_time,
+		is_conflict, latitude, longitude, altitude, author, source_url,
+		is_todo, todo_due, todo_completed, source, source_application, application_data,
+		"order", user_created_time, user_updated_time, encryption_cipher_text,
+		encryption_applied, markup_language, is_shared, share_id, conflict_original_id,
+		master_key_id, user_data, deleted_time
+		FROM notes WHERE is_conflict = 1 ORDER BY updated_time DESC LIMIT ? OFFSET ?`
+
+	rows, err := db.Query(query, limit+1, offset)
 	if err != nil {
 		return nil, false, err
 	}

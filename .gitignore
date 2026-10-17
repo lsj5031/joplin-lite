@@ -2,6 +2,9 @@
 /joplin-lite
 /joplin-lite.exe
 
+# scratch (local measurement builds)
+/tmp/
+
 # dependencies & build output
 web/node_modules/
 web/dist/

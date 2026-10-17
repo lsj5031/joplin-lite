@@ -111,6 +111,21 @@ func decryptItem(db *store.DB, svc *e2ee.Service, item store.EncryptedItem) erro
 		}
 		return saveDecryptedRaw(db, item.ID, plaintext, tag.UpdatedTime)
 
+	case models.TypeRevision:
+		// Note-history envelope: the plaintext carries the index fields
+		// (item_id, diffs) that were inside the cipher text.
+		rev := models.DeserializeRevision(plaintext)
+		if rev == nil {
+			return fmt.Errorf("cannot parse decrypted revision %s", item.ID)
+		}
+		rev.ID = item.ID
+		rev.EncryptionCipherText = ""
+		rev.EncryptionApplied = 0
+		if err := db.UpsertRevision(rev); err != nil {
+			return err
+		}
+		return saveDecryptedRaw(db, item.ID, plaintext, rev.UpdatedTime)
+
 	case models.TypeResource:
 		resource := models.DeserializeResource(plaintext)
 		resource.ID = item.ID
