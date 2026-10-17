@@ -88,7 +88,7 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 	if item.Type == 3 {
 		itemID, itemType := parseItemName(item.ItemName)
 		if itemID != "" {
-			return db.DeleteLocalItem(itemID, itemType)
+			return handleRemoteDelete(db, syncTarget, itemID, itemType)
 		}
 		return nil
 	}
@@ -108,7 +108,7 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 	if isResourceBlob(item.ItemName) {
 		resourceID := extractResourceID(item.ItemName)
 		if resourceID != "" {
-			return db.SaveResourceFile(resourceID, content)
+			return applyResourceBlob(db, syncTarget, resourceID, item.UpdatedTime, content)
 		}
 		return nil
 	}
@@ -124,11 +124,30 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if note.ID == "" {
 			return nil
 		}
-		if note.EncryptionApplied == 1 {
-			existing, err := db.GetNote(note.ID)
-			if err == nil && existing != nil && existing.EncryptionApplied == 0 {
-				slog.Debug("skipping encrypted server copy, local is already decrypted", "id", note.ID)
-				return db.UpsertSyncItem(note.ID, models.TypeNote, syncTarget)
+		existing, err := db.GetNote(note.ID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			si, err := db.GetSyncItem(note.ID, syncTarget)
+			if err != nil {
+				return err
+			}
+			if handled, err := keepDecryptedCopy(db, syncTarget, models.TypeNote, note.ID,
+				note.EncryptionApplied, existing.EncryptionApplied, note.UpdatedTime, existing.UpdatedTime, si); handled || err != nil {
+				return err
+			}
+			switch remoteDecision(si, existing.UpdatedTime, note.UpdatedTime, existing.IsConflict == 1) {
+			case pullStale:
+				slog.Debug("keeping local note; remote copy is not a newer revision", "id", note.ID)
+				return nil
+			case pullConflict:
+				if existing.IsConflict != 1 && noteMustHandleConflict(existing, note) {
+					if _, err := createNoteConflictCopy(db, existing, true); err != nil {
+						return fmt.Errorf("cannot keep conflict copy of note %s: %w", note.ID, err)
+					}
+					slog.Info("note conflict: local version kept as conflict note, remote is canonical", "id", note.ID)
+				}
 			}
 		}
 		if err := db.UpsertNote(note); err != nil {
@@ -144,11 +163,27 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if folder.ID == "" {
 			return nil
 		}
-		if folder.EncryptionApplied == 1 {
-			existing, err := db.GetFolder(folder.ID)
-			if err == nil && existing != nil && existing.EncryptionApplied == 0 {
-				slog.Debug("skipping encrypted server copy, local folder is already decrypted", "id", folder.ID)
-				return db.UpsertSyncItem(folder.ID, models.TypeFolder, syncTarget)
+		existing, err := db.GetFolder(folder.ID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			si, err := db.GetSyncItem(folder.ID, syncTarget)
+			if err != nil {
+				return err
+			}
+			if handled, err := keepDecryptedCopy(db, syncTarget, models.TypeFolder, folder.ID,
+				folder.EncryptionApplied, existing.EncryptionApplied, folder.UpdatedTime, existing.UpdatedTime, si); handled || err != nil {
+				return err
+			}
+			switch remoteDecision(si, existing.UpdatedTime, folder.UpdatedTime, false) {
+			case pullStale:
+				slog.Debug("keeping local folder; remote copy is not a newer revision", "id", folder.ID)
+				return nil
+			case pullConflict:
+				// Joplin's ItemConflict: folder metadata has no conflict copy,
+				// the remote version wins.
+				slog.Info("folder conflict: taking remote version", "id", folder.ID)
 			}
 		}
 		if err := db.UpsertFolder(folder); err != nil {
@@ -164,11 +199,27 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if tag.ID == "" {
 			return nil
 		}
-		if tag.EncryptionApplied == 1 {
-			existing, err := db.GetTag(tag.ID)
-			if err == nil && existing != nil && existing.EncryptionApplied == 0 {
-				slog.Debug("skipping encrypted server copy, local tag is already decrypted", "id", tag.ID)
-				return db.UpsertSyncItem(tag.ID, models.TypeTag, syncTarget)
+		existing, err := db.GetTag(tag.ID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			si, err := db.GetSyncItem(tag.ID, syncTarget)
+			if err != nil {
+				return err
+			}
+			if handled, err := keepDecryptedCopy(db, syncTarget, models.TypeTag, tag.ID,
+				tag.EncryptionApplied, existing.EncryptionApplied, tag.UpdatedTime, existing.UpdatedTime, si); handled || err != nil {
+				return err
+			}
+			switch remoteDecision(si, existing.UpdatedTime, tag.UpdatedTime, false) {
+			case pullStale:
+				slog.Debug("keeping local tag; remote copy is not a newer revision", "id", tag.ID)
+				return nil
+			case pullConflict:
+				// Joplin's ItemConflict: tag metadata has no conflict copy,
+				// the remote version wins.
+				slog.Info("tag conflict: taking remote version", "id", tag.ID)
 			}
 		}
 		if err := db.UpsertTag(tag); err != nil {
@@ -184,6 +235,18 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if nt.ID == "" {
 			return nil
 		}
+		var localUpdated int64
+		if err := db.QueryRow("SELECT updated_time FROM note_tags WHERE id = ?", nt.ID).Scan(&localUpdated); err == nil {
+			si, err := db.GetSyncItem(nt.ID, syncTarget)
+			if err != nil {
+				return err
+			}
+			if remoteDecision(si, localUpdated, nt.UpdatedTime, false) == pullStale {
+				slog.Debug("keeping local note_tag; remote copy is not a newer revision", "id", nt.ID)
+				return nil
+			}
+			// Joplin's ItemConflict: junction rows take the remote version.
+		}
 		if err := db.UpsertNoteTag(nt); err != nil {
 			return fmt.Errorf("cannot upsert note_tag %s: %w", nt.ID, err)
 		}
@@ -196,6 +259,28 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		resource := models.DeserializeResource(string(content))
 		if resource.ID == "" {
 			return nil
+		}
+		existing, err := db.GetResource(resource.ID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			si, err := db.GetSyncItem(resource.ID, syncTarget)
+			if err != nil {
+				return err
+			}
+			switch remoteDecision(si, existing.UpdatedTime, resource.UpdatedTime, false) {
+			case pullStale:
+				slog.Debug("keeping local resource; remote copy is not a newer revision", "id", resource.ID)
+				return nil
+			case pullConflict:
+				if resourceMustHandleConflict(existing, resource) {
+					if err := createResourceConflict(db, existing); err != nil {
+						return fmt.Errorf("cannot keep conflict copy of resource %s: %w", resource.ID, err)
+					}
+					slog.Info("resource conflict: remote version is canonical", "id", resource.ID)
+				}
+			}
 		}
 		if err := db.UpsertResource(resource); err != nil {
 			return fmt.Errorf("cannot upsert resource %s: %w", resource.ID, err)

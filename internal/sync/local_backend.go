@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -77,14 +78,19 @@ func (b *LocalFolderBackend) lockPath(l *Lock) string {
 
 // itemNameFromPath extracts the item name from a Joplin-Server-style content
 // path: /api/items/root:/<name>:/content. Names may contain "/" (the resource
-// blobs live under .resource/<id>).
+// blobs live under .resource/<id>) and arrive path-escaped like the S3
+// driver's keys — .resource%2F<id> — so they are unescaped here.
 func localItemName(path string) (string, error) {
 	const prefix = "/api/items/root:/"
 	const suffix = ":/content"
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		return "", fmt.Errorf("unsupported path %q", path)
 	}
-	return strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix), nil
+	name := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	if unescaped, err := url.PathUnescape(name); err == nil {
+		name = unescaped
+	}
+	return name, nil
 }
 
 func (b *LocalFolderBackend) Get(path string) ([]byte, error) {

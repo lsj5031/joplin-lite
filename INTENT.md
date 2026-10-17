@@ -108,6 +108,28 @@ Coexist with Joplin desktop/mobile on the same target.
   local version as a conflict note (`is_conflict=1`, `conflict_original_id`, `deleted_time` set
   on the note copy per Joplin convention) and take the remote version as canonical. Same
   treatment for resources.
+  **[update 2026-10-17 — done]** `internal/sync/conflicts.go`, wired into the pull path
+  (`delta.go`, `reconcile.go`) and tested through the local-folder rehearsal
+  (`internal/sync/conflicts_test.go`). Convention **[verified]** against `packages/lib`
+  (`Note.createConflictNote`, `Note.mustHandleConflict`, `Resource.createConflictResourceNote`/
+  `duplicateResource`, `Folder.markNotesAsConflict`, `handleConflictAction`): the conflict note
+  is a copy of the **local** note under a new id with `is_conflict=1`,
+  `conflict_original_id=<original id>` (empty when the remote copy was deleted), `is_shared`/
+  `share_id` cleared — **title and parent_id are NOT changed** (the Conflicts notebook is
+  virtual: fixed id `c04f1c7c04f1c7c04f1c7c04f1c7c04f` listing `is_conflict=1` notes), and
+  `deleted_time` is inherited like every other field. A note conflict is raised only when
+  title/body differ (or cipher text is involved — `Note.mustHandleConflict`); resources
+  conflict when `blob_updated_time` differs, resolved by duplicating the resource (blob
+  copied, share fields cleared) plus an `Attachment conflict: "…"` pointer note in a real
+  "Conflicts (attachments)`" folder. Remote delete + local changes → conflict copy first,
+  then delete; a folder deleted remotely while still holding notes marks them `is_conflict`.
+  Folders/tags/note-tags follow Joplin's `ItemConflict`: the remote version wins, no copy.
+  Staleness rules keep at-least-once redelivery from clobbering pending local edits (the
+  fork's overwrite-on-pull bug used to silently drop a local edit at the next sync's cursor
+  boundary). Residual edges: a blob-only delta window can yield two conflict copies (data is
+  never lost); items never synced to this target take the remote version (no sync point to
+  detect "changed since" — pinned by `delta_test`); Joplin's auto-merge (base_body/base_title
+  three-way merge) is not ported.
 - **Locks** on flat-file targets: file locks in `locks/` (format above); refresh at 60 s
   against a 3-min TTL; refuse to sync while an active EXCLUSIVE lock exists; while we hold a
   SYNC lock, refresh it during long syncs. On Joplin Server the fork's `/api/locks` client
@@ -291,7 +313,9 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
   paths (model: `s3_backend.go`); `SyncTarget() == 7`.
 - File-based locking (`locks/1_1_<clientId>.json`, 60 s refresh, EXCLUSIVE refusal),
   `info.json` read *and* write + version enforcement.
-- Conflict-note pass (never-lose-data), encrypted resource push (metadata + blob).
+- Conflict-note pass (never-lose-data) **[done 2026-10-17 — see the Conflicts section above;
+  the local-folder rehearsal covers the double-edit and remote-delete legs]**,
+  encrypted resource push (metadata + blob).
 - **Gate (the sync gate):** on a throwaway Dropbox app folder — edit here → sync → Joplin
   desktop shows it, and the reverse; double-edit yields a conflict note; deletion propagates
   both ways; a Joplin-desktop-held EXCLUSIVE lock blocks our sync.

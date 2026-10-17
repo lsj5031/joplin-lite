@@ -138,7 +138,7 @@ func PullMissingItems(backend SyncBackend, db *store.DB) error {
 			continue
 		}
 		slog.Info("removing stale local item not found on server", "item_id", si.ItemID, "item_type", si.ItemType)
-		if err := db.DeleteLocalItem(si.ItemID, si.ItemType); err != nil {
+		if err := handleRemoteDelete(db, syncTarget, si.ItemID, si.ItemType); err != nil {
 			slog.Error("cannot delete stale local item", "item_id", si.ItemID, "error", err)
 			continue
 		}
