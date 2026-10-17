@@ -22,13 +22,16 @@ import type { Note, Notebook, Tag } from './mock-data'
 
 const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {}
 const runtime = (
-  globalThis as { __GOJOPLIN__?: { base?: string; token?: string } }
+  globalThis as { __GOJOPLIN__?: { base?: string; token?: string; profile?: string } }
 ).__GOJOPLIN__
 const BASE: string = (runtime?.base ?? env.VITE_GOJOPLIN_URL ?? '').replace(/\/+$/, '')
 const TOKEN: string = runtime?.token ?? env.VITE_GOJOPLIN_TOKEN ?? ''
 
 /** isLive reports whether a backend URL is configured. */
 export const isLive = (): boolean => BASE !== ''
+
+// Native ports change between launches; recovery follows the database profile.
+export const recoveryKey = `joplin-lite:pending:${runtime?.profile ?? BASE}`
 
 /** LIST_PAGE is the list page size. Keyset paging means this is a ceiling on
  * rows shipped, not an offset the server must scan past. */
@@ -39,9 +42,14 @@ function withToken(path: string): string {
   return `${BASE}${path}${sep}token=${encodeURIComponent(TOKEN)}`
 }
 
+async function apiError(res: Response, request: string): Promise<never> {
+  const detail = await res.json().catch(() => null) as { error?: unknown } | null
+  throw new Error(`${request} → ${res.status}${typeof detail?.error === 'string' ? `: ${detail.error}` : ''}`)
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(withToken(path))
-  if (!res.ok) throw new Error(`GET ${path} → ${res.status}`)
+  if (!res.ok) return apiError(res, `GET ${path}`)
   return (await res.json()) as T
 }
 
@@ -51,7 +59,7 @@ async function apiSend<T>(method: string, path: string, body: unknown): Promise<
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`${method} ${path} → ${res.status}`)
+  if (!res.ok) return apiError(res, `${method} ${path}`)
   return (await res.json()) as T
 }
 
@@ -113,7 +121,15 @@ const toNote = (d: NoteDTO): Note => ({
   todoDue: d.todo_due ? d.todo_due : null,
   isConflict: !!d.is_conflict,
   conflictOriginalTitle: d.conflict_original_id ? 'conflicted copy' : null,
+  excerpt: noteExcerpt(d.body ?? ''),
 })
+
+/** Match the summary API's first-line, 140-rune excerpt. */
+export function noteExcerpt(body: string): string {
+  const line = body.trim().split(/[\r\n]/, 1)[0].replace(/^[#> \t]+/, '').replace(/\s+/g, ' ')
+  const chars = Array.from(line)
+  return chars.length > 140 ? chars.slice(0, 140).join('') + '…' : line
+}
 
 const toSummary = (d: SummaryDTO): Note => ({
   ...toNote({ ...d, body: '' }),
@@ -190,4 +206,32 @@ export async function createNoteApi(input: { title: string; body: string; notebo
 export async function updateNoteApi(id: string, patch: Record<string, unknown>): Promise<Note> {
   const d = await apiSend<NoteDTO>('PUT', `/notes/${id}`, patch)
   return toNote(d)
+}
+
+export async function deleteNoteApi(id: string): Promise<void> {
+  await apiSend('DELETE', `/notes/${encodeURIComponent(id)}`, undefined)
+}
+
+export async function createNotebookApi(title: string, parentId: string | null): Promise<Notebook> {
+  const d = await apiSend<FolderDTO>('POST', '/folders', { title, parent_id: parentId ?? '' })
+  return { id: d.id, title: d.title, parentId: d.parent_id || null }
+}
+
+export async function createTagApi(title: string): Promise<Tag> {
+  return apiSend<TagDTO>('POST', '/tags', { title })
+}
+
+export async function setNoteTagsApi(id: string, tagIds: string[]): Promise<void> {
+  const current = await fetchNoteTags(id)
+  // Add first: a failed attachment must not discard existing associations.
+  for (const tagId of new Set(tagIds)) {
+    if (!current.some((t) => t.id === tagId)) {
+      await apiSend('POST', `/tags/${encodeURIComponent(tagId)}/notes`, { id })
+    }
+  }
+  for (const tag of current) {
+    if (!tagIds.includes(tag.id)) {
+      await apiSend('DELETE', `/tags/${encodeURIComponent(tag.id)}/notes/${encodeURIComponent(id)}`, undefined)
+    }
+  }
 }

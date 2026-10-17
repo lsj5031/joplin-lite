@@ -1,386 +1,367 @@
-// Vault data source: the components consume notebooks/notes/tags through this
-// provider, so the shell stays agnostic of where the data comes from — the
-// synthetic prototype data (no backend configured) or the live gojoplin Data
-// API (VITE_GOJOPLIN_URL set).
-//
-// Live lists are summary rows: the provider holds only what the list renders,
-// pages them with the backend's keyset cursor, and asks the backend to filter
-// and search. A note body is fetched when the note is selected. Mutations are
-// optimistic locally and written through to the API when live.
+// Summary lists stay paginated; bodies are fetched only for selected notes.
 import * as React from 'react'
 import type { Note, Notebook, Tag } from './mock-data'
 import * as mock from './mock-data'
 import * as api from './api'
+export type { Note, Notebook, Tag } from './mock-data'
 
-export type VaultSource = 'mock' | 'loading' | 'live'
-
-export type ListFilter = {
-  query?: string
-  notebookId?: string | null
-  tagId?: string | null
-}
-
-type Vault = {
-  notebooks: Notebook[]
-  tags: Tag[]
-  notes: Note[]
-  source: VaultSource
-  error: string | null
-  hasMore: boolean
-  listLoading: boolean
-  /** countsExact is true only when the loaded rows are the whole library, so
-   * the sidebar must not present page-limited counts as totals. */
-  countsExact: boolean
-  activeNote: Note | null
-  activeLoading: boolean
+export type VaultSource = 'mock' | 'loading' | 'live' | 'error'
+export type SaveState = 'saved' | 'saving' | 'error'
+export type ListFilter = { query?: string; notebookId?: string | null; tagId?: string | null }
+export type Vault = {
+  notebooks: Notebook[]; tags: Tag[]; notes: Note[]
+  source: VaultSource; error: string | null; canWrite: boolean; saveState: SaveState
+  hasMore: boolean; listLoading: boolean; countsExact: boolean
+  activeNote: Note | null; activeLoading: boolean
   notebookTitle: (id: string) => string
   tagTitle: (id: string) => string
   noteCountByNotebook: (id: string) => number
-  /** loadList replaces the list with the first page for a filter. */
   loadList: (filter: ListFilter) => Promise<void>
-  /** loadMore appends the next keyset page. */
   loadMore: () => Promise<void>
-  /** selectNote loads the full note (body included) for the editor. */
   selectNote: (id: string) => Promise<void>
-  /** createNote returns the new note's id so the caller can select it. */
   createNote: (init?: Partial<Note>) => Promise<string>
   patchNote: (id: string, patch: Partial<Note>) => Promise<void>
   toggleTodo: (id: string) => Promise<void>
-  reload: () => void
+  deleteNote: (id: string) => Promise<void>
+  createNotebook: (title: string, parentId?: string | null) => Promise<string>
+  createTag: (title: string) => Promise<string>
+  setNoteTags: (id: string, tagIds: string[]) => Promise<void>
+  reload: () => Promise<void>
 }
-
+type Edit = Pick<Partial<Note>, 'title' | 'body' | 'notebookId' | 'isTodo' | 'todoCompleted' | 'todoDue'>
 const Ctx = React.createContext<Vault | null>(null)
-
 const newID = () =>
   (typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID().replace(/-/g, '')
     : Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2)
   ).slice(0, 32)
 
-const EMPTY_FILTER: ListFilter = { query: '', notebookId: null, tagId: null }
+function descendants(id: string, notebooks: Notebook[]): Set<string> {
+  const ids = new Set([id])
+  for (const parent of ids) {
+    for (const nb of notebooks) if (nb.parentId === parent) ids.add(nb.id)
+  }
+  return ids
+}
 
-/** mockPage keeps the synthetic prototype usable without a backend. */
-function mockPage(f: ListFilter): { notes: Note[]; hasMore: boolean; nextCursor: string } {
-  const q = (f.query ?? '').trim().toLowerCase()
-  let rows = mock.notes
-  const notebookId = f.notebookId
-  if (notebookId) {
-    const scope = [notebookId, ...mock.notebooks.filter((b) => b.parentId === notebookId).map((b) => b.id)]
-    rows = rows.filter((n) => scope.includes(n.notebookId))
-  }
-  const tagId = f.tagId
-  if (tagId) rows = rows.filter((n) => n.tagIds.includes(tagId))
-  if (q) {
-    rows = rows.filter((n) =>
-      [n.title, n.body, mock.notebookTitle(n.notebookId), ...n.tagIds.map(mock.tagTitle)]
-        .join(' ')
-        .toLowerCase()
-        .includes(q),
-    )
-  }
-  return { notes: rows, hasMore: false, nextCursor: '' }
+function applyEdit(note: Note, edit?: Partial<Note>): Note {
+  return edit ? { ...note, ...edit, ...(edit.body !== undefined ? { excerpt: api.noteExcerpt(edit.body) } : {}) } : note
 }
 
 export function VaultProvider({ children }: { children: React.ReactNode }) {
-  const [notebooks, setNotebooks] = React.useState<Notebook[]>(mock.notebooks)
-  const [tags, setTags] = React.useState<Tag[]>(mock.tags)
-  const [notes, setNotes] = React.useState<Note[]>(api.isLive() ? [] : mock.notes)
-  const [source, setSource] = React.useState<VaultSource>(api.isLive() ? 'loading' : 'mock')
+  const live = api.isLive()
+  const [notebooks, setNotebooks] = React.useState<Notebook[]>(live ? [] : mock.notebooks)
+  const [tags, setTags] = React.useState<Tag[]>(live ? [] : mock.tags)
+  const [notes, setNotes] = React.useState<Note[]>(live ? [] : mock.notes)
+  const [source, setSource] = React.useState<VaultSource>(live ? 'loading' : 'mock')
   const [error, setError] = React.useState<string | null>(null)
+  const [saveState, setSaveState] = React.useState<SaveState>('saved')
+  const [metaReady, setMetaReady] = React.useState(!live)
   const [hasMore, setHasMore] = React.useState(false)
   const [listLoading, setListLoading] = React.useState(false)
-  const [countsExact, setCountsExact] = React.useState(!api.isLive())
+  const [countsExact, setCountsExact] = React.useState(!live)
   const [activeNote, setActiveNote] = React.useState<Note | null>(null)
   const [activeLoading, setActiveLoading] = React.useState(false)
-
+  const active = React.useRef<Note | null>(null)
+  const rows = React.useRef(notes)
+  rows.current = notes
+  const demo = React.useRef(mock.notes)
+  const pending = React.useRef(new Map<string, Edit>())
+  const edits = React.useRef(new Map<string, Partial<Note>>())
+  const recoveryError = React.useRef<unknown>(null)
+  const timers = React.useRef(new Map<string, number>())
+  const flights = React.useRef(new Map<string, Promise<void>>())
   const seq = React.useRef(0)
+  const loadSeq = React.useRef(0)
   const nextCursor = React.useRef('')
-  const lastFilter = React.useRef<ListFilter>(EMPTY_FILTER)
-  const activeRef = React.useRef<Note | null>(null)
-  React.useEffect(() => {
-    activeRef.current = activeNote
-  }, [activeNote])
+  const lastFilter = React.useRef<ListFilter>({})
+  const canWrite = !live || (source === 'live' && metaReady && !listLoading)
+
+  const fail = React.useCallback((e: unknown) => {
+    setError(e instanceof Error ? e.message : String(e))
+    if (api.isLive()) setSource('error')
+  }, [])
+  const showActive = React.useCallback((note: Note | null) => {
+    active.current = note
+    setActiveNote(note)
+  }, [])
+  const persist = React.useCallback(() => {
+    // Synchronous before acknowledging an edit: unload handlers cannot reliably send HTTP.
+    localStorage.setItem(api.recoveryKey, JSON.stringify([...pending.current]))
+  }, [])
+  const overlay = React.useCallback((note: Note) => applyEdit(note, pending.current.get(note.id)), [])
+
+  const flushSave = React.useCallback((id: string): Promise<void> => {
+    window.clearTimeout(timers.current.get(id))
+    timers.current.delete(id)
+    const existing = flights.current.get(id)
+    if (existing) return existing
+    if (!pending.current.has(id)) return Promise.resolve()
+    const task = (async () => {
+      try {
+        while (pending.current.has(id)) {
+          const edit = pending.current.get(id)!
+          const body: Record<string, unknown> = {}
+          if (edit.body !== undefined) body.body = edit.body
+          if (edit.title !== undefined) body.title = edit.title
+          if (edit.notebookId !== undefined) body.parent_id = edit.notebookId
+          if (edit.isTodo !== undefined) body.is_todo = edit.isTodo ? 1 : 0
+          if (edit.todoCompleted !== undefined) body.todo_completed = edit.todoCompleted ? 1 : 0
+          if (edit.todoDue !== undefined) body.todo_due = edit.todoDue ?? 0
+          setSaveState((prev) => prev === 'error' ? prev : 'saving')
+          const saved = await api.updateNoteApi(id, body)
+          if (pending.current.get(id) === edit) {
+            pending.current.delete(id)
+            try { persist() } catch (e) { pending.current.set(id, edit); throw e }
+          }
+          // Preserve associations absent from PUT, and never replace newer local fields.
+          setNotes((prev) => prev.map((n) => n.id === id
+            ? { ...overlay({ ...saved, tagIds: n.tagIds }), body: '', } : n))
+          if (active.current?.id === id) {
+            showActive(overlay({ ...saved, tagIds: active.current.tagIds }))
+          }
+        }
+        if (!pending.current.size) setSaveState('saved')
+      } catch (e) {
+        setSaveState('error')
+        fail(e)
+        throw e
+      }
+    })().finally(() => { flights.current.delete(id) })
+    flights.current.set(id, task)
+    return task
+  }, [fail, overlay, persist, showActive])
 
   const loadMeta = React.useCallback(async () => {
-    if (!api.isLive()) {
-      setNotebooks(mock.notebooks)
-      setTags(mock.tags)
-      setSource('mock')
-      return
-    }
+    if (!api.isLive()) return
     const [nbs, tgs] = await Promise.all([api.fetchNotebooks(), api.fetchTags()])
     setNotebooks(nbs)
     setTags(tgs)
+    setMetaReady(true)
   }, [])
 
   const loadList = React.useCallback(async (filter: ListFilter) => {
     lastFilter.current = filter
     const my = ++seq.current
+    const before = new Map(edits.current)
+    const recovering = new Map(pending.current)
     setListLoading(true)
-    setError(null)
     try {
-      if (!api.isLive()) {
-        const page = mockPage(filter)
-        if (my !== seq.current) return
-        setNotes(page.notes)
-        if (activeRef.current && !page.notes.some((n) => n.id === activeRef.current!.id)) {
-          setActiveNote(null)
-        }
-        setHasMore(page.hasMore)
-        setCountsExact(true)
-        setSource('mock')
-        return
+      let page: { notes: Note[]; hasMore: boolean; nextCursor: string }
+      if (api.isLive()) page = await api.fetchNoteSummaries(filter)
+      else {
+        const scope = filter.notebookId ? descendants(filter.notebookId, notebooks) : null
+        const q = filter.query?.trim().toLowerCase()
+        page = { notes: demo.current.filter((n) => (!scope || scope.has(n.notebookId))
+          && (!filter.tagId || n.tagIds.includes(filter.tagId))
+          && (!q || [n.title, n.body, notebooks.find((b) => b.id === n.notebookId)?.title,
+            ...n.tagIds.map((id) => tags.find((t) => t.id === id)?.title)].join(' ').toLowerCase().includes(q))),
+          hasMore: false, nextCursor: '' }
       }
-      const page = await api.fetchNoteSummaries(filter)
       if (my !== seq.current) return
-      setNotes(page.notes)
-      if (activeRef.current && !page.notes.some((n) => n.id === activeRef.current!.id)) {
-        setActiveNote(null)
+      setNotes(page.notes.map((n) => overlay(applyEdit(n, recovering.has(n.id) || before.get(n.id) !== edits.current.get(n.id) ? edits.current.get(n.id) : undefined))))
+      if (active.current && !page.notes.some((n) => n.id === active.current!.id) && !pending.current.has(active.current.id)) {
+        ++loadSeq.current
+        showActive(null)
+        setActiveLoading(false)
       }
-      setHasMore(page.hasMore)
       nextCursor.current = page.nextCursor
+      setHasMore(page.hasMore)
       setCountsExact(!page.hasMore && !filter.query && !filter.notebookId && !filter.tagId)
-      setSource('live')
-    } catch (e) {
-      if (my !== seq.current) return
-      setError(e instanceof Error ? e.message : String(e))
-      // Keep the shell usable: fall back to the synthetic library.
-      const page = mockPage(filter)
-      setNotes(page.notes)
-      setHasMore(false)
-      setCountsExact(true)
-      setSource('mock')
-    } finally {
-      if (my === seq.current) setListLoading(false)
-    }
-  }, [])
+      // An independent metadata or save failure must not be hidden by a successful list.
+      setSource((prev) => prev === 'error' ? prev : api.isLive() ? 'live' : 'mock')
+    } catch (e) { if (my === seq.current) fail(e) }
+    finally { if (my === seq.current) setListLoading(false) }
+  }, [fail, notebooks, tags, overlay, showActive])
 
   const loadMore = React.useCallback(async () => {
-    if (!api.isLive() || !nextCursor.current) return
+    if (!api.isLive() || !nextCursor.current || listLoading) return
     const my = seq.current
     setListLoading(true)
     try {
       const page = await api.fetchNoteSummaries({ ...lastFilter.current, cursor: nextCursor.current })
       if (my !== seq.current) return
-      setNotes((prev) => [...prev, ...page.notes])
-      setHasMore(page.hasMore)
+      setNotes((prev) => [...prev, ...page.notes.filter((n) => !prev.some((p) => p.id === n.id)).map(overlay)])
       nextCursor.current = page.nextCursor
-      setCountsExact((prev) => prev && !page.hasMore)
-    } catch (e) {
-      if (my !== seq.current) return
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      if (my === seq.current) setListLoading(false)
-    }
-  }, [])
-
-  // Body writes are debounced: a keystroke must not become one PUT of the
-  // whole note body. The optimistic state updates immediately; the network
-  // write is coalesced and flushed when the note changes or the editor closes.
-  const pendingSave = React.useRef(new Map<string, { timer: number; patch: Record<string, unknown> }>())
-  const sendPatch = React.useCallback(async (id: string, body: Record<string, unknown>) => {
-    try {
-      const saved = await api.updateNoteApi(id, body)
-      // Do not let a slow response clobber newer local keystrokes.
-      setNotes((prev) =>
-        prev.map((n) => {
-          if (n.id !== id) return n
-          const keepBody = n.body !== saved.body
-          return { ...n, ...saved, body: keepBody ? n.body : '', excerpt: n.excerpt }
-        }),
-      )
-      setActiveNote((prev) => {
-        if (!prev || prev.id !== id) return prev
-        if (prev.body !== saved.body) return { ...prev, updatedTime: saved.updatedTime }
-        return { ...saved, tagIds: prev.tagIds }
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }, [])
-
-  const flushSave = React.useCallback(
-    (id: string) => {
-      const pending = pendingSave.current.get(id)
-      if (!pending) return
-      window.clearTimeout(pending.timer)
-      pendingSave.current.delete(id)
-      void sendPatch(id, pending.patch)
-    },
-    [sendPatch],
-  )
-
-  const flushAllSaves = React.useCallback(() => {
-    for (const [id, pending] of pendingSave.current) {
-      window.clearTimeout(pending.timer)
-      pendingSave.current.delete(id)
-      void sendPatch(id, pending.patch)
-    }
-  }, [sendPatch])
-
-  // Never lose the last keystrokes when the editor goes away.
-  React.useEffect(() => () => flushAllSaves(), [flushAllSaves])
-
-  const loadSeq = React.useRef(0)
+      setHasMore(page.hasMore)
+    } catch (e) { if (my === seq.current) fail(e) }
+    finally { if (my === seq.current) setListLoading(false) }
+  }, [fail, listLoading, overlay])
 
   const selectNote = React.useCallback(async (id: string) => {
-    if (activeRef.current?.id === id) return
-    if (activeRef.current) flushSave(activeRef.current.id)
-    const summary = notes.find((n) => n.id === id) ?? null
+    if (active.current?.id === id) return
+    if (active.current) void flushSave(active.current.id).catch(() => {})
     const my = ++loadSeq.current
+    const before = edits.current.get(id)
+    const recovering = pending.current.has(id)
+    const summary = rows.current.find((n) => n.id === id) ?? null
+    showActive(summary ? overlay(summary) : null)
+    if (!api.isLive()) return
     setActiveLoading(true)
-    setActiveNote(summary)
-
-    if (!api.isLive()) {
-      setActiveLoading(false)
-      return
-    }
     try {
       const full = await api.fetchNote(id)
-      // A slower response for a note the user already navigated away from
-      // must not replace the current selection.
       if (my !== loadSeq.current) return
-      // The list row already knows this note's tags; the full note endpoint
-      // does not return them, so carry them over instead of a second call.
-      full.tagIds = summary?.tagIds ?? []
-      setActiveNote(full)
-    } catch (e) {
-      if (my !== loadSeq.current) return
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      if (my === loadSeq.current) setActiveLoading(false)
-    }
-  }, [notes, flushSave])
+      full.tagIds = active.current?.id === id ? active.current.tagIds : summary?.tagIds ?? []
+      showActive(overlay(applyEdit(full, recovering || before !== edits.current.get(id) ? edits.current.get(id) : undefined)))
+    } catch (e) { if (my === loadSeq.current) fail(e) }
+    finally { if (my === loadSeq.current) setActiveLoading(false) }
+  }, [fail, flushSave, overlay, showActive])
 
   React.useEffect(() => {
-    void loadMeta().catch((e) => {
-      setError(e instanceof Error ? e.message : String(e))
-      setSource('mock')
-    })
-  }, [loadMeta])
-
-  const notebookTitle = React.useCallback(
-    (id: string) => notebooks.find((n) => n.id === id)?.title ?? '—',
-    [notebooks],
-  )
-  const tagTitle = React.useCallback((id: string) => tags.find((t) => t.id === id)?.title ?? id, [tags])
-  const noteCountByNotebook = React.useCallback(
-    (id: string) => {
-      const children = notebooks.filter((n) => n.parentId === id).map((n) => n.id)
-      const ids = [id, ...children]
-      return notes.filter((n) => ids.includes(n.notebookId)).length
-    },
-    [notebooks, notes],
-  )
-
-  const createNote = React.useCallback(
-    async (init?: Partial<Note>): Promise<string> => {
-      const now = Date.now()
-      const fresh: Note = {
-        id: newID(),
-        title: init?.title ?? 'Untitled note',
-        body: init?.body ?? '# Untitled note\n\n',
-        notebookId: init?.notebookId ?? '',
-        tagIds: [],
-        createdTime: now,
-        updatedTime: now,
-        isTodo: false,
-        todoCompleted: false,
-        todoDue: null,
-        isConflict: false,
-        conflictOriginalTitle: null,
-        excerpt: '',
-      }
-      setNotes((prev) => [fresh, ...prev])
-      setActiveNote(fresh)
-      if (source === 'live') {
-        try {
-          const saved = await api.createNoteApi({
-            title: fresh.title,
-            body: fresh.body,
-            notebookId: fresh.notebookId,
-          })
-          setNotes((prev) => prev.map((n) => (n.id === fresh.id ? { ...saved, excerpt: fresh.excerpt } : n)))
-          setActiveNote(saved)
-          return saved.id
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e))
+    if (!api.isLive()) return
+    try {
+      const stored = localStorage.getItem(api.recoveryKey)
+      if (stored) {
+        const entries: unknown = JSON.parse(stored)
+        const fields: Record<string, string> = { title: 'string', body: 'string', notebookId: 'string', isTodo: 'boolean', todoCompleted: 'boolean', todoDue: 'number' }
+        if (!Array.isArray(entries) || entries.some((entry) => !Array.isArray(entry)
+          || typeof entry[0] !== 'string' || !entry[1] || typeof entry[1] !== 'object'
+          || Object.entries(entry[1]).some(([key, value]) => !(key in fields)
+            || (typeof value !== fields[key] && !(key === 'todoDue' && value === null))))) {
+          throw new Error('Pending-edit recovery data is invalid; preserve local storage before resetting it.')
         }
+        pending.current = new Map(entries as [string, Edit][])
+        edits.current = new Map(pending.current)
+        if (pending.current.size) setSaveState('saving')
       }
-      return fresh.id
-    },
-    [source],
-  )
+      void Promise.all([...pending.current.keys()].map(flushSave)).catch(() => {})
+    } catch (e) { recoveryError.current = e; setSaveState('error'); fail(e) }
+    void loadMeta().catch(fail)
+    const online = () => { for (const id of pending.current.keys()) void flushSave(id).catch(() => {}) }
+    window.addEventListener('online', online)
+    return () => {
+      window.removeEventListener('online', online)
+      for (const timer of timers.current.values()) window.clearTimeout(timer)
+    }
+  }, [fail, flushSave, loadMeta])
 
-  const patchNote = React.useCallback(
-    async (id: string, patch: Partial<Note>) => {
-      const now = Date.now()
-      setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch, updatedTime: now } : n)))
-      setActiveNote((prev) => (prev && prev.id === id ? { ...prev, ...patch, updatedTime: now } : prev))
-      if (source !== 'live') return
-
-      const body: Record<string, unknown> = {}
-      if (patch.title !== undefined) body.title = patch.title
-      if (patch.body !== undefined) body.body = patch.body
-      if (patch.isTodo !== undefined) body.is_todo = patch.isTodo ? 1 : 0
-      if (patch.todoCompleted !== undefined) body.todo_completed = patch.todoCompleted ? 1 : 0
-
-      // Body-only edits are the typing path: coalesce them. Any other edit
-      // flushes a pending body write first so the server sees them in order.
-      const bodyOnly = patch.body !== undefined && Object.keys(body).length === 1
-      if (bodyOnly) {
-        const pending = pendingSave.current.get(id)
-        if (pending) window.clearTimeout(pending.timer)
-        const timer = window.setTimeout(() => {
-          pendingSave.current.delete(id)
-          void sendPatch(id, body)
-        }, 600)
-        pendingSave.current.set(id, { timer, patch: body })
-        return
+  function requireWrite() {
+    if (!canWrite) throw new Error('Local API unavailable or loading. Retry before making changes.')
+  }
+  async function mutate<T>(action: () => Promise<T>): Promise<T> {
+    requireWrite()
+    try { return await action() } catch (e) { fail(e); throw e }
+  }
+  async function patchNote(id: string, patch: Partial<Note>) {
+    requireWrite()
+    const edit: Edit = {}
+    for (const key of ['body', 'title', 'notebookId', 'isTodo', 'todoCompleted', 'todoDue'] as const) {
+      if (patch[key] !== undefined) Object.assign(edit, { [key]: patch[key] })
+    }
+    if (!Object.keys(edit).length) return
+    if (live) {
+      const prior = pending.current.get(id)
+      pending.current.set(id, { ...prior, ...edit })
+      try { persist() } catch (e) {
+        if (prior) pending.current.set(id, prior); else pending.current.delete(id)
+        setSaveState('error'); fail(e); throw e
       }
-      flushSave(id)
-      await sendPatch(id, body)
-    },
-    [source, sendPatch, flushSave],
-  )
-
-  const toggleTodo = React.useCallback(
-    async (id: string) => {
-      const n = notes.find((x) => x.id === id) ?? activeRef.current
-      await patchNote(id, { todoCompleted: !n?.todoCompleted })
-    },
-    [notes, patchNote],
-  )
-
-  const reload = React.useCallback(() => {
-    flushAllSaves()
-    void loadMeta().catch((e) => setError(e instanceof Error ? e.message : String(e)))
-    void loadList(lastFilter.current)
-  }, [loadMeta, loadList, flushAllSaves])
+      setSaveState((prev) => prev === 'error' ? prev : 'saving')
+    }
+    edits.current.set(id, { ...edits.current.get(id), ...edit })
+    const update = (n: Note) => n.id === id ? { ...applyEdit(n, edit), updatedTime: Date.now() } : n
+    setNotes((prev) => prev.map(update))
+    if (active.current) showActive(update(active.current))
+    if (!live) { demo.current = demo.current.map(update); return }
+    window.clearTimeout(timers.current.get(id))
+    if (Object.keys(edit).length === 1 && edit.body !== undefined) {
+      timers.current.set(id, window.setTimeout(() => { void flushSave(id).catch(() => {}) }, 600))
+    } else await flushSave(id)
+  }
+  async function createNote(init?: Partial<Note>): Promise<string> {
+    return mutate(async () => {
+      const fresh: Note = { id: newID(), title: init?.title ?? 'Untitled note', body: init?.body ?? '# Untitled note\n\n',
+        notebookId: init?.notebookId ?? '', tagIds: [], createdTime: Date.now(), updatedTime: Date.now(),
+        isTodo: false, todoCompleted: false, todoDue: null, isConflict: false, conflictOriginalTitle: null }
+      const saved = live ? await api.createNoteApi(fresh) : fresh
+      saved.excerpt = api.noteExcerpt(saved.body)
+      ++loadSeq.current
+      ++seq.current
+      setListLoading(false)
+      setActiveLoading(false)
+      setNotes((prev) => [saved, ...prev])
+      if (!live) demo.current = [saved, ...demo.current]
+      showActive(saved)
+      return saved.id
+    })
+  }
+  async function deleteNote(id: string) {
+    await mutate(async () => {
+      if (live) { await flushSave(id); await api.deleteNoteApi(id) }
+      ++seq.current
+      setListLoading(false)
+      setNotes((prev) => prev.filter((n) => n.id !== id))
+      if (!live) demo.current = demo.current.filter((n) => n.id !== id)
+      if (active.current?.id === id) { ++loadSeq.current; showActive(null); setActiveLoading(false) }
+      edits.current.delete(id)
+    })
+  }
+  async function createNotebook(title: string, parentId: string | null = null) {
+    return mutate(async () => {
+      const nb = live ? await api.createNotebookApi(title, parentId) : { id: newID(), title, parentId }
+      setNotebooks((prev) => [...prev, nb])
+      return nb.id
+    })
+  }
+  async function createTag(title: string) {
+    return mutate(async () => {
+      const tag = live ? await api.createTagApi(title) : { id: newID(), title }
+      setTags((prev) => [...prev, tag])
+      return tag.id
+    })
+  }
+  async function setNoteTags(id: string, tagIds: string[]) {
+    await mutate(async () => {
+      try {
+        if (live) await api.setNoteTagsApi(id, tagIds)
+      } catch (e) {
+        // Multiple API routes are not transactional: show actual partial results on failure.
+        try {
+          const actual = await api.fetchNoteTags(id)
+          updateTags(actual.map((t) => t.id))
+        } catch { /* Keep existing associations until the connection can be retried. */ }
+        throw e
+      }
+      updateTags([...new Set(tagIds)])
+    })
+    function updateTags(ids: string[]) {
+      edits.current.set(id, { ...edits.current.get(id), tagIds: ids })
+      const update = (n: Note) => n.id === id ? { ...n, tagIds: ids } : n
+      setNotes((prev) => prev.map(update))
+      if (active.current) showActive(update(active.current))
+      if (!live) demo.current = demo.current.map(update)
+    }
+  }
+  const reload = React.useCallback(async () => {
+    setSource(api.isLive() ? 'loading' : 'mock')
+    setError(null)
+    try {
+      if (recoveryError.current) throw recoveryError.current
+      await Promise.all([...pending.current.keys()].map(flushSave))
+      await loadMeta()
+      await loadList(lastFilter.current)
+      const id = active.current?.id
+      if (id && api.isLive()) {
+        const my = ++loadSeq.current
+        const before = edits.current.get(id)
+        setActiveLoading(true)
+        try {
+          const full = await api.fetchNote(id)
+          if (my === loadSeq.current) showActive(overlay(applyEdit({ ...full, tagIds: active.current?.tagIds ?? [] },
+            before !== edits.current.get(id) ? edits.current.get(id) : undefined)))
+        } finally { if (my === loadSeq.current) setActiveLoading(false) }
+      }
+    } catch (e) { fail(e) }
+  }, [fail, flushSave, loadList, loadMeta, overlay, showActive])
 
   const value: Vault = {
-    notebooks,
-    tags,
-    notes,
-    source,
-    error,
-    hasMore,
-    listLoading,
-    countsExact,
-    activeNote,
-    activeLoading,
-    notebookTitle,
-    tagTitle,
-    noteCountByNotebook,
-    loadList,
-    loadMore,
-    selectNote,
-    createNote,
-    patchNote,
-    toggleTodo,
-    reload,
+    notebooks, tags, notes, source, error, canWrite, saveState, hasMore, listLoading, countsExact, activeNote, activeLoading,
+    notebookTitle: (id) => notebooks.find((n) => n.id === id)?.title ?? '—',
+    tagTitle: (id) => tags.find((t) => t.id === id)?.title ?? id,
+    noteCountByNotebook: (id) => { const ids = descendants(id, notebooks); return notes.filter((n) => ids.has(n.notebookId)).length },
+    loadList, loadMore, selectNote, createNote, patchNote, deleteNote, createNotebook, createTag, setNoteTags, reload,
+    toggleTodo: async (id) => { const n = rows.current.find((n) => n.id === id) ?? active.current; await patchNote(id, { todoCompleted: !n?.todoCompleted }) },
   }
-
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

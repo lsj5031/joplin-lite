@@ -33,13 +33,13 @@ func get(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder,
 }
 
 func TestFrontendInjectsRuntimeConfig(t *testing.T) {
-	h := testHandler(t, runtimeConfig{Base: "http://127.0.0.1:4123", Token: "secret", Shell: "desktop"})
+	h := testHandler(t, runtimeConfig{Base: "http://127.0.0.1:4123", Token: "secret", Shell: "desktop", Profile: "profile-a"})
 
 	rec, body := get(t, h, "/")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if !strings.Contains(body, `window.__GOJOPLIN__={"base":"http://127.0.0.1:4123","token":"secret","shell":"desktop"}`) {
+	if !strings.Contains(body, `window.__GOJOPLIN__={"base":"http://127.0.0.1:4123","token":"secret","shell":"desktop","profile":"profile-a"}`) {
 		t.Fatalf("runtime config not injected before </head>:\n%s", body)
 	}
 	if strings.Index(body, "__GOJOPLIN__") > strings.Index(body, "</head>") {

@@ -4,16 +4,18 @@
   --font-sans: 'Overpass', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Overpass Mono', ui-monospace, 'Cascadia Mono', monospace;
 
-  /* Grounds */
-  --color-paper: #f6f4ee;
-  --color-paper-2: #ede8dd;
-  --color-paper-3: #fbfaf6;
+  --font-editorial: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+
+  /* Quiet Paper: warm grounds, blue ink, restrained accents. */
+  --color-paper: #f7f5f0;
+  --color-paper-2: #efede6;
+  --color-paper-3: #fffdf9;
 
   /* Ink */
-  --color-ink: #16283c;
-  --color-ink-soft: #4a5a6e;
-  --color-line: #d9d2c4;
-  --color-line-strong: #beb5a3;
+  --color-ink: #253344;
+  --color-ink-soft: #5f6975;
+  --color-line: #e3e0d8;
+  --color-line-strong: #c6c7c3;
 
   /* Chrome */
   --color-navy: #16283c;
@@ -22,8 +24,7 @@
   --color-navy-text: #a8b4c4;
   --color-navy-bright: #9cc1e8;
 
-  /* Transit line colors — each does a real job */
-  --color-route: #1d5fa8; /* primary / syncing */
+  --color-route: #294d78;
   --color-route-soft: #9cc1e8;
   --color-moss: #276b43; /* synced (text-safe) */
   --color-moss-bright: #3e9b63; /* synced (on navy / graphics) */
@@ -31,13 +32,32 @@
   --color-signal-bright: #e05a52;
   --color-amber: #8a5a12; /* degraded / locked (text-safe) */
   --color-amber-bright: #c9821b;
-  --color-violet: #6b4e9b; /* selection */
-  --color-violet-soft: rgba(107, 78, 155, 0.1);
+  --color-violet: #294d78;
+  --color-violet-soft: #e3eaf2;
 }
 
 @layer base {
   html {
     height: 100%;
+    color-scheme: light;
+  }
+
+  html[data-theme='dark'] {
+    color-scheme: dark;
+    --color-paper: #1b2128;
+    --color-paper-2: #171c23;
+    --color-paper-3: #202730;
+    --color-ink: #e8e6df;
+    --color-ink-soft: #a5aeb9;
+    --color-line: #323b46;
+    --color-line-strong: #515d6b;
+    --color-route: #a9c9ef;
+    --color-violet: #a9c9ef;
+    --color-violet-soft: #2c3c50;
+    --color-moss: #99c6a6;
+    --color-signal: #ffaaa2;
+    --color-signal-bright: #ffaaa2;
+    --color-amber: #eac58b;
   }
 
   body {
@@ -52,7 +72,7 @@
   }
 
   ::selection {
-    background: rgba(107, 78, 155, 0.22);
+    background: var(--color-violet-soft);
     color: var(--color-ink);
   }
 
@@ -60,6 +80,10 @@
   input {
     caret-color: var(--color-violet);
   }
+
+  button:not(:disabled), select { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  input[type='checkbox'] { accent-color: var(--color-route); }
 
   :focus-visible {
     outline: 2px solid var(--color-route);
@@ -102,24 +126,76 @@
   text-transform: uppercase;
 }
 
+.app-header {
+  min-height: 80px;
+  background: var(--color-paper-3);
+}
+
+.brand-name { font-size: 20px; letter-spacing: -0.8px; font-weight: 600; }
+.brand-name span { font-weight: 400; color: var(--color-ink-soft); }
+.brand-caption { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-ink-soft); }
+.primary-button { background: #294d78; color: #fffdf9; }
+.primary-button:hover { background: #365e8c; }
+.workspace-grid { grid-template-columns: 1fr; }
+.library-nav { padding: 24px 16px; }
+.library-nav > div + div { padding-top: 20px; border-top: 1px solid var(--color-line); }
+.library-nav button { min-height: 38px; }
+.library-nav button[aria-current='page'] { box-shadow: inset 3px 0 var(--color-route); }
+.note-list > header { min-height: 76px; padding: 16px 22px; }
+.note-list > ul { padding: 8px; }
+.note-row { position: relative; min-height: 102px; border-radius: 8px; padding: 15px 14px; }
+.note-row[aria-current='true'] { background: var(--color-violet-soft); }
+.note-row time { font-size: 10px; color: var(--color-ink-soft); white-space: nowrap; }
+.editor-header { padding: 30px 40px 0; }
+.editor-title { font-family: var(--font-editorial); font-size: 30px; font-weight: 500; letter-spacing: -0.7px; }
+.editor-tabs { margin-top: 14px; padding-bottom: 12px; align-items: center; }
+.editor-tabs > button[aria-pressed] { border: 0; border-radius: 6px; padding: 8px 16px; min-height: 40px; }
+.editor-tabs > button[aria-pressed='true'] { background: var(--color-paper-2); color: var(--color-ink); }
+.editor-body { padding: 38px max(40px, calc((100% - 720px) / 2)); }
+textarea.editor-body { font-size: 14px; line-height: 1.9; min-height: 0; }
+.workspace-status { min-height: 36px; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-moss); flex-shrink: 0; }
+.empty-mark { width: 60px; height: 60px; padding: 12px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-paper-3); }
+dialog { border: 1px solid var(--color-line); }
+dialog::backdrop { backdrop-filter: blur(3px); }
+
+@media (min-width: 1024px) {
+  .workspace-grid { grid-template-columns: 224px 320px minmax(0, 1fr); }
+}
+@media (min-width: 1440px) {
+  .workspace-grid { grid-template-columns: 240px 350px minmax(0, 1fr); }
+}
+@media (max-width: 1023px) {
+  .editor-header { padding: 20px 24px 0; }
+  .editor-title { font-size: 25px; }
+  .editor-body { padding: 28px 24px; }
+  .note-list > header { min-height: 68px; }
+  .note-row { min-height: 108px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
 /* note body — rendered markdown */
 .prose-note {
   max-width: 72ch;
-  font-size: 15px;
-  line-height: 1.65;
+  font-size: 16px;
+  line-height: 1.85;
   color: var(--color-ink);
 }
 
 .prose-note h1 {
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  font-family: var(--font-editorial);
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
   margin: 32px 0 12px;
 }
 
 .prose-note h2 {
-  font-size: 18px;
-  font-weight: 600;
+  font-family: var(--font-editorial);
+  font-size: 25px;
+  font-weight: 500;
   letter-spacing: -0.01em;
   margin: 28px 0 10px;
 }
@@ -182,7 +258,7 @@
 
 .prose-note pre {
   background: var(--color-navy);
-  color: var(--color-paper);
+  color: #f7f5f0;
   border-radius: 6px;
   padding: 12px 14px;
   overflow-x: auto;
@@ -228,43 +304,4 @@
 .prose-note th {
   background: var(--color-paper-2);
   font-weight: 600;
-}
-
-/* ---- the sync line (signature move) ---- */
-
-@keyframes service-run {
-  from {
-    stroke-dashoffset: 28;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-.service-run {
-  stroke-dasharray: 10 18;
-  animation: service-run 1.15s linear infinite;
-}
-
-@keyframes station-pulse {
-  0%,
-  100% {
-    r: 4;
-    opacity: 1;
-  }
-  50% {
-    r: 5.5;
-    opacity: 0.75;
-  }
-}
-
-.station-pulse {
-  animation: station-pulse 1.6s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .service-run,
-  .station-pulse {
-    animation: none;
-  }
 }

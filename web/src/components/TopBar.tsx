@@ -1,140 +1,115 @@
 import * as React from 'react'
-import type { SyncState, VaultState } from '~/lib/mock-data'
-import { IconGear, IconLock, IconPlus, IconSearch, IconSync, IconUnlock, Mark } from './icons'
+import type { VaultSource } from '~/lib/vault'
+import { IconGear, IconPlus, IconSearch, IconSync, Mark } from './icons'
 
 type Props = {
   query: string
   onQuery: (q: string) => void
-  syncState: SyncState
-  onSync: () => void
-  vault: VaultState
-  onToggleVault: () => void
+  source: VaultSource
+  canWrite: boolean
+  reloading: boolean
+  onReload: () => void
   onNewNote: () => void
-  onPreviewState: (s: SyncState) => void
   searchRef: React.RefObject<HTMLInputElement | null>
 }
 
-export function TopBar({ query, onQuery, syncState, onSync, vault, onToggleVault, onNewNote, onPreviewState, searchRef }: Props) {
-  const [settingsOpen, setSettingsOpen] = React.useState(false)
+export function TopBar({ query, onQuery, source, canWrite, reloading, onReload, onNewNote, searchRef }: Props) {
+  const settingsRef = React.useRef<HTMLDialogElement>(null)
+  const [theme, setTheme] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    try {
+      const value = localStorage.getItem('joplin-lite:theme')
+      setTheme(value === 'light' || value === 'dark' ? value : 'system')
+    } catch { setTheme('system') }
+  }, [])
+  React.useEffect(() => {
+    if (!theme) return
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme }
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [theme])
+  const chooseTheme = (value: string) => {
+    try { localStorage.setItem('joplin-lite:theme', value) } catch { /* Still apply it for this session. */ }
+    setTheme(value)
+  }
+  const demo = source === 'mock'
+  const reloadLabel = source === 'error' ? 'Retry connection' : 'Reload local database'
 
   return (
-    <header className="relative z-20 flex items-center gap-2 border-b border-navy-line bg-navy px-3 py-2 text-paper md:gap-3 md:px-4">
-      <div className="flex shrink-0 items-center gap-2.5">
-        <Mark className="text-route-soft" />
-        <span className="hidden text-[15px] font-semibold tracking-[-0.01em] sm:inline">joplin-lite</span>
+    <header className="app-header flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-4 py-3 text-ink md:flex-nowrap md:gap-6 md:px-6">
+      <div className="flex shrink-0 items-center gap-3 md:w-[194px]">
+        <Mark />
+        <div><div className="brand-name">joplin<span>-lite</span></div><p className="brand-caption">A little room to think</p></div>
       </div>
 
-      <button
-        type="button"
-        onClick={onToggleVault}
-        className={`flex shrink-0 items-center gap-1.5 rounded-[6px] border px-2.5 py-1 text-[12px] font-medium transition-colors duration-100 ${
-          vault === 'unlocked'
-            ? 'border-moss-bright/50 text-moss-bright hover:bg-moss-bright/10'
-            : 'border-amber-bright/50 text-amber-bright hover:bg-amber-bright/10'
-        }`}
-        aria-label={vault === 'unlocked' ? 'Vault unlocked — click to lock' : 'Vault locked — click to unlock'}
-      >
-        {vault === 'unlocked' ? <IconUnlock width={14} height={14} /> : <IconLock width={14} height={14} />}
-        <span className="hidden md:inline">{vault === 'unlocked' ? 'Vault unlocked' : 'Vault locked'}</span>
-      </button>
-
-      <div className="relative mx-auto w-full max-w-[420px]">
-        <IconSearch width={15} height={15} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-navy-text" />
+      <div className="relative order-last w-full md:order-none md:mx-auto md:max-w-[420px] md:min-w-0">
+        <IconSearch width={17} height={17} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-soft" />
         <input
           ref={searchRef}
           type="search"
           value={query}
           onChange={(e) => onQuery(e.target.value)}
-          placeholder="Search notes, notebooks, tags…"
+          placeholder="Search all notes…"
           aria-label="Search notes"
-          className="h-8 w-full rounded-[6px] border border-navy-line bg-navy-2 pr-14 pl-8 text-[13px] text-paper placeholder:text-navy-text focus:border-route focus:outline-none"
+          className="h-11 w-full rounded-lg border border-line bg-paper pr-8 pl-10 text-[16px] text-ink placeholder:text-ink-soft focus:border-route focus:outline-none md:pr-14 md:text-[13px]"
         />
-        <kbd className="mono pointer-events-none absolute top-1/2 right-2 hidden -translate-y-1/2 rounded-[4px] border border-navy-line px-1.5 py-0.5 text-[10px] text-navy-text md:block">
-          ⌘K
-        </kbd>
+        <kbd className="mono pointer-events-none absolute top-1/2 right-3 hidden -translate-y-1/2 rounded border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-soft md:block">⌘K</kbd>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 md:ml-0">
         <button
           type="button"
           onClick={onNewNote}
-          className="flex items-center gap-1.5 rounded-[6px] bg-route px-2.5 py-1.5 text-[12.5px] font-semibold text-paper transition-opacity duration-100 hover:opacity-90"
+          disabled={!canWrite}
+          aria-label="New note"
+          className="primary-button flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-3.5 text-[13px] font-semibold disabled:opacity-50"
         >
-          <IconPlus width={14} height={14} />
+          <IconPlus width={16} height={16} />
           <span className="hidden sm:inline">New note</span>
         </button>
         <button
           type="button"
-          onClick={onSync}
-          disabled={syncState === 'syncing'}
-          className="flex items-center gap-1.5 rounded-[6px] border border-navy-line px-2.5 py-1.5 text-[12.5px] font-medium text-paper transition-colors duration-100 hover:bg-navy-line/60 disabled:opacity-50"
+          onClick={onReload}
+          disabled={reloading || source === 'loading'}
+          aria-label={reloading ? 'Reloading local database' : reloadLabel}
+          title={reloadLabel}
+          className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-3 text-[13px] font-medium text-ink-soft hover:bg-paper-2 disabled:opacity-50"
         >
-          <IconSync width={14} height={14} className={syncState === 'syncing' ? 'animate-spin' : undefined} />
-          <span className="hidden sm:inline">{syncState === 'syncing' ? 'Syncing…' : 'Sync now'}</span>
+          <IconSync width={16} height={16} className={reloading ? 'animate-spin' : undefined} />
+          <span className="hidden sm:inline">{reloading ? 'Reloading…' : source === 'error' ? 'Retry' : 'Reload'}</span>
         </button>
         <button
           type="button"
-          onClick={() => setSettingsOpen((v) => !v)}
-          aria-expanded={settingsOpen}
+          onClick={() => settingsRef.current?.showModal()}
+          aria-haspopup="dialog"
           aria-label="Settings"
-          className={`rounded-[6px] border p-1.5 transition-colors duration-100 ${
-            settingsOpen ? 'border-route-soft bg-navy-line' : 'border-navy-line hover:bg-navy-line/60'
-          }`}
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-ink-soft hover:bg-paper-2"
         >
-          <IconGear width={15} height={15} />
+          <IconGear width={17} height={17} />
         </button>
       </div>
 
-      {settingsOpen && (
-        <div className="absolute top-[calc(100%+6px)] right-4 w-[300px] rounded-[8px] bg-paper-3 p-4 text-ink shadow-[0_6px_18px_rgba(15,29,45,0.22)]">
-          <h2 className="label pb-2 text-ink-soft">Settings</h2>
-          <dl className="space-y-2.5 text-[12.5px]">
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-ink-soft">Sync target</dt>
-              <dd className="mono text-right text-ink">Dropbox · target 7 · App folder</dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-ink-soft">Master password</dt>
-              <dd className="mono text-ink">set · never leaves this device</dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-ink-soft">Clipper</dt>
-              <dd className="mono text-right text-ink">41184 · token f3c1…9ab</dd>
-            </div>
-          </dl>
-          <p className="mt-3 border-t border-line pt-2.5 text-[11.5px] text-ink-soft">
-            The clipper server cannot run beside Joplin desktop: if port 41184 is taken, joplin-lite
-            reports it instead of starting.
-          </p>
-          <h2 className="label mt-3 border-t border-line pt-2.5 text-ink-soft">Prototype state preview</h2>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {(
-              [
-                ['synced', 'Synced'],
-                ['syncing', 'Syncing'],
-                ['conflict', 'Conflict'],
-                ['locked', 'Target locked'],
-                ['error', 'Sync error'],
-              ] as const
-            ).map(([state, label]) => (
-              <button
-                key={state}
-                type="button"
-                onClick={() => onPreviewState(state)}
-                aria-pressed={syncState === state}
-                className={`rounded-[6px] border px-2 py-0.5 text-[11px] font-medium transition-colors duration-100 ${
-                  syncState === state
-                    ? 'border-violet bg-violet-soft text-ink'
-                    : 'border-line-strong bg-paper text-ink hover:bg-paper-2'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="mono mt-2 text-[10px] text-ink-soft">Prototype — values are synthetic.</p>
+      <dialog ref={settingsRef} aria-labelledby="settings-title" className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-[420px] overflow-y-auto rounded-2xl bg-paper-3 p-6 text-ink shadow-xl backdrop:bg-navy/40">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 id="settings-title" className="text-[16px] font-semibold">Settings</h2>
+          <button type="button" autoFocus onClick={() => settingsRef.current?.close()} className="min-h-11 rounded-[6px] border border-line-strong px-3 text-[13px]">Close</button>
         </div>
-      )}
+        <p className="text-[14px] font-medium">{demo ? 'Demo workspace' : 'Local workspace'}</p>
+        <p className="mt-2 text-[13px] text-ink-soft">
+          {demo ? 'Synthetic notes for trying the interface. Changes are temporary and are not saved to a database.' : 'Notes are saved to your local database. Remote sync and password protection are not controlled by this interface.'}
+        </p>
+        <fieldset className="mt-6 border-t border-line pt-4">
+          <legend className="text-[13px] font-semibold">Appearance</legend>
+          <div className="mt-2 flex gap-2">
+            {['light', 'dark', 'system'].map(value => <button key={value} type="button" aria-pressed={theme === value} onClick={() => chooseTheme(value)} className={`min-h-11 flex-1 rounded-lg border px-3 text-[13px] ${theme === value ? 'border-route bg-violet-soft text-ink' : 'border-line text-ink-soft'}`}>{value.charAt(0).toUpperCase() + value.slice(1)}</button>)}
+          </div>
+        </fieldset>
+        <p className="mt-3 border-t border-line pt-3 text-[13px] text-ink-soft">
+          {source === 'error' ? 'The local database is unavailable. Close Settings and retry the connection.' : source === 'loading' ? 'Connecting to the local database…' : demo ? 'Connect a local backend to use your own notes.' : 'Use Reload to refresh notes and retry failed local saves. Backend configuration is managed outside this interface.'}
+        </p>
+      </dialog>
     </header>
   )
 }

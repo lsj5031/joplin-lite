@@ -26,10 +26,6 @@ export type Note = {
   conflictOriginalTitle: string | null
 }
 
-export type SyncState = 'synced' | 'syncing' | 'conflict' | 'error' | 'locked'
-
-export type VaultState = 'unlocked' | 'locked'
-
 /** SYNTHETIC prototype data — replace with MyGO bindings output in M4. */
 export const notebooks: Notebook[] = [
   { id: 'nb-inbox', title: 'Inbox', parentId: null },

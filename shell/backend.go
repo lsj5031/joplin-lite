@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -29,6 +31,7 @@ type backend struct {
 	cancel  context.CancelFunc
 	baseURL string
 	token   string
+	profile string
 	once    sync.Once
 }
 
@@ -39,6 +42,10 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	}
 	if dataDir != "" {
 		cfg.DataDir = dataDir
+	}
+	cfg.DataDir, err = filepath.Abs(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve database directory: %w", err)
 	}
 
 	// The desktop UI is the owner of the database, so the window grants write
@@ -118,6 +125,7 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 		cancel:  cancel,
 		baseURL: base,
 		token:   token,
+		profile: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.DataDir))),
 	}, nil
 }
 

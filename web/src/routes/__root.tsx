@@ -13,14 +13,17 @@ export const Route = createRootRoute({
       { title: 'joplin-lite' },
       {
         name: 'description',
-        content: 'joplin-lite — a lightweight Joplin peer: notes, E2EE, sync, and the web clipper.',
+        content: 'A little room to think. A lightweight workspace for your local notes and Markdown.',
       },
     ],
     links: [
       { rel: 'stylesheet', href: '/fonts/fonts.css' },
       { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' },
       { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32x32.png' },
       { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/favicon-16x16.png' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      { rel: 'manifest', href: '/site.webmanifest' },
     ],
   }),
   errorComponent: DefaultCatchBoundary,
@@ -32,6 +35,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: `try{let t=localStorage.getItem('joplin-lite:theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch{document.documentElement.dataset.theme='light'}` }} />
         <HeadContent />
       </head>
       <body className="min-h-dvh bg-paper text-ink antialiased">

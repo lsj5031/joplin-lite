@@ -119,11 +119,9 @@ export const IconClipper = (p: React.SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
-/** joplin-lite mark: a station on a route line. */
+/** The folded-page mark, shared with the favicon and platform icons. */
 export const Mark = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 40 24" width="40" height="24" fill="none" aria-hidden {...p}>
-    <path d="M2 12h11M27 12h11" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-    <circle cx="20" cy="12" r="6.5" fill="none" stroke="currentColor" strokeWidth="3" />
-    <circle cx="20" cy="12" r="2.25" fill="currentColor" />
+  <svg width="36" height="36" viewBox="0 0 64 64" fill="none" aria-hidden {...p}>
+    <image href="/logo.svg" width="64" height="64" />
   </svg>
 )

@@ -15,9 +15,10 @@ import (
 // API listens on a port chosen at launch, so baking it into the build would
 // make the binary depend on the machine's free ports.
 type runtimeConfig struct {
-	Base  string `json:"base"`
-	Token string `json:"token"`
-	Shell string `json:"shell"`
+	Base    string `json:"base"`
+	Token   string `json:"token"`
+	Shell   string `json:"shell"`
+	Profile string `json:"profile"`
 }
 
 func newFrontendHandler(fsys fs.FS, rt runtimeConfig) (http.Handler, error) {

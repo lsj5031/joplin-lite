@@ -65,10 +65,18 @@ func main() {
 			be.Close()
 			return
 		}
+		icon, err := fs.ReadFile(sub, "android-chrome-512x512.png")
+		if err == nil {
+			err = mygo.App.Dock.SetIcon(icon)
+		}
+		if err != nil {
+			slog.Warn("cannot set application icon", "error", err)
+		}
 		handler, err := newFrontendHandler(sub, runtimeConfig{
-			Base:  be.baseURL,
-			Token: be.token,
-			Shell: "desktop",
+			Base:    be.baseURL,
+			Token:   be.token,
+			Shell:   "desktop",
+			Profile: be.profile,
 		})
 		if err != nil {
 			showFatal(err)

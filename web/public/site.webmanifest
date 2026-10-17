@@ -1,6 +1,8 @@
 {
-  "name": "",
-  "short_name": "",
+  "name": "joplin-lite",
+  "short_name": "joplin-lite",
+  "description": "A little room to think. Your local notes and Markdown.",
+  "start_url": "/",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
@@ -13,7 +15,7 @@
       "type": "image/png"
     }
   ],
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
+  "theme_color": "#294d78",
+  "background_color": "#fffdf9",
   "display": "standalone"
 }
