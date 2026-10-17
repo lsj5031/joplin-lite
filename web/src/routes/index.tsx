@@ -16,8 +16,18 @@ import { EditorPane } from '~/components/EditorPane'
 import { StatusStrip } from '~/components/StatusStrip'
 
 export const Route = createFileRoute('/')({
+  // Prototype state preview via URL (?state=conflict|locked|...) — same states
+  // as the settings popover buttons, made addressable so docs screenshots are
+  // reproducible.
+  validateSearch: (search: Record<string, unknown>): { state?: string } => ({
+    state: typeof search.state === 'string' ? search.state : undefined,
+  }),
   component: Workspace,
 })
+
+const SYNC_STATES = ['synced', 'syncing', 'conflict', 'error', 'locked'] as const
+const isSyncState = (s: string | undefined): s is SyncState =>
+  SYNC_STATES.includes(s as SyncState)
 
 function Workspace() {
   const [notes, setNotes] = React.useState<Note[]>(mockNotes)
@@ -26,7 +36,10 @@ function Workspace() {
   const [notebookFilter, setNotebookFilter] = React.useState<string | null>(null)
   const [tagFilter, setTagFilter] = React.useState<string | null>(null)
   const [vault, setVault] = React.useState<VaultState>('unlocked')
-  const [syncState, setSyncState] = React.useState<SyncState>('synced')
+  const { state: previewState } = Route.useSearch()
+  const [syncState, setSyncState] = React.useState<SyncState>(
+    isSyncState(previewState) ? previewState : 'synced',
+  )
   const [lastSync, setLastSync] = React.useState<number>(Date.now() - 4 * 60_000)
   const [navOpen, setNavOpen] = React.useState(false)
   const [mobileView, setMobileView] = React.useState<'list' | 'edit'>('list')

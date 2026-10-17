@@ -22,6 +22,14 @@ sync line stays full width.
 
 ![joplin-lite workspace — narrow](docs/screenshots/workspace-narrow.png)
 
+Sync states are addressable for captures (`/?state=conflict`, `/?state=locked` — the same
+states as the settings popover preview). A conflict marks the target station with a
+disruption cross; a lock held by another client turns the line amber and refuses the sync.
+
+![Conflict state — disruption cross on the sync line](docs/screenshots/state-conflict.png)
+
+![Target locked state — sync refused](docs/screenshots/state-locked.png)
+
 The prototype runs on synthetic mock data (labeled as such in the status strip). The
 footprint figures in the strip are the measured M0 numbers — 24.4 MB binary,
 67–94 ms startup (windows/amd64, 2026-10-17) — not placeholders.

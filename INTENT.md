@@ -99,6 +99,9 @@ Coexist with Joplin desktop/mobile on the same target.
   `PullMissingItems` reconciliation + pruning covers missed changes.
 - **Deletion propagation** through `deleted_items` (fork already does this: push deletes the
   remote object; remote deletions found by the listing diff are pruned locally).
+  **[update 2026-10-17]** Local deletes now queue `deleted_items` from the store's delete paths
+  (one row per synced target, incl. note-tag links and resource blob cleanup on push);
+  both-ways propagation on a real target stays an M2 gate item.
 - **Conflicts**: both sides changed → Joplin-style conflict note (never lose data).
   **[gap]** the fork currently overwrites local changes on pull. Required behavior: when a
   pulled remote item differs and the local copy was modified since its `sync_time`, keep the
@@ -276,7 +279,10 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 **M1 — E2EE interop**
 - Load master keys from the master password (existing `DecryptPulledItems` flow), verify the
   KeyV1 checksum path end-to-end against my real target.
-- Add additive `EncryptFile` (FileV1) with round-trip tests.
+- Add additive `EncryptFile` (FileV1) with round-trip tests. **[done 2026-10-17]**
+  `internal/e2ee/encrypt_file.go` + `encrypt_file_test.go` — FileV1 round-trips against the
+  frozen `DecryptFile` (128 KiB chunks per Joplin's `chunkSize(FileV1)`, Joplin salt shape);
+  `e2ee.go` untouched.
 - **Gate (the E2EE gate):** decrypt a real note from my target, edit, re-encrypt here,
   sync, and **Joplin desktop decrypts and displays it**. Repeat for a resource blob.
 
