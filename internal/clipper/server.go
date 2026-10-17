@@ -2,6 +2,7 @@ package clipper
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -22,18 +23,24 @@ type Server struct {
 	router   chi.Router
 	syncer   SyncTrigger
 	policy   *Policy // nil = all mutations denied
+
+	authMu sync.Mutex
+	auth   *authState // current pairing request (Joplin keeps one)
+	prompt AuthPrompt // nil = pairing waits for ResolveAuth (never auto-accepted)
 }
 
 // NewServer creates a new clipper server.
 // syncer may be nil if no sync trigger is desired.
 // policy may be nil; if nil, all mutations are denied (read-only).
-func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, policy *Policy) *Server {
+// prompt may be nil; if nil, pairing requests wait for ResolveAuth.
+func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, policy *Policy, prompt AuthPrompt) *Server {
 	s := &Server{
 		db:       db,
 		apiToken: apiToken,
 		apiKey:   apiKey,
 		syncer:   syncer,
 		policy:   policy,
+		prompt:   prompt,
 	}
 	s.buildRouter()
 	return s
@@ -65,13 +72,14 @@ func (s *Server) buildRouter() {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
-	// Bearer auth (skips /health so probes need no token)
-	r.Use(s.bearerAuth)
+	// Token auth per Joplin's checkToken_ (open ping/pairing, ?token= query)
+	r.Use(s.apiAuth)
 
 	// Routes (all middlewares above)
 	r.Get("/health", s.handleHealth)
 	r.Get("/ping", s.handlePing)
 	r.Post("/auth", s.handleAuth)
+	r.Get("/auth", s.handleAuthCheck) // no check/token params -> "Invalid request" (Joplin)
 	r.Get("/auth/check", s.handleAuthCheck)
 
 	// Notes
@@ -115,6 +123,13 @@ func (s *Server) buildRouter() {
 	// Events
 	r.Get("/events", s.handleListEvents)
 	r.Get("/events/{id}", s.handleGetEvent)
+
+	// Revisions (note history) — Joplin's route set has it; empty until we
+	// persist revisions (see revisions.go).
+	r.Get("/revisions", s.handleListRevisions)
+	r.Get("/revisions/{id}", s.handleGetRevision)
+	r.Put("/revisions/{id}", s.handleUpdateRevision)
+	r.Delete("/revisions/{id}", s.handleDeleteRevision)
 
 	s.router = r
 }

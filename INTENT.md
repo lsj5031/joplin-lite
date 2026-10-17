@@ -223,18 +223,38 @@ Clipper server compatible with the official Joplin Web Clipper:
   `/health` probe.
 - Auth handshake (spec: joplinapp.org/help/dev/spec/clipper_auth), **[verified]** exact shape:
   - `POST /auth` → `{"auth_token": "AUTH_TOKEN"}` (server generates and remembers it);
-  - app shows **Accept/Reject** (a real prompt — **[gap]** the fork auto-accepts in
-    `clipper/auth.go` and must not);
+  - app shows **Accept/Reject** (a real prompt — **[gap closed 2026-10-17]** `clipper/auth.go`
+    no longer auto-accepts: a pending request stays `waiting` until an `AuthPrompt` decides
+    (console y/N prompt in `serve` today; the M4 UI hooks `Server.ResolveAuth`/
+    `PendingAuth`));
   - `GET /auth/check?auth_token=…` → `{"status":"waiting"}` →
     `{"status":"accepted","token":"API_TOKEN"}` or `{"status":"rejected"}`;
-  - the API token is also copyable from settings (the second, documented auth path).
+  - the API token is also copyable from settings (the second, documented auth path) —
+    `serve` logs it at startup in the meantime.
+  **[verified 2026-10-17 against `routes/auth.ts` + `Api.ts` checkToken_]**: `GET
+  /auth/check?token=<x>` → `{"valid": true|false}` is a second mode; an unknown
+  `auth_token` is an error (we return 400 `Invalid auth token`); the Data API authenticates
+  with a **`?token=` query parameter** (not a header — our old Bearer-only gate would have
+  failed the extension) with an open whitelist (`GET ping`, `GET/POST auth`, `GET
+  auth/check`) — `GET /ping` had been wrongly locked; `Authorization: Bearer` is kept for
+  our own tooling. Pairing endpoints additionally reject **web-page Origins** (403,
+  `ClipperServer.ts` `isAllowedPairingOrigin`) — the extension's `chrome-extension://`
+  origin and headerless native clients pass.
 - The **Data API**: `/notes`, `/folders`, `/resources` (multipart), `/tags`, `/note_tags`,
-  `/search`, `/events`, `/revisions`. **[gap]** the fork has notes/folders/tags/resources/
-  search/events (and `/tags/{id}/notes`) but no `/revisions`; pin the exact route set the
-  extension calls against Joplin's `packages/lib/ClipperServer.ts` and match it.
+  `/search`, `/events`, `/revisions`. **[gap closed 2026-10-17]** route set pinned against
+  Joplin's `Api.ts` (`resourceNameToRoute_`: ping, notes, folders, tags, resources,
+  master_keys, search, auth, events, revisions, services, mcp) and `/revisions` added.
+  **[limitation]** our `/revisions` serves an empty collection: joplin-lite persists no
+  revisions yet (the sync pass records pulled revision items as synced without content, and
+  the store has no revisions table) — the route exists so the API matches Joplin's set.
+  `nounce` request-dedup and `master_keys`/`services` routes are not ported (the extension
+  doesn't need them for clipping).
 - Permissive **CORS + preflight** (fork already does this via chi/cors).
 - **Cannot coexist with Joplin desktop on port 41184** — surface that clearly in the UI and
   logs (bind failure = explicit "Joplin desktop is using this port" message).
+  **[done 2026-10-17]** `clipper.Serve` maps an address-in-use bind failure to an explicit
+  "Joplin desktop is probably running there" error (tested, incl. the Windows WSAEADDRINUSE
+  wording).
 - After a clip lands, trigger sync (fork already wires `SyncTrigger`).
 
 ## What it is not (v1)
@@ -363,7 +383,10 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
 **M3 — clipper server**
 - Real auth handshake (POST /auth + Accept/Reject prompt + /auth/check polling), API token in
   settings, route set matched to Joplin's `ClipperServer.ts` incl. `/revisions`, explicit
-  port-collision messaging.
+  port-collision messaging. **[done 2026-10-17 — code complete, `internal/clipper/auth_test.go`
+  covers the pairing flow, token matrix, origin protection, /revisions and the collision
+  message; see the browser-extension section for the verified details]**. Remaining before
+  the gate: "API token in settings" is a console log line until the M4 settings UI exists.
 - **Gate (the clipper gate):** the official extension clips a page (simplified + full clip),
   the note lands with its resource, and it survives a sync round-trip into Joplin desktop.
 

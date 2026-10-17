@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -82,9 +85,10 @@ var serveCmd = &cobra.Command{
 		}()
 
 		policy := clipper.NewPolicy(cfg)
-		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, policy)
+		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, policy, consoleAuthPrompt{out: os.Stdout})
 		addr := cfg.ListenAddr()
 		slog.Info("starting clipper server", "addr", addr)
+		slog.Info("clipper API token (paste into the extension or settings)", "token", cfg.APIToken)
 
 		httpSrv := &http.Server{
 			Addr:    addr,
@@ -103,11 +107,30 @@ var serveCmd = &cobra.Command{
 			httpSrv.Shutdown(shutdownCtx)
 		}()
 
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := clipper.Serve(httpSrv); err != nil {
 			return err
 		}
 		return nil
 	},
+}
+
+// consoleAuthPrompt is the M3 Accept/Reject surface for clipper pairing
+// (Joplin shows a native dialog). The M4 UI replaces it via Server.ResolveAuth.
+type consoleAuthPrompt struct {
+	out io.Writer
+}
+
+func (p consoleAuthPrompt) PromptAuth(authToken string) bool {
+	fmt.Fprintf(p.out, "\nThe web clipper is asking to pair (auth token %s).\nAccept the clipper? [y/N]: ", authToken)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false // no stdin — reject rather than auto-accept
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
 }
 
 func init() {
