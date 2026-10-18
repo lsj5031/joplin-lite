@@ -1360,6 +1360,15 @@
       "notes": "",
       "fix": "Added shell/bundle.sh: a macOS 'tmp/Joplin Lite.app' (CFBundleIdentifier com.joplinlite.desktop + app-icon.icns). The runtime path is unchanged and verified: the shell reads android-chrome-512x512.png from the embedded bundle, calls Dock.SetIcon with it, logs a failure if any, and -smoke now records the result ('icon': 'ok')."
     },
+    "SYNC-23": {
+      "status": "pass",
+      "severity": "-",
+      "layer": "sync",
+      "evidence": "qa/joplin-server-e2e.sh against a real Joplin Server 3.x (Docker, SQLite): vault A pushes a notebook and note, a fresh vault B pulls the same title/body, and the E2EE leg seeds a master key, checks the server-side item is an encrypted envelope with no plaintext, decrypts it in vault B, and keeps it unreadable without the password",
+      "error": "",
+      "notes": "",
+      "fix": "internal/sync/client.go: Get reports a typed ErrNotFound, and syncinfo treats it as a missing info.json so a fresh Joplin Server target can push its first one without letting item/blob fetches overwrite local data; qa/joplin-server-e2e.sh now runs plaintext and E2EE round trips and checks the server-side envelope."
+    },
     "CLI-01": {
       "status": "pass",
       "severity": "-",
@@ -1488,13 +1497,6 @@
       "error": "",
       "notes": "",
       "fix": "config.yaml.example rewritten: tracing/metrics/rag disabled and annotated NOT YET IMPLEMENTED, and the unbuilt '13 MCP tools' claim removed, so copying it cannot enable a silent no-op."
-    },
-    "SYNC-23": {
-      "status": "blocked",
-      "severity": "medium",
-      "layer": "",
-      "evidence": "",
-      "error": "Needs a live Joplin Server; the HTTP client paths are shared with the tested Dropbox/S3 drivers."
     },
     "SYNC-24": {
       "status": "blocked",

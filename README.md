@@ -103,9 +103,9 @@ migration record and the measured numbers are in
   is in, and `shell/` is a native MyGO desktop app over it: notebooks, notes, tags,
   search, conflicts, sync state and a native settings dialog, with the clipper/Data API
   in the same process and no browser engine. Windows ships as a portable zip and macOS
-  as an `.app` bundle. Remaining for the gate: the real-target loops (extension pairing,
-  Dropbox/S3, Joplin Server) and a signed macOS bundle run. See
-  [INTENT.md](INTENT.md).
+  as an `.app` bundle. The Joplin Server round trip (plaintext and E2EE) passes against
+  a real server via `qa/joplin-server-e2e.sh`; remaining for the gate: extension pairing,
+  Dropbox/S3, and a signed macOS bundle run. See [INTENT.md](INTENT.md).
 
 ## License
 

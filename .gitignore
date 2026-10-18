@@ -12,6 +12,8 @@ web/.output/
 web/.vinxi/
 web/.tanstack/
 web/.vite/
+# stale generated SPA bundle; the desktop shell embeds no page
+shell/webdist/
 
 # env & logs
 .env

@@ -7,7 +7,7 @@ proves the round trip went through the server.
 
 Covers: `POST /api/sessions` login, `info.json` / master-key discovery, the
 delta and children listings, item upload (`/api/items/root:/<name>:/content`),
-the flat-file-style lock protocol, and (optionally) E2EE push and decrypt.
+the server lock protocol, and the E2EE push/decrypt path.
 
 ## 1. Start a throwaway server
 
@@ -42,23 +42,32 @@ bash qa/joplin-server-e2e.sh
 ```
 
 Add `GOJOPLIN_MASTER_PASSWORD='the master password'` to run the same round
-trip with E2EE: items on the server are then encrypted envelopes and vault B
-must decrypt them with that password.
+trip with E2EE. A fresh vault cannot create a master key (Joplin desktop makes
+it when encryption is first enabled), so the harness seeds vault A through
+`tools/e2eeseed` first. It then checks through the server API that `info.json`
+records E2EE and the note is an encrypted envelope, that vault B decrypts the
+same title and body, and that a third vault synced without the master password
+never exposes the body.
 
 The script prints `PASS` with the notebook and note IDs, or `FAIL` with the
-reason. Everything it writes is under `tmp/joplin-server-e2e`: the two vaults,
-their configs (`vault-a.yaml`, `vault-b.yaml`) and their logs
-(`vault-a-serve.log`, `vault-a-sync.log`, `vault-b-sync.log`,
-`vault-b-serve.log`). It leaves them there for inspection; delete the
-directory when done.
+reason. Everything it writes is under `tmp/joplin-server-e2e`: the vaults,
+their configs (`vault-a.yaml`, `vault-b.yaml`, plus `vault-c.yaml` under E2EE)
+and their logs (`vault-a-serve.log`, `vault-a-sync.log`, `vault-b-sync.log`,
+`vault-b-serve.log`, and the E2EE seed/`vault-c-*.log` files). It leaves them
+there for inspection; delete the directory when done.
 
 What it checks, in order:
 
 1. `GET /api/ping` answers — the URL really is a Joplin Server.
 2. Vault A's clipper API starts, a notebook and a note are created through
    `service/`, and a one-shot `sync` reports `sync completed successfully`.
-3. A fresh vault B syncs down without error.
-4. Vault B's API returns the note by search and its body matches what A wrote.
+3. With E2EE on, `info.json` and the server-side note are checked directly
+   through the server API: the note must carry `encryption_applied: 1` and no
+   plaintext title or body may appear.
+4. A fresh vault B syncs down without error.
+5. Vault B's API returns the note by search and its body matches what A wrote.
+6. With E2EE on, a third vault synced without the master password stores the
+   encrypted item but never exposes the plaintext body.
 
 ## 3. Optional interop check
 

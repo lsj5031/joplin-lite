@@ -3,6 +3,7 @@ package sync
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/lsj5031/joplin-lite/internal/config"
 )
+
+// ErrNotFound reports that an item does not exist on the Joplin Server target.
+// Callers that can tolerate absence (info.json on a fresh target) treat it as
+// empty; item and blob fetches must not, because empty content would clobber
+// local data.
+var ErrNotFound = errors.New("item not found")
 
 // Client is an HTTP client for the Joplin Server API.
 type Client struct {
@@ -104,6 +111,9 @@ func (c *Client) get(path string) ([]byte, error) {
 		return nil, err
 	}
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w: GET %s", ErrNotFound, path)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: status %d: %s", path, resp.StatusCode, string(data))
 	}

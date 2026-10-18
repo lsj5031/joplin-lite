@@ -167,6 +167,10 @@ MANUAL = {
     "SH-11": "real session: shell/bundle.sh builds 'tmp/Joplin Lite.app' (com.joplinlite.desktop, "
              "app-icon.icns); the app still applies the embedded 512px PNG with Dock.SetIcon and "
              "-smoke reports icon: 'ok' (no 'cannot set application icon' warning)",
+    "SYNC-23": "qa/joplin-server-e2e.sh against a real Joplin Server 3.x (Docker, SQLite): vault A "
+               "pushes a notebook and note, a fresh vault B pulls the same title/body, and the E2EE leg "
+               "seeds a master key, checks the server-side item is an encrypted envelope with no "
+               "plaintext, decrypts it in vault B, and keeps it unreadable without the password",
 }
 
 

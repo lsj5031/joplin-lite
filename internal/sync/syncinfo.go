@@ -48,7 +48,7 @@ var ErrSyncTargetUnsupported = errors.New("sync target format is newer than this
 // version, and stores any master keys found in the local database.
 func PullSyncInfo(backend SyncBackend, db *store.DB) error {
 	data, err := backend.Get(infoPath)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("cannot fetch info.json: %w", err)
 	}
 	if data == nil || len(data) == 0 {
@@ -104,7 +104,10 @@ func PullSyncInfo(backend SyncBackend, db *store.DB) error {
 func PushSyncInfo(backend SyncBackend, db *store.DB) error {
 	remoteRaw, err := backend.Get(infoPath)
 	if err != nil {
-		return fmt.Errorf("cannot fetch info.json: %w", err)
+		if !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("cannot fetch info.json: %w", err)
+		}
+		remoteRaw = nil // fresh target: no info.json yet
 	}
 
 	merged := map[string]json.RawMessage{}

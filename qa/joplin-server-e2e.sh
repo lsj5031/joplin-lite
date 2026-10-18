@@ -36,6 +36,7 @@ USAGE
 fi
 
 export GOJOPLIN_USERNAME="$USERNAME" GOJOPLIN_PASSWORD="$PASSWORD"
+export GOJOPLIN_MASTER_PASSWORD="$MASTER_PASSWORD"
 
 # Absolute paths go into the config files, in the form the Go binary can read:
 # on Windows the shell's /t/... spelling would resolve against the current
@@ -46,14 +47,17 @@ if command -v cygpath >/dev/null 2>&1; then ROOT="$(cygpath -m "$ROOT")"; fi
 RUN="tmp/joplin-server-e2e"
 PORT_A=41821
 PORT_B=41822
+PORT_C=41823
 TOKEN_A="e2e-vault-a-token"
 TOKEN_B="e2e-vault-b-token"
+TOKEN_C="e2e-vault-c-token"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 TITLE="server round trip $STAMP"
 BODY="body from vault A $STAMP"
 EXE=""
 if [ "$(go env GOOS)" = "windows" ]; then EXE=".exe"; fi
 BIN="tmp/gojoplin-e2e$EXE"
+SEED="tmp/e2eeseed$EXE"
 PIDS=()
 
 cleanup() {
@@ -83,6 +87,10 @@ rm -rf "$RUN"
 mkdir -p "$RUN/vault-a" "$RUN/vault-b"
 go build -o "$BIN" .
 echo "built $BIN"
+if [ -n "$MASTER_PASSWORD" ]; then
+  go build -o "$SEED" ./tools/e2eeseed
+  echo "built $SEED"
+fi
 
 write_config() { # vault-dir, port, token, file
   cat > "$4" <<YAML
@@ -114,6 +122,9 @@ YAML
 }
 write_config vault-a "$PORT_A" "$TOKEN_A" "$RUN/vault-a.yaml"
 write_config vault-b "$PORT_B" "$TOKEN_B" "$RUN/vault-b.yaml"
+if [ -n "$MASTER_PASSWORD" ]; then
+  write_config vault-c "$PORT_C" "$TOKEN_C" "$RUN/vault-c.yaml"
+fi
 
 api() { # port, token, method, path, [json-body]
   local port="$1" token="$2" method="$3" path="$4" body="${5:-}"
@@ -125,8 +136,12 @@ api() { # port, token, method, path, [json-body]
   fi
 }
 
-start_serve() { # vault-dir, config, port, token, log
-  "$BIN" serve --config "$2" >"$5" 2>&1 &
+start_serve() { # vault-dir, config, port, token, log, [no-master-password]
+  if [ "${6:-}" = "no-master-password" ]; then
+    env -u GOJOPLIN_MASTER_PASSWORD "$BIN" serve --config "$2" >"$5" 2>&1 &
+  else
+    "$BIN" serve --config "$2" >"$5" 2>&1 &
+  fi
   PIDS+=("$!")
   local i
   for i in $(seq 1 60); do
@@ -143,7 +158,18 @@ stop_serve() {
   unset 'PIDS[${#PIDS[@]}-1]'
 }
 
-# 3. Vault A: create a notebook and a note through the clipper API, so the note
+# 3. E2EE needs a vault that already owns a master key (Joplin desktop creates
+# it when the user enables encryption; joplin-lite joins libraries rather than
+# creating keys). Seed vault A before anything starts, so its serve process
+# cannot push the note in the clear on a background sync.
+if [ -n "$MASTER_PASSWORD" ]; then
+  "$SEED" -data-dir "$RUN/vault-a" -password "$MASTER_PASSWORD" \
+    -title "seeded $STAMP" -body "seeded body $STAMP" -resource=false >"$RUN/seed.log" 2>&1 ||
+    fail "seeding vault A with an E2EE master key; see $RUN/seed.log"
+  echo "vault A seeded with an E2EE master key"
+fi
+
+# 4. Vault A: create a notebook and a note through the clipper API, so the note
 # goes through the same service/ path the app uses, then sync it up.
 start_serve "$RUN/vault-a" "$RUN/vault-a.yaml" "$PORT_A" "$TOKEN_A" "$RUN/vault-a-serve.log" ||
   fail "vault A's API did not come up; see $RUN/vault-a-serve.log"
@@ -159,7 +185,7 @@ note_id="$(printf '%s' "$note_json" | grep -o '"id":"[^"]*"' | head -1 | cut -d'
 echo "vault A created notebook $folder_id and note $note_id"
 stop_serve
 
-# 4. Push from A and pull into the fresh B, each as a one-shot sync so the
+# 5. Push from A and pull into the fresh B, each as a one-shot sync so the
 # result is deterministic rather than waiting for a background loop.
 "$BIN" sync --config "$RUN/vault-a.yaml" >"$RUN/vault-a-sync.log" 2>&1 ||
   fail "syncing vault A up; see $RUN/vault-a-sync.log"
@@ -167,11 +193,41 @@ grep -q "sync completed successfully" "$RUN/vault-a-sync.log" ||
   fail "vault A's sync did not report success; see $RUN/vault-a-sync.log"
 echo "vault A pushed to $URL"
 
+# With E2EE on, the server itself must hold an encrypted envelope: check the
+# item through the server API rather than trusting the local round trip (a
+# master password with no key would still push plaintext, and B would still
+# read it back).
+if [ -n "$MASTER_PASSWORD" ]; then
+  login="$(curl -fsS -m 10 -X POST "$URL/api/sessions" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" || true)"
+  sid="$(printf '%s' "$login" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+  [ -n "$sid" ] || fail "cannot log in to $URL to inspect the server items: $login"
+  info="$(curl -fsS -m 10 -H "X-API-AUTH: $sid" \
+    "$URL/api/items/root:/info.json:/content")" ||
+    fail "reading info.json from $URL"
+  case "$info" in
+    *'"e2ee"'*) ;;
+    *) fail "the server's info.json does not record e2ee: $info" ;;
+  esac
+  remote_note="$(curl -fsS -m 30 -H "X-API-AUTH: $sid" \
+    "$URL/api/items/root:/$note_id.md:/content")" ||
+    fail "reading the note back from $URL"
+  case "$remote_note" in
+    *"encryption_applied: 1"*) ;;
+    *) fail "the server stored the note unencrypted: $remote_note" ;;
+  esac
+  if printf '%s' "$remote_note" | grep -Fq "$TITLE" ||
+    printf '%s' "$remote_note" | grep -Fq "$BODY"; then
+    fail "plaintext leaked into the server-side note"
+  fi
+  echo "server holds the note as an encrypted envelope"
+fi
+
 "$BIN" sync --config "$RUN/vault-b.yaml" >"$RUN/vault-b-sync.log" 2>&1 ||
   fail "syncing vault B down; see $RUN/vault-b-sync.log"
 echo "vault B pulled from $URL"
 
-# 5. Read the note back through vault B's own API: same title, same body.
+# 6. Read the note back through vault B's own API: same title, same body.
 start_serve "$RUN/vault-b" "$RUN/vault-b.yaml" "$PORT_B" "$TOKEN_B" "$RUN/vault-b-serve.log" ||
   fail "vault B's API did not come up; see $RUN/vault-b-serve.log"
 query="$(printf '%s' "$TITLE" | sed 's/ /%20/g')"
@@ -189,6 +245,27 @@ case "$read_back" in
 esac
 stop_serve
 
+# A vault without the master password may store the encrypted note, but it must
+# never expose the body in the clear.
+if [ -n "$MASTER_PASSWORD" ]; then
+  env -u GOJOPLIN_MASTER_PASSWORD "$BIN" sync --config "$RUN/vault-c.yaml" \
+    >"$RUN/vault-c-sync.log" 2>&1 ||
+    fail "syncing vault C (no master password); see $RUN/vault-c-sync.log"
+  start_serve "$RUN/vault-c" "$RUN/vault-c.yaml" "$PORT_C" "$TOKEN_C" \
+    "$RUN/vault-c-serve.log" no-master-password ||
+    fail "vault C's API did not come up; see $RUN/vault-c-serve.log"
+  locked="$(api "$PORT_C" "$TOKEN_C" GET "/notes/$note_id?fields=body" 2>/dev/null || true)"
+  stop_serve
+  case "$locked" in
+    *"$BODY"*) fail "vault C read the body without the master password: $locked" ;;
+  esac
+  if [ -z "$locked" ]; then
+    echo "vault C: the encrypted note is not exposed without the master password"
+  else
+    echo "vault C: the note exists but stays encrypted"
+  fi
+fi
+
 cadence="plaintext"
 [ -n "$MASTER_PASSWORD" ] && cadence="E2EE"
 echo
@@ -196,4 +273,5 @@ echo "PASS: $TITLE round-tripped through $URL ($cadence)"
 echo "  notebook $folder_id, note $note_id"
 echo "  vault A: $RUN/vault-a (push log $RUN/vault-a-sync.log)"
 echo "  vault B: $RUN/vault-b (pull log $RUN/vault-b-sync.log)"
+[ -n "$MASTER_PASSWORD" ] && echo "  vault C (no password): $RUN/vault-c (sync log $RUN/vault-c-sync.log)"
 echo "Delete $RUN and the server-side account/data when you are done."

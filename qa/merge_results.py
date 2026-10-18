@@ -54,6 +54,10 @@ FIXES = {
     "SYNC-19": "Added internal/sync/engine_coalesce_test.go: a pass held in the backend refuses an "
                "overlapping Sync (try-lock, one lock acquisition) and the buffered trigger channel keeps "
                "only one pending signal.",
+    "SYNC-23": "internal/sync/client.go: Get reports a typed ErrNotFound, and syncinfo treats it as a "
+               "missing info.json so a fresh Joplin Server target can push its first one without letting "
+               "item/blob fetches overwrite local data; qa/joplin-server-e2e.sh now runs plaintext and "
+               "E2EE round trips and checks the server-side envelope.",
     "SH-04": "Added shell/backend_test.go: the in-process API is started and probed headlessly (no webview).",
     "SH-05": "Same test: a 48-hex ephemeral token is minted when none is configured, is not persisted, and a "
              "configured token is reused verbatim.",
@@ -73,7 +77,6 @@ FIXES = {
 }
 
 BLOCKED = {
-    "SYNC-23": "Needs a live Joplin Server; the HTTP client paths are shared with the tested Dropbox/S3 drivers.",
     "SYNC-24": "Real S3 backend needs -tags s3 and AWS credentials; the default stub compiles into the binary.",
     "CLI-13": "dropbox-auth needs an interactive OAuth redirect against Dropbox; the loopback flow is unit "
               "tested (TestDropboxOAuth_LoopbackFlow).",

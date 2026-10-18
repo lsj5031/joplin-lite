@@ -1,6 +1,6 @@
 # joplin-lite — feature QA report
 
-_Generated 2026-10-18. Human-readable companion to the canonical spreadsheet
+_Generated 2026-10-18; Joplin Server gate closed 2026-10-19. Human-readable companion to the canonical spreadsheet
 `qa/features.csv` (200 user stories) and the live dashboard at
 <http://127.0.0.1:8099/dashboard.html>._
 
@@ -33,25 +33,27 @@ Progress is streamed to `qa/activity.jsonl` and rendered live on the dashboard.
 |-------|--------:|-----:|--------:|-----:|
 | Workspace UI (`ui`) | 62 | **62** | 0 | 0 |
 | Data API (`api`) | 53 | **53** | 0 | 0 |
-| Sync engine (`sync`) | 24 | **22** | 2 | 0 |
+| Sync engine (`sync`) | 24 | **23** | 1 | 0 |
 | Storage & format (`store`) | 13 | **13** | 0 | 0 |
 | Service seam (`service`) | 5 | 5 | 0 | 0 |
 | CLI & config (`cli`) | 22 | 21 | 1 | 0 |
 | Desktop shell (`shell`) | 16 | **16** | 0 | 0 |
 | Observability & extras (`cli`) | 5 | 5 | 0 | 0 |
-| **Total** | **200** | **197** | **3** | **0** |
+| **Total** | **200** | **198** | **2** | **0** |
 
-* **197 verified passes** — 190 carry an automated test or suite; the seven
+* **198 verified passes** — 190 carry an automated test or suite; the seven
   desktop-shell stories (`SH-01`, `SH-06`, `SH-07`, `SH-09`, `SH-10`, `SH-11`,
-  `SH-12`) were verified on a real macOS session against the built binary and
-  record the probe as evidence (`qa/collect_go.py` → `MANUAL`).
-* **3 blocked** — not failures: `SYNC-23` and `SYNC-24` need a live third-party
-  sync target, and `CLI-13` needs an interactive Dropbox OAuth redirect. Each
-  has an explicit reason in the spreadsheet and §5.
+  `SH-12`) were verified on a real macOS session against the built binary, and
+  `SYNC-23` was verified against a real Joplin Server 3.x in Docker; all record
+  their evidence (`qa/collect_go.py` → `MANUAL`).
+* **2 blocked** — not failures: `SYNC-24` needs a live S3 bucket, and `CLI-13`
+  needs an interactive Dropbox OAuth redirect. Each has an explicit reason in
+  the spreadsheet and §5.
 * **0 failing** stories remain after the fixes in §4.
 
 Raw evidence: `qa/results-ui.json`, `qa/results-api.json`, `qa/results-go.json`,
-`qa/results-cli.json`, merged into `qa/results-all.json`.
+`qa/results-cli.json`, merged into `qa/results-all.json`. The Joplin Server pass
+is reproducible with `qa/joplin-server-e2e.sh` against a Docker server.
 
 `go test ./...` passes across all modules (plus `shell/`, a separate module),
 `go vet` is clean, and the previously flaky local-folder rehearsal now passes
@@ -209,6 +211,20 @@ directories under `qa/run/`.
     the shell reads `android-chrome-512x512.png` from the embedded bundle and
     calls `Dock.SetIcon`, logging any failure. `-smoke` now records the outcome,
     and a real session reports `"icon": "ok"` with no warning.
+26. **A fresh Joplin Server target failed on its first sync** — `SYNC-23`
+    _(high)_. The server answers GET for a missing `info.json` with 404, and
+    `Client.Get` returned that as an error, so `PushSyncInfo` refused before the
+    first push. `Client.Get` now returns a typed `ErrNotFound`, and only the
+    sync-info path treats it as an empty target (the local, Dropbox and S3
+    backends already return `nil, nil` for a missing object); item and blob
+    fetches keep failing rather than overwrite local data with empty bytes.
+    Covered by `TestClientGet_MissingItemReturnsNotFound` and
+    `TestPushSyncInfo_MissingRemoteIsCreated`. Running the new
+    `qa/joplin-server-e2e.sh` also exposed that its E2EE leg was only setting a
+    password with no master key, so it round-tripped plaintext; the harness now
+    seeds vault A with `tools/e2eeseed`, inspects the server-side envelope, and
+    checks a third passwordless vault. Both legs pass against Joplin Server
+    3.x in Docker (SQLite).
 
 ---
 
@@ -216,7 +232,6 @@ directories under `qa/run/`.
 
 | Stories | Why blocked |
 |---------|-------------|
-| `SYNC-23` | Needs a live Joplin Server; the HTTP paths are shared with the tested Dropbox/S3 drivers. |
 | `SYNC-24` | Real S3 needs `-tags s3` + AWS credentials; the default stub is what compiles in. |
 | `CLI-13` | `dropbox-auth` needs an interactive OAuth redirect; the loopback flow is unit-tested (`TestDropboxOAuth_LoopbackFlow`). |
 
