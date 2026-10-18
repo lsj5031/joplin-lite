@@ -40,6 +40,10 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil || !s.policy.CanWriteResources() {
+		writeError(w, http.StatusForbidden, "attachments are read-only: configure GOJOPLIN_MCP_ALLOW_FOLDERS to allow mutations")
+		return
+	}
 	// Support multipart upload
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		// Try JSON body
@@ -62,7 +66,10 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 	if props := r.FormValue("props"); props != "" {
 		json.Unmarshal([]byte(props), &resource)
 	}
-	resource.Title = r.FormValue("title")
+	// A form field overrides props; props.title is kept when only props is sent.
+	if title := r.FormValue("title"); title != "" {
+		resource.Title = title
+	}
 	if resource.Title == "" {
 		resource.Title = "Untitled"
 	}
@@ -104,6 +111,10 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateResource(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil || !s.policy.CanWriteResources() {
+		writeError(w, http.StatusForbidden, "attachments are read-only: configure GOJOPLIN_MCP_ALLOW_FOLDERS to allow mutations")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
 	existing, err := s.db.GetResource(id)
@@ -143,6 +154,10 @@ func (s *Server) handleUpdateResource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil || !s.policy.CanWriteResources() {
+		writeError(w, http.StatusForbidden, "attachments are read-only: configure GOJOPLIN_MCP_ALLOW_FOLDERS to allow mutations")
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if err := s.db.DeleteResource(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

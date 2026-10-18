@@ -62,25 +62,33 @@ func (db *DB) GetSyncItem(itemID string, syncTarget int) (*models.SyncItem, erro
 	return si, rows.Err()
 }
 
-// UpsertSyncItem records that an item has been synced.
+// UpsertSyncItem records that an item has been synced, using the current
+// wall-clock time as the sync point.
 func (db *DB) UpsertSyncItem(itemID string, itemType, syncTarget int) error {
-	return upsertSyncItemTx(db, itemID, itemType, syncTarget)
+	return upsertSyncItemTx(db, itemID, itemType, syncTarget, time.Now().UnixMilli())
 }
 
-func upsertSyncItemTx(ex execer, itemID string, itemType, syncTarget int) error {
-	now := time.Now().UnixMilli()
+// UpsertSyncItemAt records that the given revision of an item has been synced.
+// The sync point must be the item's updated_time, not the wall clock: push
+// selects rows with updated_time > sync_time, so a wall-clock sync point that
+// lands on (or after) a local edit's timestamp makes that edit invisible and
+// silently drops it.
+func (db *DB) UpsertSyncItemAt(itemID string, itemType, syncTarget int, syncTime int64) error {
+	return upsertSyncItemTx(db, itemID, itemType, syncTarget, syncTime)
+}
 
+func upsertSyncItemTx(ex execer, itemID string, itemType, syncTarget int, syncTime int64) error {
 	var one int
 	err := ex.QueryRow(`SELECT 1 FROM sync_items WHERE item_id = ? AND sync_target = ?`,
 		itemID, syncTarget).Scan(&one)
 	switch {
 	case err == nil:
 		_, err = ex.Exec(`UPDATE sync_items SET sync_time = ? WHERE item_id = ? AND sync_target = ?`,
-			now, itemID, syncTarget)
+			syncTime, itemID, syncTarget)
 	case err == sql.ErrNoRows:
 		_, err = ex.Exec(`INSERT INTO sync_items (sync_target, sync_time, item_type, item_id, sync_disabled, sync_disabled_reason, force_sync, item_location)
 			VALUES (?, ?, ?, ?, 0, '', 0, 0)`,
-			syncTarget, now, itemType, itemID)
+			syncTarget, syncTime, itemType, itemID)
 	}
 	return err
 }

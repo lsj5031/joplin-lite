@@ -159,7 +159,8 @@ func noteExcerpt(body string) string {
 	}
 	r := []rune(body)
 	if len(r) > maxRunes {
-		return string(r[:maxRunes]) + "…"
+		// Keep the whole excerpt inside the budget: 139 runes + ellipsis.
+		return string(r[:maxRunes-1]) + "…"
 	}
 	return body
 }

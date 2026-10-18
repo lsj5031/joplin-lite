@@ -42,7 +42,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	default: // "note" or empty defaults to note search
 		if p.Summary {
-			sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{Query: query}, p.Limit, p.Cursor)
+			sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{Query: query, IncludeConflicts: r.URL.Query().Get("include_conflicts") == "1"}, p.Limit, p.Cursor)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -55,7 +55,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		var hasMore bool
 		var err error
 
-		notes, hasMore, err = s.db.SearchNotes(query, p.Limit, p.offset())
+		notes, hasMore, err = s.db.SearchNotesFiltered(query, p.Limit, p.offset(), r.URL.Query().Get("include_conflicts") == "1")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

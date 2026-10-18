@@ -24,6 +24,8 @@ export type Note = {
   todoDue: number | null
   isConflict: boolean
   conflictOriginalTitle: string | null
+  /** For a conflict copy: the id of the note it was forked from, when known. */
+  conflictOriginalId?: string | null
 }
 
 /** SYNTHETIC prototype data — replace with MyGO bindings output in M4. */

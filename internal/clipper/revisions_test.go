@@ -148,3 +148,36 @@ func TestClipperRevisionsFieldsFilter(t *testing.T) {
 		}
 	}
 }
+
+// TestClipperRevisionRewriteRefused: history is immutable through the API.
+// PUT on an existing revision is rejected and the stored bytes are untouched;
+// PUT on an unknown id is a plain 404 (the route exists, it is not 405).
+func TestClipperRevisionRewriteRefused(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+	seedRevision(t, s)
+
+	before, err := s.db.GetRevision(testRevisionID)
+	if err != nil || before == nil {
+		t.Fatalf("seed revision not found: %v", err)
+	}
+
+	status, body := doReq(t, http.MethodPut, ts.URL+"/revisions/"+testRevisionID+"?token="+testAPIToken, nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("PUT /revisions/{id} = %d %s, want 400", status, body)
+	}
+
+	after, err := s.db.GetRevision(testRevisionID)
+	if err != nil || after == nil {
+		t.Fatalf("revision vanished after refused PUT: %v", err)
+	}
+	if after.EncryptionCipherText != before.EncryptionCipherText ||
+		after.ParentID != before.ParentID ||
+		after.ItemUpdatedTime != before.ItemUpdatedTime {
+		t.Fatalf("refused PUT still mutated the revision: %+v -> %+v", before, after)
+	}
+
+	status, _ = doReq(t, http.MethodPut, ts.URL+"/revisions/ffffffffffffffffffffffffffffffff?token="+testAPIToken, nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("PUT unknown revision = %d, want 404", status)
+	}
+}

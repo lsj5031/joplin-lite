@@ -117,7 +117,7 @@ func (s *Server) handleGetTagNotes(w http.ResponseWriter, r *http.Request) {
 	p := parsePagination(r)
 
 	if p.Summary {
-		sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{TagID: id}, p.Limit, p.Cursor)
+		sums, hasMore, next, err := s.db.ListNoteSummaries(store.NoteQuery{TagID: id, IncludeConflicts: r.URL.Query().Get("include_conflicts") == "1"}, p.Limit, p.Cursor)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -126,7 +126,7 @@ func (s *Server) handleGetTagNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notes, hasMore, err := s.db.GetNotesByTag(id, p.Limit, p.offset())
+	notes, hasMore, err := s.db.GetNotesByTagFiltered(id, p.Limit, p.offset(), r.URL.Query().Get("include_conflicts") == "1")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

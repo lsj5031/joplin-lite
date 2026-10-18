@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // TracingConfig holds OpenTelemetry tracing configuration.
@@ -26,10 +27,14 @@ type MetricsConfig struct {
 
 // ObservabilityConfig holds tracing and metrics configuration.
 // Loaded from environment variables; endpoint supports ${VAR} expansion.
+//
+// Tracing and Prometheus metrics are parsed and validated but not yet exported
+// at runtime, so they default to disabled and enabling them logs a warning
+// (see Config.UnsupportedSubsystems) rather than silently doing nothing.
 func DefaultObservability() ObservabilityConfig {
 	return ObservabilityConfig{
 		Tracing: TracingConfig{
-			Enabled:     true,
+			Enabled:     false,
 			Exporter:    "otlp",
 			Protocol:    "http",
 			Endpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
@@ -37,11 +42,31 @@ func DefaultObservability() ObservabilityConfig {
 			SampleRate:  1.0,
 		},
 		Metrics: MetricsConfig{
-			Enabled:        true,
+			Enabled:        false,
 			Exporter:       "prometheus",
 			PrometheusPort: 9091,
 		},
 	}
+}
+
+// UnsupportedSubsystems returns the settings that are enabled in the config but
+// have no runtime implementation yet. Callers should warn so a configured
+// subsystem is never a silent no-op.
+func (c *Config) UnsupportedSubsystems() []string {
+	var out []string
+	if c.Observability.Tracing.Enabled {
+		out = append(out, "observability.tracing")
+	}
+	if c.Observability.Metrics.Enabled {
+		out = append(out, "observability.metrics")
+	}
+	if c.RAG.Enabled {
+		out = append(out, "rag")
+	}
+	if v := strings.TrimSpace(c.MCPEnabledTools); v != "" && v != "*" {
+		out = append(out, "mcp.enabled_tools")
+	}
+	return out
 }
 
 // ObservabilityConfig holds tracing and metrics config.

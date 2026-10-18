@@ -1,0 +1,547 @@
+{
+  "results": {
+    "SYNC-01": {
+      "name": "SYNC-01",
+      "ok": true,
+      "evidence": "TestApplyDeltaItem_AppliesUnencryptedUpdate, TestApplyDeltaItem_DeleteRemovesNote, TestApplyDeltaItem_DeleteRemovesFolder, TestApplyDeltaItem_SkipsEncryptedFolder, TestApplyDeltaItem_SkipsEncryptedTag, TestApplyDeltaItem_SkipsEncryptedWhenLocalDecrypted, TestApplyDeltaItem_AppliesEncryptedWhenNoLocal",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-02": {
+      "name": "SYNC-02",
+      "ok": true,
+      "evidence": "TestEngineLocalFolderRehearsal",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-03": {
+      "name": "SYNC-03",
+      "ok": true,
+      "evidence": "TestDeleteNote_QueuesRemoteDeletion, TestDeleteResourceAndFolder_QueueRemoteDeletion, TestDeleteTag_QueuesTagAndLinkDeletions, TestRemoveNoteTag_QueuesLinkDeletion",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-04": {
+      "name": "SYNC-04",
+      "ok": true,
+      "evidence": "TestApplyDeltaItem_DeleteRemovesNote, TestPullMissingItems_PrunesStaleLocalItems, TestDeleteLocalItem_DoesNotEchoDeletion",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-05": {
+      "name": "SYNC-05",
+      "ok": true,
+      "evidence": "TestConflictNoteOnDoubleEdit",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-06": {
+      "name": "SYNC-06",
+      "ok": true,
+      "evidence": "TestConflictNoteOnRemoteDelete",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-07": {
+      "name": "SYNC-07",
+      "ok": true,
+      "evidence": "TestApplyDeltaItem_DeleteRemovesFolder",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-08": {
+      "name": "SYNC-08",
+      "ok": true,
+      "evidence": "TestE2EE_ResourcePushPullRoundTrip, TestResourceConflictOnDoubleEdit",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-09": {
+      "name": "SYNC-09",
+      "ok": true,
+      "evidence": "TestResourceConflictOnDoubleEdit",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-10": {
+      "name": "SYNC-10",
+      "ok": true,
+      "evidence": "TestFileLock_AcquireAndRelease, TestFileLock_RefreshAndExpiry",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-11": {
+      "name": "SYNC-11",
+      "ok": true,
+      "evidence": "TestFileLock_ExclusiveLockRefusesAcquire, TestEngineRefusesSyncWhileExclusiveLockHeld, TestActiveLock_ExclusiveTieBreak",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-12": {
+      "name": "SYNC-12",
+      "ok": true,
+      "evidence": "TestFileLock_RefreshAndExpiry",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-13": {
+      "name": "SYNC-13",
+      "ok": true,
+      "evidence": "TestPullSyncInfo_VersionEnforcement",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-14": {
+      "name": "SYNC-14",
+      "ok": true,
+      "evidence": "TestPullSyncInfo_StoresMasterKeys, TestPushSyncInfo_WritesFreshTarget, TestPushSyncInfo_PreservesRemoteState",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-15": {
+      "name": "SYNC-15",
+      "ok": true,
+      "evidence": "TestApplyDeltaItem_AppliesEncryptedWhenNoLocal, TestE2EE_EditKeepsUnknownKeys, TestDecrypt_RevisionEnvelope",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-16": {
+      "name": "SYNC-16",
+      "ok": true,
+      "evidence": "TestEncryptString_JED01Format, TestE2EE_ResourcePushPullRoundTrip, TestEncryptString_UTF16LE_Encoding",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-17": {
+      "name": "SYNC-17",
+      "ok": true,
+      "evidence": "TestRemoteDecision, TestEngineLocalFolderRehearsal",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-18": {
+      "name": "SYNC-18",
+      "ok": true,
+      "evidence": "TestPullMissingItems_PrunesStaleLocalItems",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-19": {
+      "name": "SYNC-19",
+      "ok": true,
+      "evidence": "TestEngineOverlappingTriggerIsIgnored, TestEngineTriggerChannelCoalesces",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-20": {
+      "name": "SYNC-20",
+      "ok": true,
+      "evidence": "TestEngineLocalFolderRehearsal",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-21": {
+      "name": "SYNC-21",
+      "ok": true,
+      "evidence": "TestDropboxBackend_RoundTrip, TestDropboxBackend_DeltaAndChildren, TestDropboxBackend_Locks, TestDropboxBackend_TokenRefresh",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "SYNC-22": {
+      "name": "SYNC-22",
+      "ok": true,
+      "evidence": "TestDropboxOAuth_LoopbackFlow",
+      "layer": "sync",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-01": {
+      "name": "MOD-01",
+      "ok": true,
+      "evidence": "TestGoldenCorpus",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-02": {
+      "name": "MOD-02",
+      "ok": true,
+      "evidence": "TestGoldenCorpus",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-03": {
+      "name": "MOD-03",
+      "ok": true,
+      "evidence": "TestGoldenCorpus",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-04": {
+      "name": "MOD-04",
+      "ok": true,
+      "evidence": "TestDelta_RevisionPersistsRawAndPrunes, TestApplyDeltaItem_AppliesUnencryptedUpdate",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-05": {
+      "name": "MOD-05",
+      "ok": true,
+      "evidence": "TestOpen_WALMode, TestRevisionsTable_MigratesExistingDatabase",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-06": {
+      "name": "MOD-06",
+      "ok": true,
+      "evidence": "TestOpen_RealJoplinProfileLookalike",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-07": {
+      "name": "MOD-07",
+      "ok": true,
+      "evidence": "TestSearchNotes_FTS5RoundTrip, TestNotesListExcludesConflicts",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-08": {
+      "name": "MOD-08",
+      "ok": true,
+      "evidence": "TestSettingsKVRoundTrip, TestSettingsKV_PersistsAcrossReopen",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-09": {
+      "name": "MOD-09",
+      "ok": true,
+      "evidence": "TestNotesListExcludesConflicts",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-13": {
+      "name": "MOD-13",
+      "ok": true,
+      "evidence": "TestEventsPagingByCursor",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-10": {
+      "name": "MOD-10",
+      "ok": true,
+      "evidence": "TestDelta_RevisionPersistsRawAndPrunes, TestClipperRevisionsAPI, TestRevisionsTable_MigratesExistingDatabase",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-11": {
+      "name": "MOD-11",
+      "ok": true,
+      "evidence": "TestResourceBlobRoundTrip",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "MOD-12": {
+      "name": "MOD-12",
+      "ok": true,
+      "evidence": "TestDeleteNote_NeverSynced_QueuesNothing, TestDeleteNote_QueuesRemoteDeletion",
+      "layer": "store",
+      "status": "pass",
+      "notes": ""
+    },
+    "SVC-01": {
+      "name": "SVC-01",
+      "ok": true,
+      "evidence": "TestNotebookNoteTagViews",
+      "layer": "service",
+      "status": "pass",
+      "notes": ""
+    },
+    "SVC-02": {
+      "name": "SVC-02",
+      "ok": true,
+      "evidence": "TestListNoteSummariesKeyset, TestSummaryListsShipNoBodies",
+      "layer": "service",
+      "status": "pass",
+      "notes": ""
+    },
+    "SVC-03": {
+      "name": "SVC-03",
+      "ok": true,
+      "evidence": "TestNotebookNoteTagViews",
+      "layer": "service",
+      "status": "pass",
+      "notes": ""
+    },
+    "SVC-04": {
+      "name": "SVC-04",
+      "ok": true,
+      "evidence": "TestNotebookNoteTagViews",
+      "layer": "service",
+      "status": "pass",
+      "notes": ""
+    },
+    "SVC-05": {
+      "name": "SVC-05",
+      "ok": true,
+      "evidence": "TestNotebookNoteTagViews",
+      "layer": "service",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-02": {
+      "name": "SH-02",
+      "ok": true,
+      "evidence": "TestFrontendInjectsRuntimeConfig, TestFrontendSPAFallbackAndAssets",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-03": {
+      "name": "SH-03",
+      "ok": true,
+      "evidence": "TestFrontendInjectsRuntimeConfig, TestFrontendEscapesScriptBreakout",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-13": {
+      "name": "SH-13",
+      "ok": true,
+      "evidence": "TestFrontendSPAFallbackAndAssets, TestFrontendRejectsWrites",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-04": {
+      "name": "SH-04",
+      "ok": true,
+      "evidence": "TestDesktopBackendLifecycle",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-05": {
+      "name": "SH-05",
+      "ok": true,
+      "evidence": "TestDesktopBackendLifecycle, TestDesktopBackendConfiguredTokenKeepsStable",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-08": {
+      "name": "SH-08",
+      "ok": true,
+      "evidence": "TestDesktopBackendLifecycle",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-14": {
+      "name": "SH-14",
+      "ok": true,
+      "evidence": "TestDesktopBackendLifecycle",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-15": {
+      "name": "SH-15",
+      "ok": true,
+      "evidence": "TestDesktopBackendLifecycle",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-16": {
+      "name": "SH-16",
+      "ok": true,
+      "evidence": "TestDesktopBackendLifecycle",
+      "layer": "shell",
+      "status": "pass",
+      "notes": ""
+    },
+    "API-53": {
+      "name": "API-53",
+      "ok": true,
+      "evidence": "TestClipperRevisionRewriteRefused",
+      "layer": "api",
+      "status": "pass",
+      "notes": ""
+    },
+    "OBS-01": {
+      "name": "OBS-01",
+      "ok": true,
+      "evidence": "TestUnsupportedSubsystems, TestObservabilityDefaultsDisabled",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "OBS-02": {
+      "name": "OBS-02",
+      "ok": true,
+      "evidence": "TestUnsupportedSubsystems, TestObservabilityDefaultsDisabled",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "OBS-03": {
+      "name": "OBS-03",
+      "ok": true,
+      "evidence": "TestUnsupportedSubsystems",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "OBS-04": {
+      "name": "OBS-04",
+      "ok": true,
+      "evidence": "TestUnsupportedSubsystems",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "CLI-14": {
+      "name": "CLI-14",
+      "ok": true,
+      "evidence": "TestExpandEnv, TestLoadFromYAML_EndpointExpandEnv, TestLoad_YAML_MasterPasswordFromEnv",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "CLI-15": {
+      "name": "CLI-15",
+      "ok": true,
+      "evidence": "TestLoadFromJoplinJSON, TestLoad_JSON_SetsObservability",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "CLI-16": {
+      "name": "CLI-16",
+      "ok": true,
+      "evidence": "TestLoadFromYAML_MasterPasswordFromConfig, TestLoad_YAML_FullObservabilityPassed",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "CLI-17": {
+      "name": "CLI-17",
+      "ok": true,
+      "evidence": "TestValidateConfig",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "CLI-20": {
+      "name": "CLI-20",
+      "ok": true,
+      "evidence": "TestListenAddr",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "CLI-21": {
+      "name": "CLI-21",
+      "ok": true,
+      "evidence": "TestClipperServePortCollision",
+      "layer": "cli",
+      "status": "pass",
+      "notes": ""
+    },
+    "SH-01": {
+      "name": "SH-01",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: window titled 'Joplin Lite' at 1400x900 (frame 1400x891); an AppleScript resize to 700x400 clamps to the 1024x640 minimum (title fixed in web/src/routes/__root.tsx)",
+      "layer": "shell",
+      "notes": ""
+    },
+    "SH-06": {
+      "name": "SH-06",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: a second launch exits 0 immediately while the first keeps serving its port and window (RequestSingleInstanceLock)",
+      "layer": "shell",
+      "notes": ""
+    },
+    "SH-07": {
+      "name": "SH-07",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: MyGO restores 'main' from window-state.json under PathUserData; a seeded 1180x760 produced a 2360px-wide smoke capture and a resized 1024x640 survived quit/relaunch",
+      "layer": "shell",
+      "notes": ""
+    },
+    "SH-09": {
+      "name": "SH-09",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: with 41184 held, startup logs 'cannot start the local API on localhost:41184 ... bind: address already in use ... Joplin desktop uses port 41184' and blocks on the native dialog until dismissed, then quits",
+      "layer": "shell",
+      "notes": ""
+    },
+    "SH-10": {
+      "name": "SH-10",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: POST /auth opens the native pairing dialog, /auth/check reports waiting, and Return (the default button) rejects and returns no token",
+      "layer": "shell",
+      "notes": ""
+    },
+    "SH-12": {
+      "name": "SH-12",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: -smoke evaluates the live page, GET + POST/DELETE the in-process API, writes tmp/desktop-smoke.{json,png}, then quits",
+      "layer": "shell",
+      "notes": ""
+    },
+    "SH-11": {
+      "name": "SH-11",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "real session: shell/bundle.sh builds 'tmp/Joplin Lite.app' (com.joplinlite.desktop, app-icon.icns); the app still applies the embedded 512px PNG with Dock.SetIcon and -smoke reports icon: 'ok' (no 'cannot set application icon' warning)",
+      "layer": "shell",
+      "notes": ""
+    }
+  }
+}

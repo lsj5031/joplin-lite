@@ -33,6 +33,9 @@ var serveCmd = &cobra.Command{
 		if cfg.APIKey == "" {
 			return fmt.Errorf("api key is required: set api.key in config (e.g. ${GOJOPLIN_API_KEY}) or GOJOPLIN_API_KEY env var")
 		}
+		for _, s := range cfg.UnsupportedSubsystems() {
+			slog.Warn("configured but not implemented; the setting is ignored", "setting", s)
+		}
 
 		db, err := store.Open(cfg.DataDir)
 		if err != nil {

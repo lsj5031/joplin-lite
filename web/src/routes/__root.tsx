@@ -10,7 +10,9 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'joplin-lite' },
+      // The webview adopts document.title as the native window title; SH-01
+      // expects the product name there, not the npm-style slug.
+      { title: 'Joplin Lite' },
       {
         name: 'description',
         content: 'A little room to think. A lightweight workspace for your local notes and Markdown.',
@@ -31,9 +33,22 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
 })
 
+// Resolve the theme before React hydrates so the attribute the inline head
+// script already wrote matches the client's first render. Server/prerender
+// renders the light default; the browser recomputes from storage/OS.
+function initialTheme(): 'light' | 'dark' {
+  if (typeof window === 'undefined') return 'light'
+  try {
+    const stored = window.localStorage.getItem('joplin-lite:theme')
+    if (stored === 'light' || stored === 'dark') return stored
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  } catch { return 'light' }
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme={initialTheme()} suppressHydrationWarning>
+
       <head>
         <script dangerouslySetInnerHTML={{ __html: `try{let t=localStorage.getItem('joplin-lite:theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch{document.documentElement.dataset.theme='light'}` }} />
         <HeadContent />

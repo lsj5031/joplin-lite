@@ -27,10 +27,11 @@ type Props = {
   loading?: boolean
   onToggleTodo: (id: string) => void
   onChangeBody: (id: string, body: string) => void
+  onOpenNote: (id: string) => void
   onBack: () => void
 }
 
-export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onBack }: Props) {
+export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNote, onBack }: Props) {
   const { notebookTitle, tagTitle, notebooks, tags, source, canWrite, patchNote, deleteNote, createTag, setNoteTags, error: vaultError } = useVault()
   const [tab, setTab] = React.useState<'write' | 'preview'>('write')
   const [managing, setManaging] = React.useState(false)
@@ -39,6 +40,7 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onBack }
   const [tagIds, setTagIds] = React.useState<string[]>([])
   const [newTag, setNewTag] = React.useState('')
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const [acknowledgedConflict, setAcknowledgedConflict] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const disabled = !!loading || !canWrite || busy
@@ -207,23 +209,32 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onBack }
       {(error || vaultError) && <p role="alert" className="border-b border-line px-6 py-2 text-[12px] text-signal">{error || vaultError}</p>}
       {!canWrite && <p role="status" className="border-b border-line px-6 py-2 text-[12px] text-ink-soft">Editing unavailable. Reconnect to your backend to make changes.</p>}
 
-      {note.isConflict && (
+      {note.isConflict && acknowledgedConflict !== note.id && (
         <div className="flex items-start gap-2.5 border-b border-line bg-signal/[0.07] px-6 py-2.5">
           <IconConflict width={16} height={16} className="mt-0.5 shrink-0 text-signal" />
           <div className="flex-1">
             <p className="text-[12.5px] font-semibold text-signal">
-              Both this device and Joplin desktop changed this note — nothing was overwritten.
+              Another device changed this note at the same time — nothing was overwritten.
             </p>
             <p className="text-[12px] text-ink-soft">
-              Your version is kept as “{note.conflictOriginalTitle ?? note.title} (Conflict)” in this notebook.
+              This note is your kept copy. The synced version is still filed as the original note.
             </p>
           </div>
           <div className="flex shrink-0 gap-1.5">
-            <button type="button" className="rounded-[6px] border border-signal/40 bg-paper px-2.5 py-1 text-[12px] font-medium text-signal transition-colors duration-100 hover:bg-signal/10">
-              Open my copy
+            <button
+              type="button"
+              disabled={!note.conflictOriginalId}
+              onClick={() => { if (note.conflictOriginalId) onOpenNote(note.conflictOriginalId) }}
+              className="rounded-[6px] border border-signal/40 bg-paper px-2.5 py-1 text-[12px] font-medium text-signal transition-colors duration-100 hover:bg-signal/10 disabled:opacity-50"
+            >
+              Open synced version
             </button>
-            <button type="button" className="rounded-[6px] border border-line-strong bg-paper px-2.5 py-1 text-[12px] font-medium text-ink transition-colors duration-100 hover:bg-paper-2">
-              Keep synced version
+            <button
+              type="button"
+              onClick={() => setAcknowledgedConflict(note.id)}
+              className="rounded-[6px] border border-line-strong bg-paper px-2.5 py-1 text-[12px] font-medium text-ink transition-colors duration-100 hover:bg-paper-2"
+            >
+              Keep my copy
             </button>
           </div>
         </div>

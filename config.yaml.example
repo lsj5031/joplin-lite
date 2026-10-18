@@ -49,33 +49,36 @@ server:
   port: 41184        # Overridable by GOJOPLIN_PORT
   listen_host: ""    # Default: localhost; use "0.0.0.0" to bind all interfaces (GOJOPLIN_LISTEN_HOST)
 
-# Observability
+# Observability — NOT YET IMPLEMENTED. These settings are parsed and validated,
+# but no OTLP spans are exported and no /metrics endpoint is served yet. They
+# default to disabled and enabling them logs a "not implemented" warning rather
+# than silently doing nothing.
 observability:
   tracing:
-    enabled: true
+    enabled: false
     protocol: "http"   # or "grpc"
     endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
     service_name: "go-joplin"
     sample_rate: 1.0
   metrics:
-    enabled: true
+    enabled: false
     prometheus_port: 9091
 
-# MCP mutation allow-list (read-only by default). Overridable by GOJOPLIN_MCP_ALLOW_* env vars.
+# Clipper / MCP mutation allow-list (read-only by default). Overridable by
+# GOJOPLIN_MCP_ALLOW_* env vars. These restrictions apply to `serve`'s clients;
+# the desktop app always has full write access to its own vault.
 mcp:
   allow_folders: ""        # Comma-separated folder IDs or titles; "*" = all
   allow_tags: ""           # Comma-separated tag IDs or titles; "*" = all
   allow_create_tag: false
   allow_create_folder: false
-  # Tool filtering: only register these tools with the MCP server.
-  # Default "*" = all 13 tools. Set to a comma-separated list to reduce context tokens.
-  # Example: "create_note,list_folders,list_tags,create_folder,search_notes"
+  # Parsed for forward compatibility, but tool filtering is not implemented yet:
+  # enabling a non-"*" value logs a "not implemented" warning and is ignored.
   enabled_tools: "*"
 
-# RAG (Retrieval Augmented Generation) semantic search. Disabled by default.
-# When enabled, note search uses vector embeddings instead of FTS4 keyword matching.
-# Requires an OpenAI-compatible embedding API endpoint.
-# Overridable by GOJOPLIN_RAG_* env vars.
+# RAG (Retrieval Augmented Generation) — NOT YET IMPLEMENTED. The settings are
+# parsed and validated, but search always uses FTS keyword matching; enabling
+# this logs a "not implemented" warning.
 rag:
   enabled: false
   endpoint: "${GOJOPLIN_RAG_ENDPOINT}"    # e.g. "https://api.openai.com/v1" or "http://localhost:11434/v1"

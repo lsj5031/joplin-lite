@@ -184,6 +184,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       setNotes((prev) => [...prev, ...page.notes.filter((n) => !prev.some((p) => p.id === n.id)).map(overlay)])
       nextCursor.current = page.nextCursor
       setHasMore(page.hasMore)
+      if (!page.hasMore && !lastFilter.current.query && !lastFilter.current.notebookId && !lastFilter.current.tagId) setCountsExact(true)
     } catch (e) { if (my === seq.current) fail(e) }
     finally { if (my === seq.current) setListLoading(false) }
   }, [fail, listLoading, overlay])

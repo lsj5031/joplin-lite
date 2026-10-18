@@ -216,10 +216,22 @@ func (db *DB) GetNoteTagsByNote(noteID string) ([]*models.Tag, error) {
 	return tags, nil
 }
 
-// GetNotesByTag returns notes for a given tag.
+// GetNotesByTag returns notes for a given tag, excluding conflict copies to
+// match ListNotes' default.
 func (db *DB) GetNotesByTag(tagID string, limit, offset int) ([]*models.Note, bool, error) {
+	return db.GetNotesByTagFiltered(tagID, limit, offset, false)
+}
+
+// GetNotesByTagFiltered is GetNotesByTag with the Data API's include_conflicts
+// semantics: conflicts are hidden unless includeConflicts is set.
+func (db *DB) GetNotesByTagFiltered(tagID string, limit, offset int, includeConflicts bool) ([]*models.Note, bool, error) {
 	if limit <= 0 {
 		limit = 10
+	}
+
+	where := `nt.tag_id = ?`
+	if !includeConflicts {
+		where += ` AND n.is_conflict = 0`
 	}
 
 	rows, err := db.Query(`SELECT n.id, n.parent_id, n.title, n.body, n.created_time, n.updated_time,
@@ -228,7 +240,7 @@ func (db *DB) GetNotesByTag(tagID string, limit, offset int) ([]*models.Note, bo
 		n."order", n.user_created_time, n.user_updated_time, n.encryption_cipher_text,
 		n.encryption_applied, n.markup_language, n.is_shared, n.share_id, n.conflict_original_id,
 		n.master_key_id, n.user_data, n.deleted_time
-		FROM notes n JOIN note_tags nt ON n.id = nt.note_id WHERE nt.tag_id = ?
+		FROM notes n JOIN note_tags nt ON n.id = nt.note_id WHERE `+where+`
 		ORDER BY n.updated_time DESC LIMIT ? OFFSET ?`, tagID, limit+1, offset)
 	if err != nil {
 		return nil, false, err

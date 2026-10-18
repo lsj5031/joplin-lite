@@ -166,6 +166,16 @@ func (p *Policy) CanCreateTag() bool {
 	return p.allowCreateTag
 }
 
+// CanWriteResources reports whether attachments may be created, updated or
+// deleted. Resources are not filed in a notebook, so any writable folder (or
+// the wildcard) enables them.
+func (p *Policy) CanWriteResources() bool {
+	if p == nil {
+		return false
+	}
+	return p.allowAllFolders || len(p.writableFolderIDs) > 0 || len(p.writableFolderTitles) > 0
+}
+
 // CapabilitiesDoc is the JSON document exposed to LLMs via MCP.
 type CapabilitiesDoc struct {
 	Folders struct {

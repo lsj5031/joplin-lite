@@ -61,7 +61,8 @@ func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request) {
 // createNoteRequest is the body for POST /notes; note fields plus optional tag_ids.
 type createNoteRequest struct {
 	models.Note
-	TagIDs []string `json:"tag_ids"`
+	TagIDs   []string `json:"tag_ids"`
+	BodyHTML string   `json:"body_html"`
 }
 
 func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
@@ -72,13 +73,19 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	note := &req.Note
 
-	if s.policy != nil {
-		var folderTitle string
-		if note.ParentID != "" {
-			if f, _ := s.db.GetFolder(note.ParentID); f != nil {
-				folderTitle = f.Title
-			}
+	// A note must live in a real notebook (or the root); never store an orphan.
+	// This runs before the policy check so a bad parent is a 400 even when an
+	// allow-list would otherwise refuse the write as read-only.
+	var folderTitle string
+	if note.ParentID != "" {
+		f, _ := s.db.GetFolder(note.ParentID)
+		if f == nil {
+			writeError(w, http.StatusBadRequest, "parent folder not found: "+note.ParentID)
+			return
 		}
+		folderTitle = f.Title
+	}
+	if s.policy != nil {
 		if !s.policy.CanCreateNoteInFolderOrEmpty(note.ParentID, folderTitle) {
 			writeError(w, http.StatusForbidden, "folder is read-only: create notes only in writable folders")
 			return
@@ -105,8 +112,8 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle body_html conversion
-	if bodyHTML := getBodyHTML(r); bodyHTML != "" {
-		md, err := htmlToMarkdown(bodyHTML)
+	if req.BodyHTML != "" {
+		md, err := htmlToMarkdown(req.BodyHTML)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "HTML conversion failed: "+err.Error())
 			return
@@ -118,6 +125,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	note.Type_ = models.TypeNote
 
 	// Assign tags if tag_ids provided
 	for _, tagID := range req.TagIDs {
@@ -188,7 +196,24 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v, ok := updates["parent_id"]; ok {
-		existing.ParentID, _ = v.(string)
+		parentID, _ := v.(string)
+		var parentTitle string
+		if parentID != "" {
+			f, _ := s.db.GetFolder(parentID)
+			if f == nil {
+				writeError(w, http.StatusBadRequest, "parent folder not found: "+parentID)
+				return
+			}
+			parentTitle = f.Title
+		}
+		// A move must land in a writable folder too; checking only the note's
+		// current folder would let an allow-list client move a note into a
+		// read-only notebook (or the root) and keep writing to it.
+		if s.policy != nil && !s.policy.CanCreateNoteInFolderOrEmpty(parentID, parentTitle) {
+			writeError(w, http.StatusForbidden, "target folder is read-only")
+			return
+		}
+		existing.ParentID = parentID
 	}
 	if v, ok := updates["is_todo"]; ok {
 		if n, ok := v.(float64); ok {
@@ -269,7 +294,15 @@ func (s *Server) handleGetNoteTags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p := parsePagination(r)
-	writePaginated(w, tags, false, p.Fields)
+	start := p.offset()
+	if start > len(tags) {
+		start = len(tags)
+	}
+	end := start + p.Limit
+	if end > len(tags) {
+		end = len(tags)
+	}
+	writePaginated(w, tags[start:end], end < len(tags), p.Fields)
 }
 
 func (s *Server) handleGetNoteResources(w http.ResponseWriter, r *http.Request) {
@@ -285,11 +318,4 @@ func (s *Server) handleGetNoteResources(w http.ResponseWriter, r *http.Request) 
 
 	p := parsePagination(r)
 	writePaginated(w, resources, false, p.Fields)
-}
-
-// getBodyHTML extracts body_html from the request body if present.
-func getBodyHTML(r *http.Request) string {
-	// This is handled in the JSON decode, but we provide a helper
-	// for cases where it comes as a separate field
-	return ""
 }

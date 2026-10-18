@@ -48,7 +48,7 @@ func (db *DB) ApplyPulledItem(item any, syncTarget int, raw []byte) error {
 		if upsertErr != nil {
 			return upsertErr
 		}
-		if err := upsertSyncItemTx(ex, id, itemType, syncTarget); err != nil {
+		if err := upsertSyncItemTx(ex, id, itemType, syncTarget, updated); err != nil {
 			return err
 		}
 		return saveItemRawTx(ex, id, raw, updated)

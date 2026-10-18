@@ -43,6 +43,9 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	if dataDir != "" {
 		cfg.DataDir = dataDir
 	}
+	for _, s := range cfg.UnsupportedSubsystems() {
+		slog.Warn("configured but not implemented; the setting is ignored", "setting", s)
+	}
 	cfg.DataDir, err = filepath.Abs(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve database directory: %w", err)

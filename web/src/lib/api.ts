@@ -121,6 +121,7 @@ const toNote = (d: NoteDTO): Note => ({
   todoDue: d.todo_due ? d.todo_due : null,
   isConflict: !!d.is_conflict,
   conflictOriginalTitle: d.conflict_original_id ? 'conflicted copy' : null,
+  conflictOriginalId: d.conflict_original_id || null,
   excerpt: noteExcerpt(d.body ?? ''),
 })
 
@@ -159,6 +160,10 @@ export async function fetchNoteSummaries(
   if (f.cursor) params.set('cursor', f.cursor)
 
   let path: string
+  // Conflict copies live in the same notebook as their original, so every
+  // scoped view asks for them; otherwise they vanish from search and filters
+  // while still appearing under All notes.
+  params.set('include_conflicts', '1')
   if (f.query) {
     params.set('query', f.query)
     params.set('type', 'note')
@@ -168,7 +173,6 @@ export async function fetchNoteSummaries(
   } else if (f.tagId) {
     path = `/tags/${encodeURIComponent(f.tagId)}/notes?${params}`
   } else {
-    params.set('include_conflicts', '1')
     path = `/notes?${params}`
   }
 

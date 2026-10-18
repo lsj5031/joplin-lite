@@ -30,6 +30,10 @@ var (
 	// a screenshot and quit. Used by the desktop smoke check.
 	smoke   = flag.Bool("smoke", false, "probe the loaded page, capture tmp/desktop-smoke.png, then quit")
 	smokeIn = flag.Duration("smoke-after", 6*time.Second, "how long to let the page load before probing")
+
+	// dockIconStatus records the outcome of the Dock.SetIcon call, reported by
+	// -smoke so the icon path is verifiable on a real session (SH-11).
+	dockIconStatus = "unavailable"
 )
 
 func main() {
@@ -70,7 +74,10 @@ func main() {
 			err = mygo.App.Dock.SetIcon(icon)
 		}
 		if err != nil {
+			dockIconStatus = err.Error()
 			slog.Warn("cannot set application icon", "error", err)
+		} else {
+			dockIconStatus = "ok"
 		}
 		handler, err := newFrontendHandler(sub, runtimeConfig{
 			Base:    be.baseURL,
@@ -156,6 +163,9 @@ func runSmoke(win *mygo.Window, after time.Duration) {
 	if err != nil {
 		slog.Error("desktop smoke: eval failed", "error", err)
 	} else {
+		if m, ok := probe.(map[string]any); ok {
+			m["icon"] = dockIconStatus
+		}
 		out, _ := json.MarshalIndent(probe, "", "  ")
 		fmt.Println(string(out))
 		_ = os.WriteFile("tmp/desktop-smoke.json", out, 0o644)

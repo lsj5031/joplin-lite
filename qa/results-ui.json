@@ -1,0 +1,379 @@
+{
+  "at": "2026-10-18T08:25:59.745Z",
+  "origin": "http://127.0.0.1:4331",
+  "api": "http://127.0.0.1:41888",
+  "results": {
+    "UI-01": {
+      "ok": true,
+      "name": "initial live library",
+      "ms": 403,
+      "detail": ""
+    },
+    "UI-02": {
+      "ok": true,
+      "name": "empty library first step",
+      "ms": 399,
+      "detail": ""
+    },
+    "UI-03": {
+      "ok": true,
+      "name": "create note",
+      "ms": 424,
+      "detail": ""
+    },
+    "UI-04": {
+      "ok": true,
+      "name": "create note in selected notebook",
+      "ms": 789,
+      "detail": ""
+    },
+    "UI-05": {
+      "ok": true,
+      "name": "create during tag filter",
+      "ms": 793,
+      "detail": ""
+    },
+    "UI-06": {
+      "ok": true,
+      "name": "body autosave",
+      "ms": 1545,
+      "detail": ""
+    },
+    "UI-07": {
+      "ok": true,
+      "name": "instant reload durability",
+      "ms": 2579,
+      "detail": ""
+    },
+    "UI-08": {
+      "ok": true,
+      "name": "title edit via Manage note",
+      "ms": 997,
+      "detail": ""
+    },
+    "UI-09": {
+      "ok": true,
+      "name": "move note to notebook",
+      "ms": 1026,
+      "detail": ""
+    },
+    "UI-10": {
+      "ok": true,
+      "name": "assign existing tag",
+      "ms": 1017,
+      "detail": ""
+    },
+    "UI-11": {
+      "ok": true,
+      "name": "create tag inline",
+      "ms": 980,
+      "detail": ""
+    },
+    "UI-12": {
+      "ok": true,
+      "name": "remove tag",
+      "ms": 1033,
+      "detail": ""
+    },
+    "UI-13": {
+      "ok": true,
+      "name": "delete note permanently",
+      "ms": 1048,
+      "detail": ""
+    },
+    "UI-14": {
+      "ok": true,
+      "name": "cancel deletion",
+      "ms": 988,
+      "detail": ""
+    },
+    "UI-15": {
+      "ok": true,
+      "name": "manage cancel discards edits",
+      "ms": 967,
+      "detail": ""
+    },
+    "UI-16": {
+      "ok": true,
+      "name": "todo toggle",
+      "ms": 967,
+      "detail": ""
+    },
+    "UI-17": {
+      "ok": true,
+      "name": "todo due label",
+      "ms": 1170,
+      "detail": ""
+    },
+    "UI-18": {
+      "ok": true,
+      "name": "markdown preview",
+      "ms": 958,
+      "detail": ""
+    },
+    "UI-19": {
+      "ok": true,
+      "name": "preview sanitization",
+      "ms": 1353,
+      "detail": ""
+    },
+    "UI-20": {
+      "ok": true,
+      "name": "task list preview",
+      "ms": 949,
+      "detail": ""
+    },
+    "UI-21": {
+      "ok": true,
+      "name": "conflict banner",
+      "ms": 907,
+      "detail": ""
+    },
+    "UI-22": {
+      "ok": true,
+      "name": "conflict actions",
+      "ms": 1888,
+      "detail": ""
+    },
+    "UI-23": {
+      "ok": true,
+      "name": "search by title",
+      "ms": 788,
+      "detail": ""
+    },
+    "UI-24": {
+      "ok": true,
+      "name": "search by body",
+      "ms": 773,
+      "detail": ""
+    },
+    "UI-25": {
+      "ok": true,
+      "name": "search debounce",
+      "ms": 1435,
+      "detail": ""
+    },
+    "UI-26": {
+      "ok": true,
+      "name": "no results + clear",
+      "ms": 1222,
+      "detail": ""
+    },
+    "UI-27": {
+      "ok": true,
+      "name": "Escape clears search",
+      "ms": 1174,
+      "detail": ""
+    },
+    "UI-28": {
+      "ok": true,
+      "name": "Cmd+K focuses search",
+      "ms": 354,
+      "detail": ""
+    },
+    "UI-29": {
+      "ok": true,
+      "name": "notebook filter",
+      "ms": 772,
+      "detail": ""
+    },
+    "UI-30": {
+      "ok": true,
+      "name": "nested notebooks",
+      "ms": 799,
+      "detail": ""
+    },
+    "UI-31": {
+      "ok": true,
+      "name": "create top-level notebook",
+      "ms": 444,
+      "detail": ""
+    },
+    "UI-32": {
+      "ok": true,
+      "name": "create child notebook",
+      "ms": 443,
+      "detail": ""
+    },
+    "UI-33": {
+      "ok": true,
+      "name": "exact notebook counts when whole library loaded",
+      "ms": 959,
+      "detail": ""
+    },
+    "UI-34": {
+      "ok": true,
+      "name": "paged counts are not fake totals",
+      "ms": 364,
+      "detail": ""
+    },
+    "UI-35": {
+      "ok": true,
+      "name": "tag filter",
+      "ms": 779,
+      "detail": ""
+    },
+    "UI-36": {
+      "ok": true,
+      "name": "tag counts",
+      "ms": 852,
+      "detail": ""
+    },
+    "UI-37": {
+      "ok": true,
+      "name": "load more pagination",
+      "ms": 497,
+      "detail": ""
+    },
+    "UI-38": {
+      "ok": true,
+      "name": "keyboard list navigation",
+      "ms": 349,
+      "detail": ""
+    },
+    "UI-39": {
+      "ok": true,
+      "name": "selection fetches full body",
+      "ms": 770,
+      "detail": ""
+    },
+    "UI-40": {
+      "ok": true,
+      "name": "row metadata",
+      "ms": 781,
+      "detail": ""
+    },
+    "UI-41": {
+      "ok": true,
+      "name": "excerpt formatting",
+      "ms": 778,
+      "detail": ""
+    },
+    "UI-42": {
+      "ok": true,
+      "name": "reload button",
+      "ms": 1847,
+      "detail": ""
+    },
+    "UI-43": {
+      "ok": true,
+      "name": "save states",
+      "ms": 1539,
+      "detail": ""
+    },
+    "UI-44": {
+      "ok": true,
+      "name": "backend disconnected",
+      "ms": 367,
+      "detail": ""
+    },
+    "UI-45": {
+      "ok": true,
+      "name": "retry reconnects",
+      "ms": 398,
+      "detail": ""
+    },
+    "UI-46": {
+      "ok": true,
+      "name": "failed save is visible",
+      "ms": 1526,
+      "detail": ""
+    },
+    "UI-47": {
+      "ok": true,
+      "name": "narrow layout",
+      "ms": 879,
+      "detail": ""
+    },
+    "UI-48": {
+      "ok": true,
+      "name": "minimum desktop layout",
+      "ms": 356,
+      "detail": ""
+    },
+    "UI-49": {
+      "ok": true,
+      "name": "theme choice persists",
+      "ms": 701,
+      "detail": ""
+    },
+    "UI-50": {
+      "ok": true,
+      "name": "system theme follows OS",
+      "ms": 927,
+      "detail": ""
+    },
+    "UI-51": {
+      "ok": true,
+      "name": "settings dialog",
+      "ms": 415,
+      "detail": ""
+    },
+    "UI-52": {
+      "ok": true,
+      "name": "accessible controls",
+      "ms": 361,
+      "detail": ""
+    },
+    "UI-53": {
+      "ok": true,
+      "name": "truncation and overflow",
+      "ms": 763,
+      "detail": ""
+    },
+    "UI-54": {
+      "ok": true,
+      "name": "header metadata and chips",
+      "ms": 905,
+      "detail": ""
+    },
+    "UI-55": {
+      "ok": true,
+      "name": "delete selects the next note",
+      "ms": 2057,
+      "detail": ""
+    },
+    "UI-56": {
+      "ok": true,
+      "name": "reload keeps selection",
+      "ms": 1839,
+      "detail": ""
+    },
+    "UI-57": {
+      "ok": true,
+      "name": "active tag toggles off",
+      "ms": 1110,
+      "detail": ""
+    },
+    "UI-58": {
+      "ok": true,
+      "name": "notebook name validation",
+      "ms": 436,
+      "detail": ""
+    },
+    "UI-59": {
+      "ok": true,
+      "name": "tag reuse is case-insensitive",
+      "ms": 989,
+      "detail": ""
+    },
+    "UI-60": {
+      "ok": true,
+      "name": "server errors are readable",
+      "ms": 758,
+      "detail": ""
+    },
+    "UI-61": {
+      "ok": true,
+      "name": "offline recovery retries the journaled edit",
+      "ms": 2535,
+      "detail": ""
+    },
+    "UI-62": {
+      "ok": true,
+      "name": "no hydration errors",
+      "ms": 340,
+      "detail": ""
+    }
+  }
+}

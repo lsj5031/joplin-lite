@@ -1,0 +1,266 @@
+{
+  "at": "2026-10-18T08:16:08.879451+00:00",
+  "base": "http://127.0.0.1:41890",
+  "results": {
+    "API-01": {
+      "ok": true,
+      "name": "ping is open",
+      "detail": ""
+    },
+    "API-02": {
+      "ok": true,
+      "name": "health is open and empty",
+      "detail": ""
+    },
+    "API-03": {
+      "ok": true,
+      "name": "token is required",
+      "detail": ""
+    },
+    "API-04": {
+      "ok": true,
+      "name": "invalid token is rejected",
+      "detail": ""
+    },
+    "API-05": {
+      "ok": true,
+      "name": "bearer key authenticates",
+      "detail": ""
+    },
+    "API-06": {
+      "ok": true,
+      "name": "pairing request starts",
+      "detail": ""
+    },
+    "API-07": {
+      "ok": true,
+      "name": "pairing polls as waiting",
+      "detail": ""
+    },
+    "API-08": {
+      "ok": true,
+      "name": "pairing accept hands over the token",
+      "detail": ""
+    },
+    "API-09": {
+      "ok": true,
+      "name": "pairing reject never yields the token",
+      "detail": ""
+    },
+    "API-10": {
+      "ok": true,
+      "name": "web origins cannot pair",
+      "detail": ""
+    },
+    "API-11": {
+      "ok": true,
+      "name": "token validation endpoint",
+      "detail": ""
+    },
+    "API-12": {
+      "ok": true,
+      "name": "notes list newest first",
+      "detail": ""
+    },
+    "API-13": {
+      "ok": true,
+      "name": "pagination is capped and offset",
+      "detail": ""
+    },
+    "API-14": {
+      "ok": true,
+      "name": "fields projection",
+      "detail": ""
+    },
+    "API-15": {
+      "ok": true,
+      "name": "ordering",
+      "detail": ""
+    },
+    "API-16": {
+      "ok": true,
+      "name": "summary rows",
+      "detail": ""
+    },
+    "API-17": {
+      "ok": true,
+      "name": "summary keyset cursor",
+      "detail": ""
+    },
+    "API-18": {
+      "ok": true,
+      "name": "conflict listing flag",
+      "detail": ""
+    },
+    "API-19": {
+      "ok": true,
+      "name": "note filters",
+      "detail": ""
+    },
+    "API-20": {
+      "ok": true,
+      "name": "create note minimum fields",
+      "detail": ""
+    },
+    "API-21": {
+      "ok": true,
+      "name": "create with tags rejects unknowns",
+      "detail": ""
+    },
+    "API-22": {
+      "ok": true,
+      "name": "create accepts body_html",
+      "detail": ""
+    },
+    "API-23": {
+      "ok": true,
+      "name": "get missing note is 404",
+      "detail": ""
+    },
+    "API-24": {
+      "ok": true,
+      "name": "update note fields",
+      "detail": ""
+    },
+    "API-25": {
+      "ok": true,
+      "name": "update accepts body_html",
+      "detail": ""
+    },
+    "API-26": {
+      "ok": true,
+      "name": "update missing note is 404",
+      "detail": ""
+    },
+    "API-27": {
+      "ok": true,
+      "name": "delete note queues sync",
+      "detail": ""
+    },
+    "API-28": {
+      "ok": true,
+      "name": "folders CRUD",
+      "detail": ""
+    },
+    "API-29": {
+      "ok": true,
+      "name": "folder tree",
+      "detail": ""
+    },
+    "API-30": {
+      "ok": true,
+      "name": "folder notes options",
+      "detail": ""
+    },
+    "API-31": {
+      "ok": true,
+      "name": "tags CRUD",
+      "detail": ""
+    },
+    "API-32": {
+      "ok": true,
+      "name": "attach tag is idempotent",
+      "detail": ""
+    },
+    "API-33": {
+      "ok": true,
+      "name": "detach tag queues sync",
+      "detail": ""
+    },
+    "API-34": {
+      "ok": true,
+      "name": "note tags pagination and fields",
+      "detail": ""
+    },
+    "API-35": {
+      "ok": true,
+      "name": "tag notes listing",
+      "detail": ""
+    },
+    "API-36": {
+      "ok": true,
+      "name": "search notes",
+      "detail": ""
+    },
+    "API-37": {
+      "ok": true,
+      "name": "search folders",
+      "detail": ""
+    },
+    "API-38": {
+      "ok": true,
+      "name": "search tags",
+      "detail": ""
+    },
+    "API-39": {
+      "ok": true,
+      "name": "search validation",
+      "detail": ""
+    },
+    "API-40": {
+      "ok": true,
+      "name": "search tolerates FTS syntax",
+      "detail": ""
+    },
+    "API-41": {
+      "ok": true,
+      "name": "resource upload and download",
+      "detail": ""
+    },
+    "API-42": {
+      "ok": true,
+      "name": "resource update and delete",
+      "detail": ""
+    },
+    "API-43": {
+      "ok": true,
+      "name": "read-only policy covers resources",
+      "detail": ""
+    },
+    "API-44": {
+      "ok": true,
+      "name": "revisions",
+      "detail": ""
+    },
+    "API-45": {
+      "ok": true,
+      "name": "events feed",
+      "detail": ""
+    },
+    "API-46": {
+      "ok": true,
+      "name": "CORS preflight",
+      "detail": ""
+    },
+    "API-47": {
+      "ok": true,
+      "name": "bad JSON rejected",
+      "detail": ""
+    },
+    "API-48": {
+      "ok": true,
+      "name": "read-only policy",
+      "detail": ""
+    },
+    "API-49": {
+      "ok": true,
+      "name": "writable allow-list",
+      "detail": ""
+    },
+    "API-50": {
+      "ok": true,
+      "name": "orphan note guard",
+      "detail": ""
+    },
+    "API-51": {
+      "ok": true,
+      "name": "unicode round-trip",
+      "detail": ""
+    },
+    "API-52": {
+      "ok": true,
+      "name": "unknown routes and methods",
+      "detail": ""
+    }
+  }
+}

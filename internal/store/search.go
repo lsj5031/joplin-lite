@@ -6,7 +6,14 @@ import (
 
 // SearchNotes performs a full-text search on notes using the local FTS5 index
 // (jl_notes_fts — distinct from a real Joplin profile's FTS4 notes_fts).
+// Conflict copies are excluded, matching ListNotes' default.
 func (db *DB) SearchNotes(query string, limit, offset int) ([]*models.Note, bool, error) {
+	return db.SearchNotesFiltered(query, limit, offset, false)
+}
+
+// SearchNotesFiltered is SearchNotes with the Data API's include_conflicts
+// semantics: conflicts are hidden unless includeConflicts is set.
+func (db *DB) SearchNotesFiltered(query string, limit, offset int, includeConflicts bool) ([]*models.Note, bool, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -14,6 +21,11 @@ func (db *DB) SearchNotes(query string, limit, offset int) ([]*models.Note, bool
 	fts := ftsQuery(query)
 	if fts == "" {
 		return []*models.Note{}, false, nil
+	}
+
+	where := `jl_notes_fts MATCH ?`
+	if !includeConflicts {
+		where += ` AND n.is_conflict = 0`
 	}
 
 	// External-content FTS5 rows are joined by rowid, not by the content
@@ -27,7 +39,7 @@ func (db *DB) SearchNotes(query string, limit, offset int) ([]*models.Note, bool
 		n.master_key_id, n.user_data, n.deleted_time
 		FROM notes n
 		JOIN jl_notes_fts ON n.rowid = jl_notes_fts.rowid
-		WHERE jl_notes_fts MATCH ?
+		WHERE `+where+`
 		ORDER BY n.updated_time DESC
 		LIMIT ? OFFSET ?`, fts, limit+1, offset)
 	if err != nil {

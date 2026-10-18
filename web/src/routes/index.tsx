@@ -29,6 +29,9 @@ function Workspace() {
   const [mobileView, setMobileView] = React.useState<'list' | 'edit'>('list')
   const searchRef = React.useRef<HTMLInputElement | null>(null)
   const navRef = React.useRef<HTMLDialogElement>(null)
+  // A note the user explicitly opened (row click, conflict's synced version)
+  // stays selected even when it is not part of the current filtered page.
+  const pinned = React.useRef<string | null>(null)
 
   const reportError = (error: unknown) => setActionError(error instanceof Error ? error.message : String(error))
 
@@ -69,9 +72,12 @@ function Workspace() {
     return () => window.clearTimeout(t)
   }, [query, notebookFilter, tagFilter, vault.loadList])
 
+  // Changing what the list shows releases any pinned out-of-list selection.
+  React.useEffect(() => { pinned.current = null }, [query, notebookFilter, tagFilter])
+
   // Keep a valid selection as the list loads/changes, and load its body once.
   React.useEffect(() => {
-    if (selectedId && notes.some((n) => n.id === selectedId)) return
+    if (selectedId && (notes.some((n) => n.id === selectedId) || pinned.current === selectedId)) return
     setSelectedId(notes[0]?.id ?? null)
   }, [notes, selectedId])
   React.useEffect(() => {
@@ -95,6 +101,7 @@ function Workspace() {
   const selected = activeNote
 
   const selectNote = (id: string) => {
+    pinned.current = id
     setSelectedId(id)
     setMobileView('edit')
   }
@@ -196,6 +203,7 @@ function Workspace() {
             loading={vault.activeLoading}
             onToggleTodo={toggleTodo}
             onChangeBody={changeBody}
+            onOpenNote={selectNote}
             onBack={() => setMobileView('list')}
           />
         </div>

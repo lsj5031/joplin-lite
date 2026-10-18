@@ -21,3 +21,7 @@ web/.vite/
 # OS
 .DS_Store
 Thumbs.db
+
+# QA scratch (generated databases, logs, pids) and generated demo media
+/qa/run/
+/qa/video/

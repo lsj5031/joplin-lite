@@ -23,14 +23,27 @@ The script copies the static SPA into `shell/webdist/` (gitignored) because
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ../tmp/gojoplin-desktop.exe .
 ```
 
+### macOS app bundle
+
+```sh
+bash shell/bundle.sh    # -> tmp/Joplin Lite.app
+```
+
+This wraps the same binary with an `Info.plist` (`com.joplinlite.desktop`) and
+`app-icon.icns`, so macOS gives the process a real app identity and Dock tile.
+Packaging does not replace the runtime icon path: the shell still reads
+`android-chrome-512x512.png` from the embedded bundle and applies it with
+`Dock.SetIcon`; a failure only logs. `-smoke` reports the outcome as
+`"icon": "ok"` (or the error) in `tmp/desktop-smoke.json`.
+
 The staged bundle is required: a fresh checkout has only
 `webdist/.gitkeep`, so `go build` alone produces an app that reports a
 missing `index.html` instead of showing a blank window.
 
 The MyGO CLI (`mygo dev`, `mygo build`) is deliberately not required. The
 shell calls `mygo.App`/`mygo.NewWindow` directly and registers an `app://`
-protocol handler; a later packaging pass (M5) can adopt `mygo build` without
-changing the app code.
+protocol handler; `bundle.sh` produces the macOS wrapper, and a later pass can
+adopt `mygo build` without changing the app code.
 
 ## Run
 

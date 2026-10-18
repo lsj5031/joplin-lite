@@ -1,0 +1,116 @@
+{
+  "results": {
+    "CLI-01": {
+      "ok": true,
+      "name": "help lists commands",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (help lists commands)"
+    },
+    "CLI-02": {
+      "ok": true,
+      "name": "config prints resolved settings",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (config prints resolved settings)"
+    },
+    "CLI-03": {
+      "ok": true,
+      "name": "serve requires an api token",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (serve requires an api token)"
+    },
+    "CLI-04": {
+      "ok": true,
+      "name": "serve requires an api key",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (serve requires an api key)"
+    },
+    "CLI-05": {
+      "ok": true,
+      "name": "serve --no-sync is local only",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (serve --no-sync is local only)"
+    },
+    "CLI-06": {
+      "ok": true,
+      "name": "serve announces its address",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (serve announces its address)"
+    },
+    "CLI-07": {
+      "ok": true,
+      "name": "one-shot sync fails loudly",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (one-shot sync fails loudly)"
+    },
+    "CLI-08": {
+      "ok": true,
+      "name": "clip ping",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (clip ping)"
+    },
+    "CLI-09": {
+      "ok": true,
+      "name": "clip notes round-trip",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (clip notes round-trip)"
+    },
+    "CLI-10": {
+      "ok": true,
+      "name": "clip folders",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (clip folders)"
+    },
+    "CLI-11": {
+      "ok": true,
+      "name": "clip tags",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (clip tags)"
+    },
+    "CLI-12": {
+      "ok": true,
+      "name": "clip search",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (clip search)"
+    },
+    "CLI-18": {
+      "ok": true,
+      "name": "no-sync skips sync validation",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (no-sync skips sync validation)"
+    },
+    "CLI-19": {
+      "ok": true,
+      "name": "data dir env fallback",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (data dir env fallback)"
+    },
+    "CLI-22": {
+      "ok": true,
+      "name": "completion scripts",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (completion scripts)"
+    },
+    "OBS-05": {
+      "ok": true,
+      "name": "example config matches reality",
+      "status": "pass",
+      "layer": "cli",
+      "evidence": "qa/test_cli.py (example config matches reality)"
+    }
+  }
+}
