@@ -65,13 +65,16 @@ HTTP server down, waits for the last sync pass, and closes SQLite
 ## Workspace
 
 The window has a notebook tree with create/rename/delete, a keyset-paged note
-list with search and a **Sort** menu (updated, created or title; either
-direction), tags with create/rename/delete, filtering and per-note
-assignment, a Conflicts view with **Resolve conflict** (keep this version on
-the original), a title and Markdown body editor that autosaves after 500 ms, a
-rendered preview, new note, todo toggle, move to another notebook, delete with
-confirmation, and Back/Forward through visited notes. Sorting pages with the
-same keyset cursor, so a deep page never scans the rows before it.
+list with search, **Saved** searches and a **Sort** menu (updated, created or
+title; either direction), tags with create/rename/delete, filtering and
+per-note assignment, a Conflicts view with **Resolve conflict** (keep this
+version on the original), a title and Markdown body editor that autosaves
+after 500 ms, a rendered preview, new note, todo toggle, move to another
+notebook, delete with confirmation, and Back/Forward through visited notes.
+Sorting pages with the same keyset cursor, so a deep page never scans the rows
+before it. Saved searches name the active query, apply it with one click and
+live in `key_values` (`desktop.saved_searches`), so they are per-device and
+never synced.
 
 The sidebar footer shows sync state, a **Sync now** button and **Settings**;
 when a pass finishes, rows and notebooks reload and an idle open note picks up

@@ -52,9 +52,16 @@ type nativeApp struct {
 	selectedID       string
 	list             ui.ListState
 
-	query       string
-	sort        string
-	sortOpen    bool
+	query    string
+	sort     string
+	sortOpen bool
+
+	savedSearches []savedSearch
+	savedMenuOpen bool
+	savedOpen     bool
+	savedName     string
+	savedErr      string
+
 	editing     bool
 	note        *models.Note
 	title       string
@@ -117,6 +124,7 @@ func newNativeApp(db *store.DB) *nativeApp {
 	app := &nativeApp{svc: service.New(db), selectedNote: -1, editing: true}
 	app.reloadNotebooks()
 	app.reloadTags()
+	app.loadSavedSearches()
 	app.reloadNotes()
 	app.remember(app.selectedID)
 	return app
@@ -1191,6 +1199,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.notebookDialogs(c, t)
 	a.tagDialogs(c, t)
 	a.settingsDialog(c, t)
+	a.savedSearchDialog(c, t)
 
 	if a.resolveConflict {
 		if ui.AlertDialog(c, &a.resolveConflict, "Keep this version?",
@@ -1372,6 +1381,11 @@ func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
 					a.reloadNotes()
 				}
 			}
+			saved := ui.Button(c, "Saved").Label("Saved searches").Tooltip("Saved searches")
+			if saved.Clicked() {
+				a.savedMenuOpen = !a.savedMenuOpen
+			}
+			ui.Popover(c, saved, &a.savedMenuOpen, func() { a.savedSearchMenu(c, t) })
 		})
 		ui.Divider(c)
 

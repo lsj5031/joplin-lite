@@ -104,9 +104,12 @@ Joplin Server), its fields, the E2EE master password and the clipper token in
 a native dialog; saving applies them without a restart. The note list has a
 **Sort** menu (updated, created or title; either direction) with keyset
 paging per order; tests pin all six orders, page boundaries, a cursor reused
-with another order (ignored), legacy cursors and titles containing `:`. Still
-not native: drag/drop, multi-select, saved searches and a dedicated
-lock-state view.
+with another order (ignored), legacy cursors and titles containing `:`. The
+search row has **Saved**: name the active query, apply it with one click or
+delete it, stored as JSON in `key_values` (`desktop.saved_searches`) so the
+list is per-device and survives a relaunch (tested through a fresh app
+instance; saving an existing name updates its query). Still not native:
+drag/drop, multi-select and a dedicated lock-state view.
 
 ### Phase 3 — packaging
 
@@ -239,9 +242,8 @@ The management and trust surfaces are native:
   Joplin desktop. A Dropbox/S3 target configured in the file is shown as a
   read-only segment and kept.
 
-Remaining Phase 2 UX (not the gate): drag/drop moves, multi-select, saved
-searches, and a first-class lock/offline state beyond the sync footer's error
-line.
+Remaining Phase 2 UX (not the gate): drag/drop moves, multi-select, and a
+first-class lock/offline state beyond the sync footer's error line.
 
 ## Phase 3 result (2026-10-19)
 
@@ -280,5 +282,5 @@ Phases 1–3 meet their gates: the daily note loop works without the web UI,
 settings and sync no longer require editing YAML, and the desktop binary runs
 with zero WebView2 processes. The native workspace is the product shell; the
 web build remains an optional browser preview. Remaining work is UX polish
-(drag/drop, multi-select, saved searches), release packaging for Windows, and
-the real-target loops (extension pairing, Dropbox/S3, Joplin Server).
+(drag/drop, multi-select), release packaging for Windows, and the real-target
+loops (extension pairing, Dropbox/S3, Joplin Server).

@@ -1043,3 +1043,120 @@ func noteTitles(notes []*models.NoteSummary) []string {
 	}
 	return out
 }
+
+// TestNativeSavedSearches saves the active query from the search row, applies
+// it from the menu, and deletes it. The list must survive a fresh app instance
+// (it lives in key_values, not in memory).
+func TestNativeSavedSearches(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	addTestNote(t, svc, "", "Work todo", "finish the report")
+	addTestNote(t, svc, "", "Groceries", "milk")
+	app.reloadNotes()
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	if err := tt.Click("Search notes"); err != nil {
+		t.Fatalf("click search: %v", err)
+	}
+	tt.Type("report")
+	if len(app.notes) != 1 || app.notes[0].Title != "Work todo" {
+		t.Fatalf("search results = %v", app.notes)
+	}
+
+	if err := tt.Click("Saved searches"); err != nil {
+		t.Fatalf("open saved searches: %v", err)
+	}
+	if !app.savedMenuOpen {
+		t.Fatal("the saved-search menu did not open")
+	}
+	if err := tt.Click("Save current search…"); err != nil {
+		t.Fatalf("click Save current search: %v", err)
+	}
+	if !app.savedOpen {
+		t.Fatal("the save dialog did not open")
+	}
+	tt.Type("Work")
+	if err := tt.Click("Save"); err != nil {
+		t.Fatalf("click Save: %v", err)
+	}
+	if app.savedOpen || app.savedErr != "" {
+		t.Fatalf("save dialog stayed open: %q", app.savedErr)
+	}
+	if len(app.savedSearches) != 1 || app.savedSearches[0].Name != "Work" || app.savedSearches[0].Query != "report" {
+		t.Fatalf("saved searches = %+v", app.savedSearches)
+	}
+
+	// A fresh view over the same vault loads the list.
+	if fresh := newNativeApp(db); len(fresh.savedSearches) != 1 || fresh.savedSearches[0].Name != "Work" {
+		t.Fatalf("reloaded saved searches = %+v", fresh.savedSearches)
+	}
+
+	// Clearing the query and applying the saved search restores it.
+	app.query = ""
+	app.reloadNotes()
+	tt.Frame()
+	if len(app.notes) != 2 {
+		t.Fatalf("cleared search still filters: %v", app.notes)
+	}
+	if err := tt.Click("Saved searches"); err != nil {
+		t.Fatalf("reopen saved searches: %v", err)
+	}
+	if err := tt.Click("Apply saved search Work"); err != nil {
+		t.Fatalf("apply saved search: %v", err)
+	}
+	if app.query != "report" || len(app.notes) != 1 || app.notes[0].Title != "Work todo" {
+		t.Fatalf("applied query %q, notes %v", app.query, app.notes)
+	}
+	if app.savedMenuOpen {
+		t.Fatal("the saved-search menu stayed open after applying")
+	}
+
+	// Deleting removes it from the menu and from the vault.
+	if err := tt.Click("Saved searches"); err != nil {
+		t.Fatalf("reopen saved searches: %v", err)
+	}
+	if err := tt.Click("Delete saved search Work"); err != nil {
+		t.Fatalf("delete saved search: %v", err)
+	}
+	if len(app.savedSearches) != 0 {
+		t.Fatalf("saved searches after delete = %+v", app.savedSearches)
+	}
+	if fresh := newNativeApp(db); len(fresh.savedSearches) != 0 {
+		t.Fatalf("deleted search came back: %+v", fresh.savedSearches)
+	}
+}
+
+// TestNativeSavedSearchReplacesByName checks that saving an existing name
+// updates its query instead of duplicating the entry, and that an empty name
+// is refused in the dialog.
+func TestNativeSavedSearchReplacesByName(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	addTestNote(t, svc, "", "Alpha", "first")
+	addTestNote(t, svc, "", "Beta", "second")
+	app.reloadNotes()
+
+	save := func(query, name string) {
+		app.query = query
+		app.openSaveSearch()
+		app.savedName = name
+		app.submitSavedSearch()
+	}
+
+	save("first", "  Work  ")
+	if len(app.savedSearches) != 1 || app.savedSearches[0].Name != "Work" || app.savedSearches[0].Query != "first" {
+		t.Fatalf("after first save = %+v", app.savedSearches)
+	}
+	save("second", "work")
+	if len(app.savedSearches) != 1 || app.savedSearches[0].Query != "second" {
+		t.Fatalf("after replacing = %+v", app.savedSearches)
+	}
+
+	app.savedName = "   "
+	app.savedOpen = true
+	app.submitSavedSearch()
+	if !app.savedOpen || app.savedErr == "" {
+		t.Fatalf("empty name accepted: open=%v err=%q", app.savedOpen, app.savedErr)
+	}
+	app.savedOpen = false
+}
