@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -33,6 +34,89 @@ type backend struct {
 	token   string
 	profile string
 	once    sync.Once
+
+	// cfg is the effective configuration: the file plus the native settings
+	// overlay. Settings changes replace it and the sync loop behind syncMu.
+	cfg *config.Config
+	srv *clipper.Server
+
+	// cncl stops the whole backend; the loop's own cancel only stops one
+	// generation of it, so a target change can restart sync without reopening
+	// the database or the API.
+	cncl context.Context
+
+	// syncMu guards the loop handles below. They are read from the UI poll and
+	// replaced from the settings dialog, so they cannot be plain fields.
+	syncMu     sync.Mutex
+	engine     *jsync.Engine
+	syncCancel context.CancelFunc
+	syncDone   chan struct{}
+	syncGen    int
+	closed     bool
+
+	status *syncStatus
+}
+
+// syncStatus is the current/last sync state, read by the native window from
+// the UI thread while syncLoop writes it from its own goroutine.
+type syncStatus struct {
+	mu      sync.Mutex
+	running bool
+	pending bool
+	last    time.Time
+	err     string
+}
+
+// syncSnapshot is a consistent copy of the sync state.
+type syncSnapshot struct {
+	Enabled bool
+	Running bool
+	Pending bool
+	Last    time.Time
+	Err     string
+}
+
+// reset clears the last result when a new sync engine (a new target) replaces
+// the old one, so the footer does not show the previous target's failure.
+func (s *syncStatus) reset() {
+	s.mu.Lock()
+	s.running, s.pending, s.last, s.err = false, false, time.Time{}, ""
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) request() {
+	s.mu.Lock()
+	s.pending = true
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) start() {
+	s.mu.Lock()
+	s.pending, s.running = false, true
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) finish(err error) {
+	s.mu.Lock()
+	s.running, s.pending, s.last = false, false, time.Now()
+	if err != nil {
+		s.err = err.Error()
+	} else {
+		s.err = ""
+	}
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) snapshot(enabled bool) syncSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return syncSnapshot{
+		Enabled: enabled,
+		Running: s.running,
+		Pending: s.pending,
+		Last:    s.last,
+		Err:     s.err,
+	}
 }
 
 func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*backend, error) {
@@ -62,6 +146,21 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	uiCfg.MCPAllowCreateFolder = true
 	uiCfg.MCPAllowCreateTag = true
 
+	db, err := store.Open(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// The native settings dialog owns a small overlay in key_values. It is
+	// applied before the token and the sync engine are built, so a saved
+	// target is what this launch uses.
+	if stored, ok, err := loadStoredSettings(db); err != nil {
+		db.Close()
+		return nil, err
+	} else if ok {
+		overlayStoredSettings(cfg, stored)
+	}
+
 	// A configured token keeps the Data API stable across launches (the web
 	// clipper pastes it once). Without one, mint an ephemeral token for the
 	// page only — never persist it, and never log it.
@@ -69,33 +168,26 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	if token == "" {
 		token, err = randomToken()
 		if err != nil {
+			db.Close()
 			return nil, fmt.Errorf("generate api token: %w", err)
 		}
+		cfg.APIToken = token
 		slog.Warn("no api.token configured; using an ephemeral token for this session")
 	}
 
-	db, err := store.Open(cfg.DataDir)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	var syncer clipper.SyncTrigger
-	var engine *jsync.Engine
-	if cfg.NoSync || cfg.SyncTarget == 0 {
-		slog.Info("sync disabled: serving the local database only")
-	} else {
-		remote, err := newSyncBackend(cfg)
+	// Build the remote before anything is started so a bad target is a startup
+	// error (and a settings-save error), not a loop that fails later.
+	var remote jsync.SyncBackend
+	if !cfg.NoSync && cfg.SyncTarget != 0 {
+		remote, err = newSyncBackend(cfg)
 		if err != nil {
-			cancel()
 			db.Close()
 			return nil, err
 		}
-		engine = jsync.NewEngine(remote, db, cfg.MasterPassword)
-		syncer = engine
-		go syncLoop(ctx, engine)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	status := &syncStatus{}
 
 	// Listen before creating the window so a port collision is a clear dialog
 	// (Joplin desktop uses 41184 by default) instead of a blank page.
@@ -111,7 +203,19 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 			"Close it or set server.port in the config.", addr, err)
 	}
 
-	srv := clipper.NewServer(db, token, cfg.APIKey, syncer, clipper.NewPolicy(&uiCfg), authPrompt{})
+	b := &backend{
+		db:      db,
+		cancel:  cancel,
+		baseURL: "",
+		token:   token,
+		profile: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.DataDir))),
+		cfg:     cfg,
+		cncl:    ctx,
+		status:  status,
+	}
+
+	srv := clipper.NewServer(db, token, cfg.APIKey, b, clipper.NewPolicy(&uiCfg), authPrompt{})
+	b.srv = srv
 	httpSrv := &http.Server{Handler: srv.Router()}
 	go func() {
 		if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -120,16 +224,166 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	}()
 
 	base := baseURLFor(ln.Addr())
+	b.httpSrv = httpSrv
+	b.baseURL = base
 	slog.Info("desktop API listening", "base", base, "data_dir", cfg.DataDir)
 
-	return &backend{
-		db:      db,
-		httpSrv: httpSrv,
-		cancel:  cancel,
-		baseURL: base,
-		token:   token,
-		profile: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.DataDir))),
-	}, nil
+	b.syncMu.Lock()
+	startErr := b.startSyncLocked(remote)
+	b.syncMu.Unlock()
+	if startErr != nil {
+		cancel()
+		db.Close()
+		return nil, startErr
+	}
+
+	return b, nil
+}
+
+// overlayStoredSettings applies a saved dialog state over the loaded config.
+// A -no-sync run stays local, but the token and master password still apply so
+// they survive it.
+func overlayStoredSettings(cfg *config.Config, s desktopSettings) {
+	if !cfg.NoSync {
+		s.applyTo(cfg)
+		return
+	}
+	cfg.MasterPassword = s.MasterPassword
+	if s.APIToken != "" {
+		cfg.APIToken = s.APIToken
+	}
+}
+
+// startSyncLocked starts the background loop. The caller holds syncMu (or is
+// still constructing the backend). A nil remote means "no sync".
+func (b *backend) startSyncLocked(remote jsync.SyncBackend) error {
+	if remote == nil {
+		b.engine = nil
+		slog.Info("sync disabled: serving the local database only")
+		return nil
+	}
+	ctx, cancel := context.WithCancel(b.cncl)
+	engine := jsync.NewEngine(remote, b.db, b.cfg.MasterPassword)
+	done := make(chan struct{})
+	b.engine, b.syncCancel, b.syncDone = engine, cancel, done
+	b.status.reset()
+	go func() {
+		defer close(done)
+		syncLoop(ctx, engine, b.status)
+	}()
+	return nil
+}
+
+// Settings returns the settings in effect, for the native dialog.
+func (b *backend) Settings() desktopSettings {
+	if b == nil {
+		return desktopSettings{}
+	}
+	if b.cfg == nil {
+		return desktopSettings{APIToken: b.token}
+	}
+	b.syncMu.Lock()
+	cfg := *b.cfg
+	b.syncMu.Unlock()
+	return settingsFromConfig(&cfg)
+}
+
+// ApplySettings validates and persists the dialog's values, then applies them
+// without restarting the app: the clipper token changes in place and the sync
+// loop is replaced once the previous pass has exited, so two engines never run
+// against one target.
+func (b *backend) ApplySettings(s desktopSettings) error {
+	if b == nil {
+		return errors.New("settings are read-only in this build")
+	}
+	if err := s.validate(); err != nil {
+		return err
+	}
+	b.syncMu.Lock()
+	if b.cfg == nil {
+		b.syncMu.Unlock()
+		return errors.New("settings are read-only in this build")
+	}
+	cfg := *b.cfg
+	b.syncMu.Unlock()
+	s.applyTo(&cfg)
+
+	var remote jsync.SyncBackend
+	if !cfg.NoSync && cfg.SyncTarget != 0 {
+		var err error
+		remote, err = newSyncBackend(&cfg)
+		if err != nil {
+			return fmt.Errorf("cannot use this sync target: %w", err)
+		}
+	}
+	if err := s.save(b.db); err != nil {
+		return err
+	}
+
+	b.syncMu.Lock()
+	prevDone, prevCancel := b.syncDone, b.syncCancel
+	if prevCancel != nil {
+		prevCancel()
+	}
+	b.syncCancel, b.syncDone = nil, nil
+	b.engine = nil
+	b.cfg = &cfg
+	b.token = cfg.APIToken
+	b.syncGen++
+	gen := b.syncGen
+	b.syncMu.Unlock()
+
+	b.srv.SetAPIToken(cfg.APIToken)
+
+	go func() {
+		if prevDone != nil {
+			<-prevDone
+		}
+		b.syncMu.Lock()
+		defer b.syncMu.Unlock()
+		// A newer save (or Close) wins; this generation must not start.
+		if b.closed || b.syncGen != gen {
+			return
+		}
+		if err := b.startSyncLocked(remote); err != nil {
+			b.status.finish(err)
+			slog.Error("cannot start sync after settings change", "error", err)
+		}
+	}()
+	return nil
+}
+
+// SyncNow asks the sync loop to run immediately. It reports false when the
+// instance was started without a remote (-no-sync or no target).
+func (b *backend) SyncNow() bool {
+	if b == nil || b.status == nil {
+		return false
+	}
+	b.syncMu.Lock()
+	engine := b.engine
+	b.syncMu.Unlock()
+	if engine == nil {
+		return false
+	}
+	b.status.request()
+	engine.TriggerSync()
+	return true
+}
+
+// TriggerSync satisfies clipper.SyncTrigger: a mutation queues a pass.
+func (b *backend) TriggerSync() { b.SyncNow() }
+
+// SyncState returns a consistent snapshot of the sync state for the UI. Sync
+// counts as enabled whenever the effective config has a target, even during
+// the short window where a settings change has no engine yet.
+func (b *backend) SyncState() syncSnapshot {
+	if b == nil || b.status == nil {
+		return syncSnapshot{}
+	}
+	b.syncMu.Lock()
+	enabled := b.cfg != nil && !b.cfg.NoSync && b.cfg.SyncTarget != 0
+	b.syncMu.Unlock()
+	return b.status.snapshot(enabled)
 }
 
 // baseURLFor turns the bound address into a URL the webview can fetch. A
@@ -181,32 +435,52 @@ func randomToken() (string, error) {
 }
 
 // syncLoop mirrors `serve`: initial sync, then every 10 minutes or when a
-// UI mutation asks for one.
-func syncLoop(ctx context.Context, engine *jsync.Engine) {
+// UI mutation asks for one. The status is recorded around every pass so the
+// native window can show progress and refresh when a pass finishes.
+func syncLoop(ctx context.Context, engine *jsync.Engine, status *syncStatus) {
+	run := func() {
+		status.start()
+		err := engine.Sync(ctx)
+		status.finish(err)
+		if err != nil {
+			slog.Error("sync failed", "error", err)
+		}
+	}
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
-	if err := engine.Sync(ctx); err != nil {
-		slog.Error("initial sync failed", "error", err)
-	}
+	run()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := engine.Sync(ctx); err != nil {
-				slog.Error("sync failed", "error", err)
-			}
+			run()
 		case <-engine.TriggerCh():
-			if err := engine.Sync(ctx); err != nil {
-				slog.Error("triggered sync failed", "error", err)
-			}
+			run()
 		}
 	}
 }
 
 func (b *backend) Close() {
+	b.syncMu.Lock()
+	b.closed = true
+	done, stop := b.syncDone, b.syncCancel
+	b.syncMu.Unlock()
 	b.once.Do(func() {
 		b.cancel()
+		if stop != nil {
+			stop()
+		}
+		// Closing the database under a running pass is how a shutdown turns
+		// into "database is closed" sync errors, so let the last pass exit
+		// first (bounded: it may be blocked in a slow request).
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				slog.Warn("sync did not stop before shutdown")
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = b.httpSrv.Shutdown(ctx)

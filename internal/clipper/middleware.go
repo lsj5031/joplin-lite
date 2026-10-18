@@ -22,14 +22,15 @@ func (s *Server) apiAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if s.apiToken == "" && s.apiKey == "" {
+		apiToken := s.APIToken()
+		if apiToken == "" && s.apiKey == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		// Joplin Data API auth: ?token=...
 		if token, ok := lookupParam(r.URL.Query(), "token"); ok {
-			if token == s.apiToken {
+			if token == apiToken {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -40,7 +41,7 @@ func (s *Server) apiAuth(next http.Handler) http.Handler {
 		// Bearer (our own CLI/tooling).
 		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 			t := strings.TrimPrefix(auth, "Bearer ")
-			if t == s.apiKey || t == s.apiToken {
+			if t == s.apiKey || t == apiToken {
 				next.ServeHTTP(w, r)
 				return
 			}

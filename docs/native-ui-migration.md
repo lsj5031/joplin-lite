@@ -78,12 +78,32 @@ of going through the in-process HTTP API; the clipper server remains on
 - Virtualized list (only visible rows built), keyboard navigation, back/forward.
 - **Gate:** the daily note loop works without the web UI.
 
+Status: **done.** Selection, editing, autosave, preview, create, rename,
+move, delete, todo toggle, search, keyboard navigation and back/forward are
+wired, and `ui.List` builds only the rows in view. The daily note loop works
+without the web UI.
+
 ### Phase 2 — management and trust surfaces
 
 - Notebook/tag management, multi-select, drag-and-drop moves, context menus.
 - Sync target, master password, clipper token and conflicts in native dialogs.
 - Sync-now and status; lock/conflict/error states.
 - **Gate:** settings and sync no longer require editing YAML.
+
+Status: **gate met.** The native sidebar has a sync footer with **Sync now**,
+last-sync time, running/pending state and shortened errors, and the workspace
+refreshes rows/notebooks (and the open note when it has no unsaved edits) when
+a pass finishes. Notebooks are a title-sorted tree with create, rename, move
+and delete (delete refuses a notebook with children and removes its notes
+after confirmation). Tags have their own rail for filtering, and the note
+header assigns/removes them; the rail can create, rename and delete tags. A
+**Conflicts** row lists Joplin's virtual conflict notebook, and **Resolve
+conflict → Keep this version** copies the conflict onto its original and
+deletes the copy. **Settings** now edits the sync target (off / file system /
+Joplin Server), its fields, the E2EE master password and the clipper token in
+a native dialog; saving applies them without a restart. Still not native:
+drag/drop, multi-select, sort, saved searches and a dedicated lock-state
+view.
 
 ### Phase 3 — packaging
 
@@ -131,13 +151,92 @@ The difference is ~354 MB, a 4.5× reduction, with no `msedgewebview2.exe`
 process at all. A captured frame (`tmp/native-smoke.png`, 2534×1529 at the
 window's 2× scale) confirms the content actually renders.
 
-The 100 MB gate passes, but narrowly. Phase 1 should bring it down further
-before the window grows: page the note list instead of loading 500 rows,
-keep one Markdown parse per selection, and measure again at idle.
+The 100 MB gate passed, but narrowly. Phase 1 paged the note list as
+planned; the editor it added kept the total at the line instead of lowering
+it (see the Phase 1 result below).
+
+## Phase 1 result (2026-10-19)
+
+`shell/native.go` is now a read/write workspace, not just a spike:
+
+- notebook rail, a keyset-paged note list (100 rows, then **Load more**), and
+  search over the FTS index;
+- the selected note opens in a monospace Markdown editor with a title field;
+  edits autosave after a 500 ms debounce (flushed on selection change,
+  preview, and window close);
+- **Preview** renders the same body with `ui/markdown`, **Todo** toggles
+  `is_todo`, **Move** opens a notebook menu, **Delete…** asks for
+  confirmation, and **+**/Ctrl+N creates a note in the current notebook
+  (creating a default notebook when the vault has none);
+- Back/Forward walk the visited notes; a target hidden by the current search
+  or notebook drops those filters to show it;
+- shortcuts: Cmd/Ctrl+N new, Cmd/Ctrl+F search, Cmd/Ctrl+S save now,
+  Cmd/Ctrl+E preview, Alt+Left/Right back and forward.
+
+It still talks to `service/` directly, so the clipper server and the webview
+shell are untouched. Measured on the same snapshot, while no webview process
+was running:
+
+| Build | Processes | Working set |
+|---|---:|---:|
+| WebView2 shell | 7 | ~453 MB |
+| Native workspace | 1 | **92–97 MB** |
+
+After the notebook tree and tag rail landed, a windowed smoke run settled at
+92 MB (97 MB in the first second), so the 100 MB gate now has a small margin.
+`ui.List` builds only the rows in view; the remaining cost is text shaping and
+font caches. Keeping button glyphs ASCII (for example `<` rather than `‹`)
+avoids pulling in a fallback font face for a few megabytes of cache. Trimming
+the editor's shaping caches is the next memory work, not list virtualization.
+
+Verification: `go test ./...` and `cd shell && go test ./...` pass.
+`TestNativeWorkspaceDrivesTheView` drives the real view headlessly through
+`ui.NewTester`: it types into the body and title, waits for the autosave
+debounce, toggles preview, creates a note with Ctrl+N, searches the store,
+toggles Todo and deletes through the confirmation dialog.
+`TestNativeHistoryAndMove` clicks between notes, walks Back/Forward by button
+and Alt+Left/Right, and moves a note out of the open notebook through the
+Move menu. `TestNativeNotebookManagement` creates a child through the modal,
+renames it, verifies deleting it removes its notes, and checks that a parent
+with children is refused; `TestNativeTagFilterAndToggle` assigns a tag, filters
+the list by it, and removes it again; `TestNativeTagManagement` creates,
+renames and deletes a tag through the rail; `TestNativeConflictsResolve`
+opens the Conflicts view and folds a conflict back into its original. `TestNativeSyncRefresh` checks that a pulled change updates an
+idle open note but never overwrites unsaved typing, and
+`TestSyncStatusTransitions` covers the running/pending/error snapshot the
+footer reads. `TestDesktopBackendManualSync` runs the real engine against a
+file-system target, waits for the initial pass, pushes a note through
+`SyncNow`, and verifies the target received it. A windowed smoke run captures
+`tmp/native-smoke.png` (2534×1529).
+
+## Phase 2 result (2026-10-19)
+
+The management and trust surfaces are native:
+
+- notebooks create/rename/delete/move; tags create/rename/delete, filter the
+  list, and are assigned per note; notes get the **Conflicts** rail and
+  **Resolve conflict → Keep this version**;
+- sync is a footer line (last pass, running, pending, shortened error) with
+  **Sync now**, and a finished pass refreshes rows, notebooks, tags and an
+  idle open note without overwriting unsaved typing;
+- **Settings** is a native dialog. It edits the sync target — off, file
+  system (folder) or Joplin Server (URL, email, password) — plus the E2EE
+  master password and the clipper API token (with **Regenerate**). Saving
+  validates first, stores the values in the vault's local `key_values` table,
+  swaps the clipper token in place (the old one is rejected immediately) and
+  replaces the sync loop once its current pass has finished. The config file
+  is never rewritten, so a Joplin `settings.json` profile stays owned by
+  Joplin desktop. A Dropbox/S3 target configured in the file is shown as a
+  read-only segment and kept.
+
+Remaining Phase 2 UX (not the gate): drag/drop moves, multi-select, note
+sorting, saved searches, and a first-class lock/offline state beyond the
+sync footer's error line.
 
 ## Decision
 
-Proceed to Phase 1 on this spike — note selection/editing, autosave and
-search — while the webview shell stays the shipping UI until parity.
-Re-measure at every phase gate and keep the webview process count at zero in
-the native build.
+Phase 1 meets its gate: the daily note loop works without the web UI. Phase 2
+is measured against its gate — settings and sync no longer require editing
+YAML — and passes. Next is Phase 3: package the native shell, drop the
+embedded SPA from the desktop binary and record the final numbers. Every
+phase is measured with zero webview processes running.

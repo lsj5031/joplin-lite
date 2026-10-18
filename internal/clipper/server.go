@@ -18,6 +18,7 @@ type SyncTrigger interface {
 // Server is the Joplin Clipper REST API server.
 type Server struct {
 	db       *store.DB
+	tokenMu  sync.RWMutex
 	apiToken string
 	apiKey   string
 	router   chi.Router
@@ -44,6 +45,22 @@ func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger,
 	}
 	s.buildRouter()
 	return s
+}
+
+// SetAPIToken replaces the token the Data API accepts. The desktop settings
+// dialog calls it, so changing the token closes the old session immediately
+// (the clipper pairs again) instead of requiring a restart.
+func (s *Server) SetAPIToken(token string) {
+	s.tokenMu.Lock()
+	s.apiToken = token
+	s.tokenMu.Unlock()
+}
+
+// APIToken returns the token the server currently accepts.
+func (s *Server) APIToken() string {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	return s.apiToken
 }
 
 // Router returns the HTTP handler.

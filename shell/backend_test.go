@@ -10,9 +10,79 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
+	"github.com/lsj5031/joplin-lite/internal/models"
+	"github.com/lsj5031/joplin-lite/service"
 )
+
+// TestDesktopBackendManualSync runs the real sync loop against a file-system
+// target: it waits for the initial pass, pushes a new note with SyncNow, and
+// checks that the target received it.
+func TestDesktopBackendManualSync(t *testing.T) {
+	target := t.TempDir()
+	cfg := writeDesktopConfig(t, fmt.Sprintf("sync:\n  target: 2\n  local_dir: %q\n", filepath.ToSlash(target)))
+	be, err := startBackend(cfg, filepath.Join(t.TempDir(), "vault"), false, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("startBackend: %v", err)
+	}
+	t.Cleanup(be.Close)
+
+	if got := be.SyncState(); !got.Enabled {
+		t.Fatal("sync is disabled in a backend configured with target 2")
+	}
+	first := waitDesktopSync(t, be, time.Time{})
+	if first.Err != "" {
+		t.Fatalf("initial sync failed: %s", first.Err)
+	}
+
+	note := &models.Note{Title: "Sync me", Body: "manual sync body"}
+	if err := service.New(be.db).CreateNote(note); err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	if !be.SyncNow() {
+		t.Fatal("SyncNow reported false with an engine present")
+	}
+	if st := be.SyncState(); !st.Pending && !st.Running {
+		t.Fatalf("SyncNow did not mark the pass pending: %+v", st)
+	}
+	last := waitDesktopSync(t, be, first.Last)
+	if last.Err != "" {
+		t.Fatalf("manual sync failed: %s", last.Err)
+	}
+
+	found := false
+	_ = filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err == nil && (strings.Contains(string(body), note.ID) || strings.Contains(string(body), "Sync me")) {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		t.Fatalf("pushed note not found in target %s", target)
+	}
+}
+
+// waitDesktopSync waits for a pass that started after the given time to end.
+func waitDesktopSync(t *testing.T, be *backend, after time.Time) syncSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		st := be.SyncState()
+		if !st.Running && !st.Pending && !st.Last.IsZero() && st.Last.After(after) {
+			return st
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	st := be.SyncState()
+	t.Fatalf("sync did not finish: %+v", st)
+	return st
+}
 
 func writeDesktopConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -157,4 +227,113 @@ func TestDesktopBackendPortCollision(t *testing.T) {
 	if !strings.Contains(err.Error(), addr) {
 		t.Fatalf("error %q does not name the address %q", err, addr)
 	}
+}
+
+// TestDesktopBackendApplySettings covers the native settings path: a save is
+// validated, persisted in key_values, and applied without a restart — the
+// clipper accepts only the new token and sync moves to the new folder. A
+// relaunch then picks the saved overlay up instead of the config file's target.
+func TestDesktopBackendApplySettings(t *testing.T) {
+	t.Setenv("GOJOPLIN_API_TOKEN", "")
+	t.Setenv("GOJOPLIN_API_KEY", "")
+	t.Setenv("GOJOPLIN_DATA_DIR", "")
+
+	firstDir := t.TempDir()
+	secondDir := t.TempDir()
+	const oldToken = "old-token-0123456789abcdef0123456789abcdef"
+	const newToken = "new-token-0123456789abcdef0123456789abcdef"
+
+	cfgPath := writeDesktopConfig(t, fmt.Sprintf(
+		"sync:\n  target: 2\n  local_dir: %q\napi:\n  token: %q\n",
+		filepath.ToSlash(firstDir), oldToken))
+	dataDir := filepath.Join(t.TempDir(), "vault")
+	be, err := startBackend(cfgPath, dataDir, false, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("startBackend: %v", err)
+	}
+	t.Cleanup(be.Close)
+	first := waitDesktopSync(t, be, time.Time{})
+	if first.Err != "" {
+		t.Fatalf("initial sync failed: %s", first.Err)
+	}
+	if code, _ := httpGet(be.baseURL + "/notes?token=" + oldToken); code != 200 {
+		t.Fatalf("configured token before save = %d, want 200", code)
+	}
+
+	// An invalid save reports the missing field and changes nothing.
+	if err := be.ApplySettings(desktopSettings{Target: targetServer, APIToken: newToken}); err == nil {
+		t.Fatal("ApplySettings accepted a server target without a URL")
+	}
+	if code, _ := httpGet(be.baseURL + "/notes?token=" + oldToken); code != 200 {
+		t.Fatalf("invalid save rotated the token anyway: %d", code)
+	}
+
+	next := desktopSettings{
+		Target:   targetFolder,
+		LocalDir: secondDir,
+		APIToken: newToken,
+	}
+	if err := be.ApplySettings(next); err != nil {
+		t.Fatalf("ApplySettings: %v", err)
+	}
+	if got := be.Settings(); got.LocalDir != secondDir || got.APIToken != newToken || got.Target != targetFolder {
+		t.Fatalf("Settings after save = %+v", got)
+	}
+
+	// The new token works immediately; the old one is rejected.
+	if code, _ := httpGet(be.baseURL + "/notes?token=" + oldToken); code != http.StatusForbidden {
+		t.Fatalf("old token after save = %d, want 403", code)
+	}
+	if code, _ := httpGet(be.baseURL + "/notes?token=" + newToken); code != http.StatusOK {
+		t.Fatalf("new token after save = %d, want 200", code)
+	}
+
+	// The restarted engine pushes to the new folder.
+	note := &models.Note{Title: "After settings", Body: "moved target"}
+	if err := service.New(be.db).CreateNote(note); err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	if !be.SyncNow() {
+		t.Fatal("SyncNow reported false after the settings change")
+	}
+	if st := waitDesktopSync(t, be, first.Last); st.Err != "" {
+		t.Fatalf("sync after settings change failed: %s", st.Err)
+	}
+	if !folderContains(t, secondDir, note.ID) {
+		t.Fatalf("pushed note not found in the new target %s", secondDir)
+	}
+
+	// A relaunch reopens the same vault and inherits the saved overlay.
+	be.Close()
+	again, err := startBackend(cfgPath, dataDir, false, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	defer again.Close()
+	if got := again.Settings(); got.LocalDir != secondDir || got.APIToken != newToken || got.Target != targetFolder {
+		t.Fatalf("Settings after relaunch = %+v", got)
+	}
+	if again.token != newToken {
+		t.Fatalf("relaunched token = %q, want the saved one", again.token)
+	}
+	if code, _ := httpGet(again.baseURL + "/notes?token=" + newToken); code != 200 {
+		t.Fatalf("saved token after relaunch = %d, want 200", code)
+	}
+}
+
+// folderContains reports whether any file under dir mentions want.
+func folderContains(t *testing.T, dir, want string) bool {
+	t.Helper()
+	found := false
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(body), want) {
+			found = true
+		}
+		return nil
+	})
+	return found
 }

@@ -115,14 +115,14 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		resp := map[string]interface{}{"status": st.status}
 		if st.status == authStatusAccepted {
-			resp["token"] = s.apiToken
+			resp["token"] = s.APIToken()
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
 	if token, ok := lookupParam(q, "token"); ok {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"valid": token == s.apiToken})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"valid": token == s.APIToken()})
 		return
 	}
 

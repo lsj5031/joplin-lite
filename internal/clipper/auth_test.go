@@ -301,3 +301,28 @@ func TestClipperServePortCollision(t *testing.T) {
 		t.Fatalf("Serve error lacks the collision message: %v", err)
 	}
 }
+
+// TestClipperTokenRotation covers SetAPIToken: the desktop settings dialog
+// replaces the token without restarting the server, so the old token must stop
+// working at once and the new one must authorise the same routes.
+func TestClipperTokenRotation(t *testing.T) {
+	s, ts := newTestServer(t, nil)
+
+	if code, _ := doReq(t, "GET", ts.URL+"/notes?token="+testAPIToken, nil); code != http.StatusOK {
+		t.Fatalf("old token GET /notes = %d, want 200", code)
+	}
+	s.SetAPIToken("api-token-2")
+	if got := s.APIToken(); got != "api-token-2" {
+		t.Fatalf("APIToken() = %q", got)
+	}
+	if code, _ := doReq(t, "GET", ts.URL+"/notes?token="+testAPIToken, nil); code != http.StatusForbidden {
+		t.Fatalf("rotated-out token GET /notes = %d, want 403", code)
+	}
+	if code, _ := doReq(t, "GET", ts.URL+"/notes?token=api-token-2", nil); code != http.StatusOK {
+		t.Fatalf("new token GET /notes = %d, want 200", code)
+	}
+	code, body := doReq(t, "GET", ts.URL+"/auth/check?token=api-token-2", nil)
+	if code != http.StatusOK || !strings.Contains(string(body), `"valid":true`) {
+		t.Fatalf("new token GET /auth/check = %d %s", code, body)
+	}
+}

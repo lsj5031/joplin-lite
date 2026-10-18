@@ -26,9 +26,9 @@ var (
 	noSync   = flag.Bool("no-sync", false, "serve the local database without syncing")
 	addrFlag = flag.String("addr", "", "override the API listen address, e.g. 127.0.0.1:41888")
 
-	// nativeUI opens the Phase 0 native-UI spike (MyGO ui, no webview) for the
-	// memory comparison in docs/native-ui-migration.md.
-	nativeUI = flag.Bool("native", false, "open the native UI spike instead of the webview")
+	// nativeUI opens the MyGO ui workspace (no webview) described in
+	// docs/native-ui-migration.md.
+	nativeUI = flag.Bool("native", false, "open the native workspace instead of the webview")
 
 	// Development-only verification: load the app, probe the live page, save
 	// a screenshot and quit. Used by the desktop smoke check.
