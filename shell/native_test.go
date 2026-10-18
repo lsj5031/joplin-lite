@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -981,4 +982,64 @@ func TestNativeSettingsDialog(t *testing.T) {
 		got.Username != "me@example.com" || got.Password != "hunter2" || got.MasterPassword != "master pass" {
 		t.Fatalf("applied server settings = %+v", got)
 	}
+}
+
+// TestNativeSortMenu switches the note-list order through the Sort popover.
+// The order must match the store's, and the selection must stay on a note.
+func TestNativeSortMenu(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	for _, title := range []string{"Delta", "alpha", "Charlie"} {
+		addTestNote(t, svc, "", title, "body of "+title)
+	}
+	app.reloadNotes()
+	if len(app.notes) != 3 {
+		t.Fatalf("seeded %d notes, want 3", len(app.notes))
+	}
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	if err := tt.Click("Sort"); err != nil {
+		t.Fatalf("click Sort: %v", err)
+	}
+	if !app.sortOpen {
+		t.Fatal("Sort did not open its menu")
+	}
+	if err := tt.Click("Title A-Z"); err != nil {
+		t.Fatalf("click Title A-Z: %v", err)
+	}
+	if app.sort != string(store.SortTitleAsc) {
+		t.Fatalf("sort = %q, want %q", app.sort, store.SortTitleAsc)
+	}
+	if got := strings.Join(noteTitles(app.notes), ","); got != "alpha,Charlie,Delta" {
+		t.Fatalf("title order = %s", got)
+	}
+	if app.sortOpen {
+		t.Fatal("the sort menu stayed open after choosing")
+	}
+
+	if err := tt.Click("Sort"); err != nil {
+		t.Fatalf("reopen Sort: %v", err)
+	}
+	if err := tt.Click("Title Z-A"); err != nil {
+		t.Fatalf("click Title Z-A: %v", err)
+	}
+	if got := strings.Join(noteTitles(app.notes), ","); got != "Delta,Charlie,alpha" {
+		t.Fatalf("descending title order = %s", got)
+	}
+
+	// The selected row still opens its note after the reorder.
+	if err := tt.Click("Charlie"); err != nil {
+		t.Fatalf("select Charlie: %v", err)
+	}
+	if app.note == nil || app.note.Title != "Charlie" {
+		t.Fatalf("selected note = %#v", app.note)
+	}
+}
+
+func noteTitles(notes []*models.NoteSummary) []string {
+	out := make([]string, 0, len(notes))
+	for _, n := range notes {
+		out = append(out, n.Title)
+	}
+	return out
 }

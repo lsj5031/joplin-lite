@@ -53,6 +53,8 @@ type nativeApp struct {
 	list             ui.ListState
 
 	query       string
+	sort        string
+	sortOpen    bool
 	editing     bool
 	note        *models.Note
 	title       string
@@ -358,6 +360,7 @@ func (a *nativeApp) noteFilter(cursor string) service.NoteFilter {
 		Page:   service.Page{Limit: nativePageSize},
 		Cursor: cursor,
 		Query:  a.query,
+		Sort:   a.sort,
 	}
 	if a.query == "" {
 		switch {
@@ -1342,6 +1345,11 @@ func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
 			}
 			ui.Text(c, title).Bold().Grow(1)
 			ui.Textf(c, "%d", len(a.notes)).FontSize(11).TextColor(t.TextMuted)
+			sortButton := ui.Button(c, "Sort").Label("Sort notes").Tooltip("Sort the note list")
+			if sortButton.Clicked() {
+				a.sortOpen = !a.sortOpen
+			}
+			ui.Popover(c, sortButton, &a.sortOpen, func() { a.sortMenu(c, t) })
 			if ui.Button(c, "+").Tooltip("New note (Cmd/Ctrl+N)").Clicked() {
 				a.newNote()
 			}
@@ -1540,6 +1548,44 @@ func (a *nativeApp) notebookMenu(c *ui.Context, t *ui.Theme) {
 				item.run()
 			}
 			entry.Children(func() { ui.Text(c, item.label) })
+		}
+	})
+}
+
+// sortMenu sets the note-list order. The default is updated_time descending,
+// as before; the choice is per-window state, not a saved setting.
+func (a *nativeApp) sortMenu(c *ui.Context, t *ui.Theme) {
+	options := []struct {
+		label string
+		value string
+	}{
+		{"Updated (newest)", ""},
+		{"Updated (oldest)", string(store.SortUpdatedAsc)},
+		{"Created (newest)", string(store.SortCreatedDesc)},
+		{"Created (oldest)", string(store.SortCreatedAsc)},
+		{"Title A-Z", string(store.SortTitleAsc)},
+		{"Title Z-A", string(store.SortTitleDesc)},
+	}
+	ui.Column(c).Width(190).Padding(4).Gap(2).Children(func() {
+		for _, opt := range options {
+			entry := ui.Row(c.Key("sort:"+opt.value)).Label("Sort by "+opt.label).
+				Padding(6, 10).Radius(5).Gap(6).AlignItems(ui.Center)
+			if entry.Hovered() {
+				entry.Background(t.Accent).TextColor(t.AccentText)
+			}
+			if entry.Clicked() {
+				a.sortOpen = false
+				if a.sort != opt.value {
+					a.sort = opt.value
+					a.reloadNotes()
+				}
+			}
+			entry.Children(func() {
+				ui.Text(c, opt.label).Grow(1)
+				if a.sort == opt.value {
+					ui.Text(c, "✓")
+				}
+			})
 		}
 	})
 }

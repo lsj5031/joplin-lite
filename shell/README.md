@@ -65,11 +65,13 @@ HTTP server down, waits for the last sync pass, and closes SQLite
 ## Workspace
 
 The window has a notebook tree with create/rename/delete, a keyset-paged note
-list with search, tags with create/rename/delete, filtering and per-note
+list with search and a **Sort** menu (updated, created or title; either
+direction), tags with create/rename/delete, filtering and per-note
 assignment, a Conflicts view with **Resolve conflict** (keep this version on
 the original), a title and Markdown body editor that autosaves after 500 ms, a
 rendered preview, new note, todo toggle, move to another notebook, delete with
-confirmation, and Back/Forward through visited notes.
+confirmation, and Back/Forward through visited notes. Sorting pages with the
+same keyset cursor, so a deep page never scans the rows before it.
 
 The sidebar footer shows sync state, a **Sync now** button and **Settings**;
 when a pass finishes, rows and notebooks reload and an idle open note picks up
@@ -89,9 +91,10 @@ Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+F search, Cmd/Ctrl+S save now,
 Cmd/Ctrl+E edit/preview, Alt+Left/Right back and forward. Edits are flushed
 when switching notes, leaving the editor and closing the window.
 
-Measured as one process at **~94–96 MB** working set after settling (98,748 KB
-at first read on the Phase 3 build) with no `msedgewebview2.exe` child, versus
-7 processes and ~453 MB for the former webview shell. `go test ./...` in this directory includes headless
+Measured as one process at **92–101 MB** working set depending on window
+visibility and GC timing (94,668 KB on the final sample) with no
+`msedgewebview2.exe` child, versus 7 processes and ~453 MB for the former
+webview shell. `go test ./...` in this directory includes headless
 `ui.NewTester` tests that type, autosave, preview, search, move, delete and
 save settings through the real view.
 

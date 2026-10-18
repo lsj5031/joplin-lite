@@ -39,7 +39,10 @@ type NoteFilter struct {
 	TagID        string `json:"tag_id,omitempty"`
 	Query        string `json:"query,omitempty"`
 	ConflictOnly bool   `json:"conflict_only,omitempty"`
-	Page         Page   `json:"page"`
+	// Sort is the list order: "" / "updated-desc" (default), "updated-asc",
+	// "created-desc", "created-asc", "title-asc" or "title-desc".
+	Sort string `json:"sort,omitempty"`
+	Page Page   `json:"page"`
 	// Cursor is the keyset position for ListNoteSummaries (empty = first
 	// page). The page/offset fields remain for the full-note Data API.
 	Cursor string `json:"cursor,omitempty"`
@@ -86,14 +89,15 @@ type SummaryPage struct {
 }
 
 // ListNoteSummaries lists note rows without bodies. Cursor paging is keyset
-// (updated_time, id), so page N does not scan N×limit rows. Same filter
-// precedence as ListNotes: Query, then ConflictOnly, then FolderID/TagID.
+// (the sort's column plus id), so page N does not scan N×limit rows. Same
+// filter precedence as ListNotes: Query, then ConflictOnly, then FolderID/TagID.
 func (s *Service) ListNoteSummaries(f NoteFilter) (SummaryPage, error) {
 	q := store.NoteQuery{
 		FolderID:     f.FolderID,
 		TagID:        f.TagID,
 		Query:        f.Query,
 		ConflictOnly: f.ConflictOnly,
+		Sort:         store.ParseNoteSort(f.Sort),
 	}
 	notes, hasMore, next, err := s.db.ListNoteSummaries(q, f.Page.Limit, f.Cursor)
 	if err != nil {

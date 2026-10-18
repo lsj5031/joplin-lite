@@ -101,9 +101,12 @@ header assigns/removes them; the rail can create, rename and delete tags. A
 conflict → Keep this version** copies the conflict onto its original and
 deletes the copy. **Settings** now edits the sync target (off / file system /
 Joplin Server), its fields, the E2EE master password and the clipper token in
-a native dialog; saving applies them without a restart. Still not native:
-drag/drop, multi-select, sort, saved searches and a dedicated lock-state
-view.
+a native dialog; saving applies them without a restart. The note list has a
+**Sort** menu (updated, created or title; either direction) with keyset
+paging per order; tests pin all six orders, page boundaries, a cursor reused
+with another order (ignored), legacy cursors and titles containing `:`. Still
+not native: drag/drop, multi-select, saved searches and a dedicated
+lock-state view.
 
 ### Phase 3 — packaging
 
@@ -236,9 +239,9 @@ The management and trust surfaces are native:
   Joplin desktop. A Dropbox/S3 target configured in the file is shown as a
   read-only segment and kept.
 
-Remaining Phase 2 UX (not the gate): drag/drop moves, multi-select, note
-sorting, saved searches, and a first-class lock/offline state beyond the
-sync footer's error line.
+Remaining Phase 2 UX (not the gate): drag/drop moves, multi-select, saved
+searches, and a first-class lock/offline state beyond the sync footer's error
+line.
 
 ## Phase 3 result (2026-10-19)
 
@@ -254,7 +257,7 @@ desktop process.
 |---|---:|---:|
 | Processes | 1 | 1 |
 | WebView2 processes | 0 | **0** |
-| Working set | 92–97 MB | **95.9 MB steady** (98.7 MB at first read) |
+| Working set | 92–97 MB | **92–101 MB** by window state (94.7 MB final sample) |
 | Binary | 19.5 MiB | **18.6 MiB** (19,501,056 bytes) |
 
 The binary shrank by the staged bundle (~0.9 MiB) and contains no
@@ -277,6 +280,5 @@ Phases 1–3 meet their gates: the daily note loop works without the web UI,
 settings and sync no longer require editing YAML, and the desktop binary runs
 with zero WebView2 processes. The native workspace is the product shell; the
 web build remains an optional browser preview. Remaining work is UX polish
-(drag/drop, multi-select, sort, saved searches), release packaging for
-Windows, and the real-target loops (extension pairing, Dropbox/S3, Joplin
-Server).
+(drag/drop, multi-select, saved searches), release packaging for Windows, and
+the real-target loops (extension pairing, Dropbox/S3, Joplin Server).

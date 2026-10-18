@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,39 +13,124 @@ import (
 // the sense that it is ANDed with the other filters; callers that expose the
 // Data API's "query wins" semantics decide that before calling.
 //
-// Cursor is the keyset position (updated_time + id) returned by the previous
-// page. Keyset paging is what keeps a deep page from scanning every row before
-// it — OFFSET pagination degrades linearly on a large library.
+// Cursor is the keyset position returned by the previous page for Sort. Keyset
+// paging is what keeps a deep page from scanning every row before it — OFFSET
+// pagination degrades linearly on a large library.
 type NoteQuery struct {
 	FolderID         string
 	TagID            string
 	Query            string
 	ConflictOnly     bool
 	IncludeConflicts bool
+	Sort             NoteSort
 	Cursor           string
 }
 
-// NoteCursor serializes a keyset position. IDs are 32-hex, so ":" is safe.
+// NoteSort is the note-list order. The empty value is the default,
+// updated_time descending (Joplin's "last modified" order).
+type NoteSort string
+
+const (
+	SortUpdatedDesc NoteSort = ""
+	SortUpdatedAsc  NoteSort = "updated-asc"
+	SortCreatedDesc NoteSort = "created-desc"
+	SortCreatedAsc  NoteSort = "created-asc"
+	SortTitleAsc    NoteSort = "title-asc"
+	SortTitleDesc   NoteSort = "title-desc"
+)
+
+// ParseNoteSort accepts the public spellings and falls back to the default for
+// anything else, so a stored or API-supplied value can never reach the SQL.
+func ParseNoteSort(s string) NoteSort {
+	switch NoteSort(s) {
+	case SortUpdatedAsc, SortCreatedDesc, SortCreatedAsc, SortTitleAsc, SortTitleDesc:
+		return NoteSort(s)
+	}
+	return SortUpdatedDesc
+}
+
+// noteSortSpec names the column, direction and type of one order. Keyset
+// comparison and ORDER BY are derived from it, so they can never disagree.
+type noteSortSpec struct {
+	sort   NoteSort
+	column string
+	desc   bool
+	text   bool
+}
+
+func noteSortSpecFor(s NoteSort) noteSortSpec {
+	switch s {
+	case SortUpdatedAsc:
+		return noteSortSpec{s, "n.updated_time", false, false}
+	case SortCreatedDesc:
+		return noteSortSpec{s, "n.created_time", true, false}
+	case SortCreatedAsc:
+		return noteSortSpec{s, "n.created_time", false, false}
+	case SortTitleAsc:
+		return noteSortSpec{s, "n.title", false, true}
+	case SortTitleDesc:
+		return noteSortSpec{s, "n.title", true, true}
+	}
+	return noteSortSpec{SortUpdatedDesc, "n.updated_time", true, false}
+}
+
+// NoteCursor serializes a keyset position for the default order. IDs are
+// 32-hex, so ":" is safe as the separator.
 func NoteCursor(updatedTime int64, id string) string {
-	return strconv.FormatInt(updatedTime, 10) + ":" + id
+	return noteCursor(SortUpdatedDesc, strconv.FormatInt(updatedTime, 10), id)
 }
 
-func parseNoteCursor(c string) (int64, string, bool) {
-	ts, id, ok := strings.Cut(c, ":")
-	if !ok || id == "" {
-		return 0, "", false
+// noteCursor serializes a position for any order. The sort is part of the key
+// so a cursor is only reused with the query that produced it; text values are
+// base64 (URL-safe) because a title may contain ":".
+func noteCursor(sort NoteSort, value, id string) string {
+	key := sortKey(sort)
+	return "s1:" + key + ":" + base64.RawURLEncoding.EncodeToString([]byte(value)) + ":" + id
+}
+
+func sortKey(s NoteSort) string {
+	if s == SortUpdatedDesc {
+		return "updated-desc"
 	}
-	n, err := strconv.ParseInt(ts, 10, 64)
+	return string(s)
+}
+
+type noteCursorPos struct {
+	sort  NoteSort
+	value string
+	id    string
+}
+
+func parseNoteCursor(c string) (noteCursorPos, bool) {
+	rest, ok := strings.CutPrefix(c, "s1:")
+	if !ok {
+		// Legacy "<updated_time>:<id>" cursors (one running app across the
+		// upgrade) still page the default order.
+		ts, id, ok := strings.Cut(c, ":")
+		if !ok || id == "" {
+			return noteCursorPos{}, false
+		}
+		if _, err := strconv.ParseInt(ts, 10, 64); err != nil {
+			return noteCursorPos{}, false
+		}
+		return noteCursorPos{SortUpdatedDesc, ts, id}, true
+	}
+	parts := strings.SplitN(rest, ":", 3)
+	if len(parts) != 3 || parts[2] == "" {
+		return noteCursorPos{}, false
+	}
+	value, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return 0, "", false
+		return noteCursorPos{}, false
 	}
-	return n, id, true
+	return noteCursorPos{ParseNoteSort(parts[0]), string(value), parts[2]}, true
 }
 
-// ListNoteSummaries returns one page of list rows, newest first. It never
-// selects the full body: only a 320-byte prefix reaches Go, which is trimmed
-// to a single-line excerpt. limit+1 rows are fetched to report has_more, and
-// the cursor of the last returned row is the next page's key.
+// ListNoteSummaries returns one page of list rows in q.Sort order (newest
+// first by default). It never selects the full body: only a 320-byte prefix
+// reaches Go, which is trimmed to a single-line excerpt. limit+1 rows are
+// fetched to report has_more, and the cursor of the last returned row is the
+// next page's key.
 func (db *DB) ListNoteSummaries(q NoteQuery, limit int, cursor string) ([]*models.NoteSummary, bool, string, error) {
 	if limit <= 0 {
 		limit = 50
@@ -79,10 +165,27 @@ func (db *DB) ListNoteSummaries(q NoteQuery, limit int, cursor string) ([]*model
 		where = append(where, "EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = ?)")
 		args = append(args, q.TagID)
 	}
+	spec := noteSortSpecFor(q.Sort)
+	// A cursor made for a different order cannot describe a position in this
+	// one; ignore it and start from the first page instead of returning a
+	// confusing slice.
 	if cursor != "" {
-		if ts, id, ok := parseNoteCursor(cursor); ok {
-			where = append(where, "(n.updated_time < ? OR (n.updated_time = ? AND n.id < ?))")
-			args = append(args, ts, ts, id)
+		if pos, ok := parseNoteCursor(cursor); ok && pos.sort == spec.sort {
+			op := "<"
+			if !spec.desc {
+				op = ">"
+			}
+			column := spec.column
+			if spec.text {
+				column += " COLLATE NOCASE"
+			}
+			if spec.text {
+				where = append(where, fmt.Sprintf("(%s %s ? OR (%s = ? AND n.id %s ?))", column, op, column, op))
+				args = append(args, pos.value, pos.value, pos.id)
+			} else if ts, err := strconv.ParseInt(pos.value, 10, 64); err == nil {
+				where = append(where, fmt.Sprintf("(%s %s ? OR (%s = ? AND n.id %s ?))", column, op, column, op))
+				args = append(args, ts, ts, pos.id)
+			}
 		}
 	}
 
@@ -93,7 +196,15 @@ func (db *DB) ListNoteSummaries(q NoteQuery, limit int, cursor string) ([]*model
 	if len(where) > 0 {
 		sql += " WHERE " + strings.Join(where, " AND ")
 	}
-	sql += " ORDER BY n.updated_time DESC, n.id DESC LIMIT ?"
+	dir := "DESC"
+	if !spec.desc {
+		dir = "ASC"
+	}
+	orderCol := spec.column
+	if spec.text {
+		orderCol += " COLLATE NOCASE"
+	}
+	sql += fmt.Sprintf(" ORDER BY %s %s, n.id %s LIMIT ?", orderCol, dir, dir)
 	args = append(args, limit+1)
 
 	rows, err := db.queryStmt(sql, args...)
@@ -130,7 +241,15 @@ func (db *DB) ListNoteSummaries(q NoteQuery, limit int, cursor string) ([]*model
 	}
 	next := ""
 	if n := len(out); n > 0 {
-		next = NoteCursor(out[n-1].UpdatedTime, out[n-1].ID)
+		last := out[n-1]
+		value := strconv.FormatInt(last.UpdatedTime, 10)
+		switch spec.sort {
+		case SortCreatedDesc, SortCreatedAsc:
+			value = strconv.FormatInt(last.CreatedTime, 10)
+		case SortTitleAsc, SortTitleDesc:
+			value = last.Title
+		}
+		next = noteCursor(spec.sort, value, last.ID)
 	}
 	return out, hasMore, next, nil
 }
