@@ -3,6 +3,9 @@
 This is the safe way to exercise the full Joplin item format, E2EE and sync
 loop without touching your production Dropbox library.
 
+For the fast client-side gate (encrypted push, pull and decrypt without
+Joplin desktop), see [e2ee-sync-rehearsal.md](e2ee-sync-rehearsal.md) first.
+
 It uses Joplin's **File system** sync target (target 2) and a throwaway
 folder plus a throwaway Joplin profile. Both clients read and write the same
 on-disk Joplin format (`<id>.md`, `.resource/<id>`, `info.json`, `locks/`).
