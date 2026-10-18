@@ -72,6 +72,11 @@ requirements; the MyGO CLI is not needed. The API address is chosen at launch an
 injected into the page, so there is no build-time localhost wiring. Closing the
 window stops the server and closes SQLite.
 
+For a safe end-to-end E2EE and sync rehearsal against Joplin desktop's File
+system target, see [docs/local-sync-test.md](docs/local-sync-test.md). The
+memory plan for replacing the WebView2 UI with MyGO native UI is in
+[docs/native-ui-migration.md](docs/native-ui-migration.md).
+
 ## Status
 
 - **M0** (headless, cgo-free, lossless baseline) — done: golden-corpus format gate
