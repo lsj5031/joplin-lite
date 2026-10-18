@@ -42,16 +42,15 @@ console), `LICENSE`, `NOTICE` and a short `README.txt`. The executable's icon
 and version block come from `shell/rsrc_windows_amd64.syso`, which `go build`
 embeds automatically; the icon is the same 512 px artwork the web preview and
 the macOS bundle use, and it is resource `#1` because MyGO loads that for the
-window class (title bar and taskbar). Regenerate the resource with
-
-```sh
-bash shell/winres.sh            # go-winres v0.3.3, VERSION defaults to 0.1.0
-```
-
-after changing the artwork or the version, then commit the `.syso`. There is
-no manifest on purpose: the app sets per-monitor-v2 DPI awareness itself, and
-a manifest declaring a DPI mode would override that and blur the window on a
-scaled display.
+window class (title bar and taskbar). `bash shell/winres.sh` (go-winres
+v0.3.3, `VERSION` defaults to `0.1.0`) rebuilds it in two steps:
+`go run ./tools/icongen` writes `web/public/app-icon.ico` with a 16, 32, 48
+and 256 pixel entry from the 512 px PNG — one image per size Windows asks for,
+rather than letting Windows scale a single 256 px image — and go-winres packs
+that icon plus the version block into the `.syso`. Commit both files after
+changing the artwork or the version. There is no manifest on purpose: the app
+sets per-monitor-v2 DPI awareness itself, and a manifest declaring a DPI mode
+would override that and blur the window on a scaled display.
 
 The zip is the intended Windows package: the app is portable by decision, with
 no installer, no registry entries and no uninstaller. Nothing is written next
@@ -64,6 +63,13 @@ or `-config`.
 ```sh
 ./tmp/gojoplin-desktop.exe -config tmp/try-config.yaml -no-sync
 ```
+
+The app logs to `<data dir>/desktop.log` (the data dir is
+`%USERPROFILE%\.local\share\gojoplin` by default) as well as to stderr, and
+rotates it to `desktop.log.1` at the next launch once it passes 1 MiB. That
+file is the only record of a startup failure or a failing sync pass in a
+packaged build, which has no console to print to; `showFatal` still shows the
+same reason in a native dialog.
 
 | Flag | |
 |---|---|

@@ -52,7 +52,12 @@ func main() {
 			return
 		}
 		win = openNativeWindow(be)
-		win.OnClosed(func() { be.Close() })
+		win.OnClosed(func() {
+			// The log file outlives the window, so a clean exit is recorded
+			// before the backend closes it.
+			slog.Info("window closed; shutting down")
+			be.Close()
+		})
 	})
 
 	if err := mygo.App.Run(); err != nil {

@@ -56,6 +56,10 @@ type backend struct {
 	closed     bool
 
 	status *syncStatus
+
+	// logRestore closes the desktop log file and puts the previous default
+	// logger back; nil for a backend that never opened one.
+	logRestore func()
 }
 
 // syncFailure classifies a failed pass. The footer can then say what happened
@@ -151,7 +155,7 @@ func (s *syncStatus) snapshot(enabled bool) syncSnapshot {
 	}
 }
 
-func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*backend, error) {
+func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ *backend, err error) {
 	cfg, err := config.Load(cfgPath, config.Overrides{NoSync: noSync})
 	if err != nil {
 		return nil, err
@@ -166,6 +170,21 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	if err != nil {
 		return nil, fmt.Errorf("resolve database directory: %w", err)
 	}
+
+	// Log to the data directory from here on, so a launch without a console
+	// leaves a record of the migrations, the API port and the sync passes. A
+	// failure below closes it again rather than leaving a half-started app
+	// holding the file.
+	logRestore, err := setupDesktopLog(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			logRestore()
+		}
+	}()
+	slog.Info("desktop app starting", "data_dir", cfg.DataDir, "log", filepath.Join(cfg.DataDir, desktopLogName))
 
 	// The desktop UI is the owner of the database, so the window grants write
 	// access to the whole vault regardless of the MCP allow-list (which is a
@@ -236,14 +255,15 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (*b
 	}
 
 	b := &backend{
-		db:      db,
-		cancel:  cancel,
-		baseURL: "",
-		token:   token,
-		profile: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.DataDir))),
-		cfg:     cfg,
-		cncl:    ctx,
-		status:  status,
+		db:         db,
+		cancel:     cancel,
+		baseURL:    "",
+		token:      token,
+		profile:    fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.DataDir))),
+		cfg:        cfg,
+		cncl:       ctx,
+		status:     status,
+		logRestore: logRestore,
 	}
 
 	srv := clipper.NewServer(db, token, cfg.APIKey, b, clipper.NewPolicy(&uiCfg), authPrompt{})
@@ -618,6 +638,9 @@ func (b *backend) Close() {
 		_ = b.httpSrv.Shutdown(ctx)
 		if b.db != nil {
 			_ = b.db.Close()
+		}
+		if b.logRestore != nil {
+			b.logRestore()
 		}
 	})
 }
