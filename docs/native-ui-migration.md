@@ -112,8 +112,11 @@ instance; saving an existing name updates its query). The note list uses
 MyGO's keyed `Selection` for multi-select (Cmd/Ctrl-click, Shift ranges,
 Cmd/Ctrl+A): a count bar moves the chosen notes to a notebook or deletes them
 after confirmation, pending edits to a note being deleted are dropped rather
-than written back, and the choice is pruned when a filter changes. Still not
-native: drag/drop and a dedicated lock-state view.
+than written back, and the choice is pruned when a filter changes. Each row
+has a `::` grip that drags it (or the whole choice) onto a notebook; the
+grip, not the row, is the drag source because a draggable row would take the
+press from the list and a click would stop choosing rows. Only a dedicated
+lock/offline view is left from the Phase 2 list.
 
 ### Phase 3 — packaging
 
@@ -246,8 +249,8 @@ The management and trust surfaces are native:
   Joplin desktop. A Dropbox/S3 target configured in the file is shown as a
   read-only segment and kept.
 
-Remaining Phase 2 UX (not the gate): drag/drop moves and a first-class
-lock/offline state beyond the sync footer's error line.
+Remaining Phase 2 UX (not the gate): a first-class lock/offline state beyond
+the sync footer's error line.
 
 ## Phase 3 result (2026-10-19)
 
@@ -285,6 +288,6 @@ bundle run on macOS.
 Phases 1–3 meet their gates: the daily note loop works without the web UI,
 settings and sync no longer require editing YAML, and the desktop binary runs
 with zero WebView2 processes. The native workspace is the product shell; the
-web build remains an optional browser preview. Remaining work is drag/drop, release
-packaging for Windows, and the real-target loops (extension pairing,
-Dropbox/S3, Joplin Server).
+web build remains an optional browser preview. Remaining work is release packaging
+for Windows and the real-target loops (extension pairing, Dropbox/S3, Joplin
+Server).

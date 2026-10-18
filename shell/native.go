@@ -1283,7 +1283,18 @@ func (a *nativeApp) notebooksPane(c *ui.Context, t *ui.Theme) {
 			walk = func(nodes []*models.Folder) {
 				for _, nb := range nodes {
 					label := strings.Repeat("  ", a.notebookDepth[nb.ID]) + nb.Title
-					ui.SidebarItem(c.Key(nb.ID), nb.ID, nil, label).Children(func() {
+					item := ui.SidebarItem(c.Key(nb.ID), nb.ID, nil, label)
+					// Dragging a note (or the whole selection) onto a notebook
+					// moves it there.
+					if _, over := ui.DragOver[[]string](item); over {
+						item.Background(t.Accent.Alpha(0.18))
+					}
+					if ids, ok := ui.Drop[[]string](item); ok {
+						// The note list is built after the sidebar, so moving here
+						// updates it in this same frame.
+						a.moveNotes(ids, nb.ID)
+					}
+					item.Children(func() {
 						ui.Textf(c, "%d", nb.NoteCount).FontSize(10).TextColor(t.TextMuted)
 					})
 					walk(nb.Children)
@@ -1445,15 +1456,32 @@ func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
 		a.list.Selection = &a.selection
 		a.list.Key = func(i int) any { return a.notes[i].ID }
 		a.list.Label = func(i int) string { return noteRowTitle(a.notes[i]) }
+		// Dragging a chosen row drags the whole choice; an unchosen row drags
+		// only itself. The drag starts on the row's grip: making the whole row
+		// a drag source would take the press from the list, and a click would
+		// stop choosing a row.
+		dragIDs := a.selectedIDs()
 		list := ui.List(c, &a.list, len(a.notes), func(i int) {
 			n := a.notes[i]
-			ui.Column(c).Padding(8, 14).Gap(2).Children(func() {
-				ui.Text(c, noteRowTitle(n)).FontSize(13)
-				if n.Excerpt != "" {
-					ui.Text(c, excerpt(n.Excerpt)).FontSize(11).TextColor(t.TextMuted)
+			title := noteRowTitle(n)
+			row := ui.Row(c).Padding(8, 14).Gap(6).AlignItems(ui.Center)
+			row.Children(func() {
+				grip := ui.Text(c, "::").FontSize(12).TextColor(t.TextMuted).
+					Label("Drag note " + title).
+					Tooltip("Drag to a notebook")
+				if a.selection.Has(n.ID) && len(dragIDs) > 0 {
+					grip.Drag(dragIDs)
+				} else {
+					grip.Drag([]string{n.ID})
 				}
-				ui.Text(c, time.UnixMilli(n.UpdatedTime).Format("02 Jan 15:04")).
-					FontSize(10).TextColor(t.TextMuted)
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, title).FontSize(13)
+					if n.Excerpt != "" {
+						ui.Text(c, excerpt(n.Excerpt)).FontSize(11).TextColor(t.TextMuted)
+					}
+					ui.Text(c, time.UnixMilli(n.UpdatedTime).Format("02 Jan 15:04")).
+						FontSize(10).TextColor(t.TextMuted)
+				})
 			})
 		}).Grow(1)
 		if list.Changed() {
@@ -1728,7 +1756,12 @@ func (a *nativeApp) selectedIDs() []string {
 // moveSelected moves the chosen notes, saving pending edits first. The
 // selection clears because those rows leave the current notebook view.
 func (a *nativeApp) moveSelected(folderID string) {
-	ids := a.selectedIDs()
+	a.moveNotes(a.selectedIDs(), folderID)
+}
+
+// moveNotes moves the given notes to a notebook. Drop and the bulk menu share
+// it, so a dragged note and a chosen one are handled the same way.
+func (a *nativeApp) moveNotes(ids []string, folderID string) {
 	if folderID == "" || len(ids) == 0 {
 		return
 	}

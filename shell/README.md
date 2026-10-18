@@ -82,6 +82,10 @@ note to a notebook or deletes them after confirmation. The choice is pruned
 whenever the rows change, so it never counts a hidden note; pending edits to a
 note that is being deleted are dropped instead of written back.
 
+Each row has a `::` grip: dragging it onto a notebook moves that note there,
+or the whole selection when the dragged row is part of it. The grip, not the
+row, is the drag source so a click still chooses rows.
+
 The sidebar footer shows sync state, a **Sync now** button and **Settings**;
 when a pass finishes, rows and notebooks reload and an idle open note picks up
 pulled changes (unsaved edits are never overwritten).

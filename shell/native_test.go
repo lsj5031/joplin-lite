@@ -1292,3 +1292,81 @@ func TestNativeSelectionPrunesOnFilter(t *testing.T) {
 		t.Fatalf("bulk bar still shows; texts = %v", tt.Texts())
 	}
 }
+
+// TestNativeDragNoteToNotebook simulates a real pointer drag: press a row, move
+// past the drag threshold onto a notebook in the sidebar, release. A chosen row
+// drags the whole choice.
+func TestNativeDragNoteToNotebook(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+
+	inbox := &models.Folder{Title: "Inbox"}
+	target := &models.Folder{Title: "Target"}
+	for _, f := range []*models.Folder{inbox, target} {
+		if err := svc.CreateNotebook(f); err != nil {
+			t.Fatalf("CreateNotebook: %v", err)
+		}
+	}
+	alpha := addTestNote(t, svc, inbox.ID, "Alpha", "first")
+	beta := addTestNote(t, svc, inbox.ID, "Beta", "second")
+	gamma := addTestNote(t, svc, inbox.ID, "Gamma", "third")
+
+	app.reloadNotebooks()
+	app.selectedNotebook = inbox.ID
+	app.reloadNotes()
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	drag := func(from, to string) {
+		t.Helper()
+		src, ok := tt.Find("Drag note " + from)
+		if !ok {
+			t.Fatalf("no grip for %q", from)
+		}
+		dst, ok := tt.Find(to)
+		if !ok {
+			t.Fatalf("no notebook %q", to)
+		}
+		sx, sy := src.X+src.W/2, src.Y+src.H/2
+		dx, dy := dst.X+dst.W/2, dst.Y+dst.H/2
+		tt.Press(sx, sy)
+		tt.Move(sx+6, sy+6)
+		tt.Move((sx+dx)/2, (sy+dy)/2)
+		tt.Move(dx, dy)
+		tt.Release(dx, dy)
+		tt.Frame()
+		tt.Frame()
+	}
+
+	// A single, unchosen row drags itself.
+	drag("Alpha", "Target")
+	if got, _ := svc.GetNote(alpha.ID); got == nil || got.ParentID != target.ID {
+		t.Fatalf("Alpha parent = %#v, want Target", got)
+	}
+	if got, _ := svc.GetNote(beta.ID); got == nil || got.ParentID != inbox.ID {
+		t.Fatalf("Beta moved with a single-row drag: %#v", got)
+	}
+
+	// A chosen row drags the whole choice.
+	app.selectedNotebook = ""
+	app.reloadNotes()
+	tt.Frame()
+	if err := tt.Click("Beta"); err != nil {
+		t.Fatalf("select Beta: %v", err)
+	}
+	if err := tt.ClickWith(ui.Cmd, "Gamma"); err != nil {
+		t.Fatalf("cmd-click Gamma: %v", err)
+	}
+	if app.selection.Len() != 2 {
+		t.Fatalf("selection = %d, want 2", app.selection.Len())
+	}
+	drag("Gamma", "Target")
+	for _, n := range []*models.Note{beta, gamma} {
+		got, _ := svc.GetNote(n.ID)
+		if got == nil || got.ParentID != target.ID {
+			t.Fatalf("%s parent = %#v, want Target", n.Title, got)
+		}
+	}
+	if app.selection.Len() != 0 {
+		t.Fatalf("selection survived the drag: %d", app.selection.Len())
+	}
+}
