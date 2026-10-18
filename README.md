@@ -72,6 +72,10 @@ Go 1.27+ (pinned via the toolchain) is the only extra requirement; the MyGO CLI
 is not needed and WebView2 is never started. Closing the window stops the server
 and closes SQLite.
 
+Packaging: Windows is a portable zip (`bash shell/package-windows.sh`, icon and
+version block included) and macOS an `.app` bundle (`bash shell/bundle.sh`).
+There is no installer, by decision.
+
 The web build is still available as an optional browser preview over the same
 vault, served from disk rather than embedded:
 
@@ -96,9 +100,12 @@ migration record and the measured numbers are in
   against fakes and local rehearsals; the real-target gates (Joplin desktop decrypts,
   Dropbox round-trip, extension clip) are still ahead.
 - **M4** — the `service/` typed seam (notes, notebooks, tags, search, conflicts, settings)
-  is in, and a runnable MyGO desktop shell now serves the real UI from an in-process
-  API (`shell/`). Remaining for the gate: typed bindings for settings/sync control and
-  the real-target loops. See [INTENT.md](INTENT.md).
+  is in, and `shell/` is a native MyGO desktop app over it: notebooks, notes, tags,
+  search, conflicts, sync state and a native settings dialog, with the clipper/Data API
+  in the same process and no browser engine. Windows ships as a portable zip and macOS
+  as an `.app` bundle. Remaining for the gate: the real-target loops (extension pairing,
+  Dropbox/S3, Joplin Server) and a signed macOS bundle run. See
+  [INTENT.md](INTENT.md).
 
 ## License
 

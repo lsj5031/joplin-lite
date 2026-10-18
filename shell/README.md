@@ -53,8 +53,11 @@ no manifest on purpose: the app sets per-monitor-v2 DPI awareness itself, and
 a manifest declaring a DPI mode would override that and blur the window on a
 scaled display.
 
-Still open: a real installer (Inno Setup, NSIS or MSIX); the portable zip and
-the macOS bundle are the current packages.
+The zip is the intended Windows package: the app is portable by decision, with
+no installer, no registry entries and no uninstaller. Nothing is written next
+to the executable — the vault lives in `%USERPROFILE%\.local\share\gojoplin`
+and the settings come from `%USERPROFILE%\.config\joplin-desktop\settings.json`
+or `-config`.
 
 ## Run
 
@@ -161,8 +164,8 @@ sets the directory without the flag.
 
 ## What is still missing
 
-- A Windows installer (the icon and portable zip are done), and an updated
-  macOS bundle smoke run.
+- An updated macOS bundle smoke run; Windows is packaged and portable by
+  decision (no installer).
 - Lock and offline states were exercised headlessly and against a fake
   engine, not by pulling a real network cable or contending with a second
   device on a live target.

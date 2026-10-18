@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds the portable Windows package: the GUI-subsystem executable (icon and
 # version block embedded from rsrc_windows_amd64.syso) plus the AGPL license
-# and notices. There is no installer yet; unzip the directory and run the
-# executable. The same binary is what a future installer would wrap.
+# and notices. The app is portable by decision: unzip the directory and run the
+# executable. There is no installer, no registry entry and no uninstaller.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,10 +26,11 @@ process. There is no browser engine in the app.
 
 Run: gojoplin-desktop.exe
 
-The first launch opens the vault in %LOCALAPPDATA%\gojoplin (config from
-%USERPROFILE%\.config\joplin-desktop\settings.json or -config). Settings in
-the app choose the sync target (file system folder or Joplin Server), the E2EE
-master password and the clipper API token.
+The first launch opens the vault in %USERPROFILE%\.local\share\gojoplin
+(config from %USERPROFILE%\.config\joplin-desktop\settings.json, or -config; an
+existing settings.json is read as-is). Settings in the app choose the sync
+target (file system folder or Joplin Server), the E2EE master password and the
+clipper API token.
 
 Local-only: gojoplin-desktop.exe -no-sync
 
