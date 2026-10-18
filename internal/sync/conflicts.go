@@ -261,7 +261,7 @@ func applyResourceBlob(db *store.DB, syncTarget int, resourceID string, remoteTi
 	}
 	if existing == nil {
 		// Metadata not known yet — store the blob; the .md item carries it.
-		return db.SaveResourceFile(resourceID, content)
+		return savePulledBlob(db, resourceID, content)
 	}
 
 	si, err := db.GetSyncItem(resourceID, syncTarget)
@@ -279,7 +279,7 @@ func applyResourceBlob(db *store.DB, syncTarget int, resourceID string, remoteTi
 		}
 		if local, err := os.ReadFile(db.GetResourceFile(resourceID)); err == nil && bytes.Equal(local, content) {
 			// Identical content — nothing to conflict about.
-			return db.SaveResourceFile(resourceID, content)
+			return savePulledBlob(db, resourceID, content)
 		}
 		if err := createResourceConflict(db, existing); err != nil {
 			return fmt.Errorf("cannot keep conflict copy of resource %s: %w", resourceID, err)
@@ -288,7 +288,37 @@ func applyResourceBlob(db *store.DB, syncTarget int, resourceID string, remoteTi
 			return err
 		}
 	}
-	return db.SaveResourceFile(resourceID, content)
+	return savePulledBlob(db, resourceID, content)
+}
+
+// fileV1Prefix marks a FileV1 (E2EE) encrypted blob, the same check the
+// decrypt pass makes before calling DecryptFile.
+const fileV1Prefix = "JED01"
+
+// savePulledBlob writes a blob fetched from the target and records whether the
+// bytes now on disk are a FileV1 envelope. That flag is all the decrypt pass
+// looks at, and this function is the only place a pulled blob is stored: a file
+// target re-lists every item on each pass, so an encrypted blob can arrive
+// long after its metadata row was decrypted (flag 0). Storing it without the
+// flag would leave the vault serving ciphertext for that resource forever.
+func savePulledBlob(db *store.DB, resourceID string, content []byte) error {
+	if err := db.SaveResourceFile(resourceID, content); err != nil {
+		return err
+	}
+	res, err := db.GetResource(resourceID)
+	if err != nil || res == nil {
+		// Metadata has not arrived yet; the .md item sets the flag.
+		return err
+	}
+	want := 0
+	if bytes.HasPrefix(content, []byte(fileV1Prefix)) {
+		want = 1
+	}
+	if res.EncryptionBlobEncrypted == want {
+		return nil
+	}
+	res.EncryptionBlobEncrypted = want
+	return db.UpsertResource(res)
 }
 
 // handleRemoteDelete applies a deletion found on the target without losing

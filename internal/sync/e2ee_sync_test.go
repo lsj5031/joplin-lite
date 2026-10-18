@@ -296,3 +296,89 @@ func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+// TestE2EE_ResourceBlobStaysDecryptedOnRedelivery pins what a second pull does
+// to an already-decrypted resource. A file target re-lists every item, so the
+// encrypted blob arrives again on the next pass; storing it without recording
+// that the stored bytes are encrypted would leave the vault serving ciphertext,
+// because the blob-decrypt pass only looks at rows marked
+// encryption_blob_encrypted = 1.
+func TestE2EE_ResourceBlobStaysDecryptedOnRedelivery(t *testing.T) {
+	const (
+		password = "redelivery-password"
+		keyID    = "0123456789abcdef0123456789abcdef"
+		resID    = "5b2c9e1d4a6f80b3c5d7e9f1a3b5c7d9"
+		base     = int64(1772000000000)
+	)
+	blob := []byte("blob that must survive a second pull \x00\x01\xff")
+
+	remote := t.TempDir()
+	openStore := func() *store.DB {
+		db, err := store.Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		t.Cleanup(func() { db.Close() })
+		return db
+	}
+	dbA, dbB := openStore(), openStore()
+	ctx := context.Background()
+
+	if err := dbA.UpsertMasterKey(&models.MasterKey{
+		ID: keyID, CreatedTime: base, UpdatedTime: base,
+		SourceApplication: "joplin-desktop",
+		EncryptionMethod:  e2ee.MethodKeyV1,
+		Content:           buildTestKeyV1Packet(t, password),
+	}); err != nil {
+		t.Fatalf("UpsertMasterKey: %v", err)
+	}
+	if err := dbA.SetActiveMasterKeyID(keyID); err != nil {
+		t.Fatalf("SetActiveMasterKeyID: %v", err)
+	}
+	if err := dbA.UpsertResource(&models.Resource{
+		ID: resID, Title: "pic.png", Mime: "image/png", Filename: "pic.png",
+		CreatedTime: base, UpdatedTime: base,
+		UserCreatedTime: base, UserUpdatedTime: base,
+		Size: int64(len(blob)), BlobUpdatedTime: base,
+	}); err != nil {
+		t.Fatalf("UpsertResource: %v", err)
+	}
+	if err := dbA.SaveResourceFile(resID, blob); err != nil {
+		t.Fatalf("SaveResourceFile: %v", err)
+	}
+	if err := NewEngine(NewLocalFolderBackend(remote), dbA, password).Sync(ctx); err != nil {
+		t.Fatalf("A sync: %v", err)
+	}
+
+	engB := NewEngine(NewLocalFolderBackend(remote), dbB, password)
+	if err := engB.Sync(ctx); err != nil {
+		t.Fatalf("B sync #1: %v", err)
+	}
+	got, err := os.ReadFile(dbB.GetResourceFile(resID))
+	if err != nil {
+		t.Fatalf("B blob after sync #1: %v", err)
+	}
+	if !bytes.Equal(got, blob) {
+		t.Fatalf("B blob after sync #1 = %q, want the plaintext", got)
+	}
+
+	// The target has not changed; a second pass must leave the vault as usable
+	// as the first one did.
+	if err := engB.Sync(ctx); err != nil {
+		t.Fatalf("B sync #2: %v", err)
+	}
+	got, err = os.ReadFile(dbB.GetResourceFile(resID))
+	if err != nil {
+		t.Fatalf("B blob after sync #2: %v", err)
+	}
+	if !bytes.Equal(got, blob) {
+		t.Fatalf("B blob after sync #2 = %q, want the plaintext (ciphertext was stored and never decrypted)", got)
+	}
+	res, err := dbB.GetResource(resID)
+	if err != nil || res == nil {
+		t.Fatalf("B resource after sync #2: %v (%v)", res, err)
+	}
+	if res.EncryptionBlobEncrypted != 0 || res.EncryptionApplied != 0 {
+		t.Fatalf("B resource after sync #2 = %+v, want a plaintext resource", res)
+	}
+}

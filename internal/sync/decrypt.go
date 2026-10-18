@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -164,10 +165,17 @@ func decryptResourceBlob(db *store.DB, svc *e2ee.Service, resourceID string) err
 		return fmt.Errorf("cannot read resource blob: %w", err)
 	}
 
-	// Check if it looks like JED01
-	if len(data) < 5 || string(data[:5]) != "JED01" {
-		slog.Debug("resource blob not JED01 encrypted, skipping", "id", resourceID)
-		return nil
+	// Only a FileV1 envelope can be decrypted. Anything else is already the
+	// plaintext, and the row must stop claiming otherwise, or every later sync
+	// would keep trying it.
+	if !bytes.HasPrefix(data, []byte(fileV1Prefix)) {
+		slog.Debug("resource blob is not a FileV1 envelope; nothing to decrypt", "id", resourceID)
+		resource, err := db.GetResource(resourceID)
+		if err != nil || resource == nil || resource.EncryptionBlobEncrypted == 0 {
+			return err
+		}
+		resource.EncryptionBlobEncrypted = 0
+		return db.UpsertResource(resource)
 	}
 
 	decrypted, err := svc.DecryptFile(string(data))
