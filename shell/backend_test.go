@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,11 +12,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
 	"github.com/lsj5031/joplin-lite/internal/models"
+	jsync "github.com/lsj5031/joplin-lite/internal/sync"
 	"github.com/lsj5031/joplin-lite/service"
 )
 
@@ -353,5 +357,84 @@ func TestBaseURLForLoopback(t *testing.T) {
 		if got := baseURLFor(c.addr); got != c.want {
 			t.Errorf("baseURLFor(%v) = %q, want %q", c.addr, got, c.want)
 		}
+	}
+}
+
+// fakeSyncer replays a fixed list of pass results, then succeeds.
+type fakeSyncer struct {
+	mu      sync.Mutex
+	errs    []error
+	calls   int
+	trigger chan struct{}
+}
+
+func (f *fakeSyncer) Sync(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if len(f.errs) == 0 {
+		return nil
+	}
+	err := f.errs[0]
+	f.errs = f.errs[1:]
+	return err
+}
+
+func (f *fakeSyncer) TriggerCh() <-chan struct{} { return f.trigger }
+
+func (f *fakeSyncer) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// TestSyncLoopRetriesTransientFailures covers the loop behind the paused and
+// offline states: a lock or a dropped connection is retried before the ten
+// minute tick, while a failure that needs the user waits for it.
+func TestSyncLoopRetriesTransientFailures(t *testing.T) {
+	oldLock, oldNet := syncRetryLock, syncRetryNetwork
+	syncRetryLock, syncRetryNetwork = 20*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { syncRetryLock, syncRetryNetwork = oldLock, oldNet })
+
+	run := func(f *fakeSyncer) *syncStatus {
+		t.Helper()
+		status := &syncStatus{}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			syncLoop(ctx, f, status)
+		}()
+		t.Cleanup(func() {
+			cancel()
+			<-done
+		})
+		return status
+	}
+
+	// A held lock clears on its own, so the loop takes over without a click.
+	locked := &fakeSyncer{errs: []error{fmt.Errorf("sync refused: %w", jsync.ErrExclusiveLock)}, trigger: make(chan struct{})}
+	status := run(locked)
+	deadline := time.Now().Add(2 * time.Second)
+	for locked.count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := locked.count(); got != 2 {
+		t.Fatalf("passes after a lock = %d, want 2", got)
+	}
+	if snap := status.snapshot(true); snap.Err != "" || !snap.Retry.IsZero() {
+		t.Fatalf("state after the retry succeeded = %#v", snap)
+	}
+
+	// Credentials do not fix themselves: one pass, and the footer keeps the
+	// reason until the next scheduled pass.
+	refused := &fakeSyncer{errs: []error{errors.New("invalid credentials")}, trigger: make(chan struct{})}
+	status = run(refused)
+	time.Sleep(150 * time.Millisecond)
+	if got := refused.count(); got != 1 {
+		t.Fatalf("passes after a refused login = %d, want 1", got)
+	}
+	if snap := status.snapshot(true); snap.Kind != syncFailureOther || !snap.Retry.IsZero() || snap.Err == "" {
+		t.Fatalf("state after a refused login = %#v", snap)
 	}
 }

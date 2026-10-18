@@ -236,9 +236,17 @@ The management and trust surfaces are native:
 - notebooks create/rename/delete/move; tags create/rename/delete, filter the
   list, and are assigned per note; notes get the **Conflicts** rail and
   **Resolve conflict → Keep this version**;
-- sync is a footer line (last pass, running, pending, shortened error) with
-  **Sync now**, and a finished pass refreshes rows, notebooks, tags and an
-  idle open note without overwriting unsaved typing;
+- sync is a footer state with **Sync now**, and a finished pass refreshes
+  rows, notebooks, tags and an idle open note without overwriting unsaved
+  typing. The footer names the state instead of showing one truncated Go
+  error: **Local only** (with **Set up sync** instead of a **Sync now** that
+  could do nothing), **Sync paused · another device is syncing** when the
+  target's lock is held, **Offline · sync paused** when the target cannot be
+  reached, **Sync stopped · target needs a newer Joplin** for an unsupported
+  format, and **Sync failed** plus the reason otherwise. Locked and offline
+  passes are retried by the loop itself after 45 s and 30 s, and the footer
+  says when ("retrying at 15:05"); a failure that needs the user waits for the
+  ten-minute pass or a click;
 - **Settings** is a native dialog. It edits the sync target — off, file
   system (folder) or Joplin Server (URL, email, password) — plus the E2EE
   master password and the clipper API token (with **Regenerate**). Saving
@@ -249,8 +257,13 @@ The management and trust surfaces are native:
   Joplin desktop. A Dropbox/S3 target configured in the file is shown as a
   read-only segment and kept.
 
-Remaining Phase 2 UX (not the gate): a first-class lock/offline state beyond
-the sync footer's error line.
+`TestSyncNoticeStates` pins the footer's words for each state and
+`TestNativeFooterShowsPausedStates` renders them through a real backend's
+status. `TestSyncRetryPolicy` and `TestSyncLoopRetriesTransientFailures` check
+which failures the loop retries on its own — a `jsync.ErrExclusiveLock` and
+connection errors (`net.Error` or a "no such host"/"connection refused"
+message) — and that a rejected login is not retried behind the user's back.
+The delays are package variables so the loop test runs in milliseconds.
 
 ## Phase 3 result (2026-10-19)
 

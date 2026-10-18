@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,8 +11,10 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/lsj5031/joplin-lite/internal/config"
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
+	jsync "github.com/lsj5031/joplin-lite/internal/sync"
 	"github.com/lsj5031/joplin-lite/service"
 )
 
@@ -684,6 +688,22 @@ func TestSyncStatusTransitions(t *testing.T) {
 	if snap := st.snapshot(true); snap.Err != "" || snap.Last.IsZero() {
 		t.Fatalf("successful snapshot = %#v", snap)
 	}
+
+	// A lock failure is classified, and a retry records when it will run.
+	st.finish(fmt.Errorf("sync refused: %w", jsync.ErrExclusiveLock))
+	if snap := st.snapshot(true); snap.Kind != syncFailureLock {
+		t.Fatalf("lock failure kind = %q", snap.Kind)
+	}
+	when := time.Now().Add(time.Minute)
+	st.retryIn(when)
+	if snap := st.snapshot(true); !snap.Retry.Equal(when) {
+		t.Fatalf("retry = %v, want %v", snap.Retry, when)
+	}
+	st.start()
+	if snap := st.snapshot(true); !snap.Retry.IsZero() {
+		t.Fatalf("a new pass kept the stale retry: %v", snap.Retry)
+	}
+	st.finish(nil)
 
 	// A backend without an engine offers nothing to trigger.
 	if (&backend{}).SyncNow() {
@@ -1368,5 +1388,171 @@ func TestNativeDragNoteToNotebook(t *testing.T) {
 	}
 	if app.selection.Len() != 0 {
 		t.Fatalf("selection survived the drag: %d", app.selection.Len())
+	}
+}
+
+// TestSyncNoticeStates pins the footer's words for each state. A lock or a
+// lost connection reads as paused, and says when the loop retries; a refusal
+// that needs the user keeps the reason.
+func TestSyncNoticeStates(t *testing.T) {
+	last := time.Date(2026, 10, 19, 15, 4, 0, 0, time.Local)
+	retry := time.Date(2026, 10, 19, 15, 5, 0, 0, time.Local)
+
+	cases := []struct {
+		name string
+		snap syncSnapshot
+		line string
+		hint string
+		err  bool
+	}{
+		{
+			name: "local only",
+			snap: syncSnapshot{},
+			line: "Local only",
+			hint: "Notes stay on this computer.",
+		},
+		{
+			name: "running",
+			snap: syncSnapshot{Enabled: true, Running: true},
+			line: "Syncing…",
+		},
+		{
+			name: "never synced",
+			snap: syncSnapshot{Enabled: true},
+			line: "Not synced yet",
+		},
+		{
+			name: "synced",
+			snap: syncSnapshot{Enabled: true, Last: last},
+			line: "Synced 15:04",
+		},
+		{
+			name: "locked",
+			snap: syncSnapshot{Enabled: true, Last: last, Err: "sync refused: active exclusive lock", Kind: syncFailureLock, Retry: retry},
+			line: "Sync paused · another device is syncing",
+			hint: "last synced 15:04 · retrying at 15:05",
+		},
+		{
+			name: "locked without history",
+			snap: syncSnapshot{Enabled: true, Err: "lock", Kind: syncFailureLock},
+			line: "Sync paused · another device is syncing",
+			hint: "Another device is syncing this vault.",
+		},
+		{
+			name: "offline",
+			snap: syncSnapshot{Enabled: true, Last: last, Err: "dial tcp: no such host", Kind: syncFailureOffline, Retry: retry},
+			line: "Offline · sync paused",
+			hint: "Changes are kept here · last synced 15:04 · retrying at 15:05",
+		},
+		{
+			name: "target too new",
+			snap: syncSnapshot{Enabled: true, Err: "sync refused: sync target format is newer than this client supports", Kind: syncFailureTarget},
+			line: "Sync stopped · target needs a newer Joplin",
+			hint: "sync refused: sync target format is newer than this client supports",
+			err:  true,
+		},
+		{
+			name: "refused",
+			snap: syncSnapshot{Enabled: true, Last: last, Err: "invalid credentials", Kind: syncFailureOther, Retry: retry},
+			line: "Sync failed",
+			hint: "invalid credentials · last synced 15:04 · retrying at 15:05",
+			err:  true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := syncNoticeFor(tc.snap)
+			if got.Line != tc.line || got.Hint != tc.hint || got.Err != tc.err {
+				t.Fatalf("notice = %+v, want line %q hint %q err %v", got, tc.line, tc.hint, tc.err)
+			}
+		})
+	}
+}
+
+// TestSyncRetryPolicy covers which failures the loop retries on its own: a
+// lock and a lost connection clear; a rejected login does not.
+func TestSyncRetryPolicy(t *testing.T) {
+	offline := fmt.Errorf("list folder: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")})
+	cases := []struct {
+		name string
+		err  error
+		want time.Duration
+	}{
+		{"none", nil, 0},
+		{"lock", fmt.Errorf("sync refused: %w", jsync.ErrExclusiveLock), syncRetryLock},
+		{"network", offline, syncRetryNetwork},
+		{"unresolved host", errors.New("Get \"https://api.dropboxapi.com\": dial tcp: lookup api.dropboxapi.com: no such host"), syncRetryNetwork},
+		{"target too new", fmt.Errorf("sync refused: %w", jsync.ErrSyncTargetUnsupported), 0},
+		{"bad credentials", errors.New("invalid credentials"), 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := retryAfter(tc.err); got != tc.want {
+				t.Fatalf("retryAfter(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNativeLocalOnlyFooterOffersSetup checks the footer of a vault without a
+// target: it says notes stay local and the first button opens the sync setup
+// instead of a Sync now that could do nothing.
+func TestNativeLocalOnlyFooterOffersSetup(t *testing.T) {
+	app, _ := openNativeTestApp(t)
+	app.loadSettings = func() desktopSettings { return desktopSettings{Target: targetOff} }
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	if !tt.HasText("Notes stay on this computer.") {
+		t.Fatalf("local-only footer lacks its explanation; texts = %v", tt.Texts())
+	}
+	if tt.HasText("Sync now") {
+		t.Fatalf("local-only footer offers a useless Sync now; texts = %v", tt.Texts())
+	}
+	if err := tt.Click("Set up sync"); err != nil {
+		t.Fatalf("click Set up sync: %v", err)
+	}
+	if !app.settingsOpen {
+		t.Fatal("Set up sync did not open the settings dialog")
+	}
+}
+
+// TestNativeFooterShowsPausedStates drives the real footer through a backend's
+// status: a lock and a lost connection read as paused with the retry time, and
+// a finished pass goes back to Synced.
+func TestNativeFooterShowsPausedStates(t *testing.T) {
+	app, _ := openNativeTestApp(t)
+	st := &syncStatus{}
+	app.be = &backend{status: st, cfg: &config.Config{SyncTarget: 2}}
+	tt := ui.NewTester(app.view, 1200, 800)
+
+	st.finish(fmt.Errorf("sync refused: %w", jsync.ErrExclusiveLock))
+	st.retryIn(time.Now().Add(time.Minute))
+	tt.Frame()
+	if !tt.HasText("Sync paused · another device is syncing") {
+		t.Fatalf("lock state not shown; texts = %v", tt.Texts())
+	}
+	if !tt.HasText("Sync now") {
+		t.Fatalf("a configured vault lost its Sync now; texts = %v", tt.Texts())
+	}
+
+	st.finish(errors.New("Get \"https://api.dropboxapi.com\": dial tcp: lookup api.dropboxapi.com: no such host"))
+	st.retryIn(time.Now().Add(time.Minute))
+	tt.Frame()
+	if !tt.HasText("Offline · sync paused") {
+		t.Fatalf("offline state not shown; texts = %v", tt.Texts())
+	}
+	if tt.HasText("Sync failed") {
+		t.Fatalf("offline was reported as a hard failure; texts = %v", tt.Texts())
+	}
+
+	st.start()
+	tt.Frame()
+	if !tt.HasText("Syncing…") {
+		t.Fatalf("running state not shown; texts = %v", tt.Texts())
+	}
+	st.finish(nil)
+	tt.Frame()
+	if !tt.HasText("Synced " + time.Now().Format("15:04")) {
+		t.Fatalf("success state not shown; texts = %v", tt.Texts())
 	}
 }

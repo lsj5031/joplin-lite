@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +58,19 @@ type backend struct {
 	status *syncStatus
 }
 
+// syncFailure classifies a failed pass. The footer can then say what happened
+// (another device holds the lock, the connection is gone) instead of showing
+// a raw Go error, and only failures that may clear on their own are retried.
+type syncFailure string
+
+const (
+	syncFailureNone    syncFailure = ""
+	syncFailureLock    syncFailure = "lock"
+	syncFailureOffline syncFailure = "offline"
+	syncFailureTarget  syncFailure = "target"
+	syncFailureOther   syncFailure = "other"
+)
+
 // syncStatus is the current/last sync state, read by the native window from
 // the UI thread while syncLoop writes it from its own goroutine.
 type syncStatus struct {
@@ -65,6 +79,8 @@ type syncStatus struct {
 	pending bool
 	last    time.Time
 	err     string
+	kind    syncFailure
+	retry   time.Time
 }
 
 // syncSnapshot is a consistent copy of the sync state.
@@ -74,6 +90,10 @@ type syncSnapshot struct {
 	Pending bool
 	Last    time.Time
 	Err     string
+	Kind    syncFailure
+	// Retry is when a failed pass will be tried again on its own; zero when
+	// the next attempt waits for the timer or the user.
+	Retry time.Time
 }
 
 // reset clears the last result when a new sync engine (a new target) replaces
@@ -81,6 +101,7 @@ type syncSnapshot struct {
 func (s *syncStatus) reset() {
 	s.mu.Lock()
 	s.running, s.pending, s.last, s.err = false, false, time.Time{}, ""
+	s.kind, s.retry = syncFailureNone, time.Time{}
 	s.mu.Unlock()
 }
 
@@ -93,17 +114,26 @@ func (s *syncStatus) request() {
 func (s *syncStatus) start() {
 	s.mu.Lock()
 	s.pending, s.running = false, true
+	s.retry = time.Time{}
 	s.mu.Unlock()
 }
 
 func (s *syncStatus) finish(err error) {
 	s.mu.Lock()
 	s.running, s.pending, s.last = false, false, time.Now()
+	s.kind, s.retry = syncFailureFor(err), time.Time{}
 	if err != nil {
 		s.err = err.Error()
 	} else {
 		s.err = ""
 	}
+	s.mu.Unlock()
+}
+
+// retryIn records the automatic retry the loop has armed.
+func (s *syncStatus) retryIn(at time.Time) {
+	s.mu.Lock()
+	s.retry = at
 	s.mu.Unlock()
 }
 
@@ -116,6 +146,8 @@ func (s *syncStatus) snapshot(enabled bool) syncSnapshot {
 		Pending: s.pending,
 		Last:    s.last,
 		Err:     s.err,
+		Kind:    s.kind,
+		Retry:   s.retry,
 	}
 }
 
@@ -437,28 +469,128 @@ func randomToken() (string, error) {
 // syncLoop mirrors `serve`: initial sync, then every 10 minutes or when a
 // UI mutation asks for one. The status is recorded around every pass so the
 // native window can show progress and refresh when a pass finishes.
-func syncLoop(ctx context.Context, engine *jsync.Engine, status *syncStatus) {
-	run := func() {
+//
+// A pass that failed for a reason that may clear (a lock another device will
+// release, a connection that dropped) is retried sooner, so the app comes back
+// on its own when the network returns instead of waiting for the ten-minute
+// tick. Failures that need the user keep waiting for that tick.
+func syncLoop(ctx context.Context, engine syncer, status *syncStatus) {
+	run := func() time.Duration {
 		status.start()
 		err := engine.Sync(ctx)
 		status.finish(err)
-		if err != nil {
-			slog.Error("sync failed", "error", err)
+		if err == nil {
+			return 0
 		}
+		slog.Error("sync failed", "error", err)
+		if d := retryAfter(err); d > 0 {
+			status.retryIn(time.Now().Add(d))
+			return d
+		}
+		return 0
 	}
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
-	run()
+	retry := time.NewTimer(time.Hour)
+	if !retry.Stop() {
+		<-retry.C
+	}
+	defer retry.Stop()
+	// arm runs a pass and starts or stops the retry timer to match its result.
+	arm := func() {
+		if !retry.Stop() {
+			select {
+			case <-retry.C:
+			default:
+			}
+		}
+		if d := run(); d > 0 {
+			retry.Reset(d)
+		}
+	}
+	arm()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			run()
+			arm()
 		case <-engine.TriggerCh():
-			run()
+			arm()
+		case <-retry.C:
+			arm()
 		}
 	}
+}
+
+// syncer is the part of jsync.Engine the loop drives, so the retry timing can
+// be tested without a sync target.
+type syncer interface {
+	Sync(ctx context.Context) error
+	TriggerCh() <-chan struct{}
+}
+
+// Delays for failures that may clear; variables so tests can shorten them.
+var (
+	// syncRetryLock is short enough that the app takes over soon after the
+	// other device finishes, and long enough not to fight it for the lock.
+	syncRetryLock = 45 * time.Second
+	// syncRetryNetwork lets a flaky connection come back without hammering
+	// the target.
+	syncRetryNetwork = 30 * time.Second
+)
+
+// syncFailureFor says which kind of failure a pass hit.
+func syncFailureFor(err error) syncFailure {
+	switch {
+	case err == nil:
+		return syncFailureNone
+	case errors.Is(err, jsync.ErrExclusiveLock):
+		return syncFailureLock
+	case errors.Is(err, jsync.ErrSyncTargetUnsupported):
+		return syncFailureTarget
+	case isOffline(err):
+		return syncFailureOffline
+	}
+	return syncFailureOther
+}
+
+// retryAfter is how long to wait before trying a failed pass again, or zero
+// when the failure needs the user and should not be retried behind their back.
+func retryAfter(err error) time.Duration {
+	switch syncFailureFor(err) {
+	case syncFailureLock:
+		return syncRetryLock
+	case syncFailureOffline:
+		return syncRetryNetwork
+	}
+	return 0
+}
+
+// isOffline reports whether a sync error means the target could not be
+// reached, rather than refusing the request. HTTP clients usually wrap a
+// net.Error; the text check covers the errors built from a response body.
+func isOffline(err error) bool {
+	var nerr net.Error
+	if errors.As(err, &nerr) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, hint := range []string{
+		"no such host",
+		"connection refused",
+		"connection reset",
+		"network is unreachable",
+		"i/o timeout",
+		"tls handshake timeout",
+		"temporary failure in name resolution",
+		"server misbehaving",
+	} {
+		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *backend) Close() {

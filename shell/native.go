@@ -953,20 +953,65 @@ func (a *nativeApp) syncState() syncSnapshot {
 	return a.be.SyncState()
 }
 
-func (a *nativeApp) syncLine() (string, bool) {
-	st := a.syncState()
+// syncNotice is what the footer says about sync. Line is the state in a few
+// words; Hint explains it or says when the app tries again. Separating the two
+// keeps the reason from being squeezed into one truncated error line.
+type syncNotice struct {
+	Line string
+	Hint string
+	Err  bool
+}
+
+// syncNotice describes the current sync state. A pass that another device is
+// locking or a lost connection is reported as paused, not as a failure: both
+// clear on their own, and the loop has already armed a retry.
+func (a *nativeApp) syncNotice() syncNotice {
+	return syncNoticeFor(a.syncState())
+}
+
+// syncNoticeFor turns a snapshot into the footer's words.
+func syncNoticeFor(st syncSnapshot) syncNotice {
 	switch {
 	case !st.Enabled:
-		return "Local only", false
+		return syncNotice{Line: "Local only", Hint: "Notes stay on this computer."}
 	case st.Running || st.Pending:
-		return "Syncing…", false
-	case st.Err != "":
-		return "Sync failed: " + clip(st.Err, 40), true
-	case st.Last.IsZero():
-		return "Not synced yet", false
-	default:
-		return "Synced " + st.Last.Format("15:04"), false
+		return syncNotice{Line: "Syncing…"}
+	case st.Err == "":
+		if st.Last.IsZero() {
+			return syncNotice{Line: "Not synced yet"}
+		}
+		return syncNotice{Line: "Synced " + st.Last.Format("15:04")}
 	}
+
+	var meta []string
+	if !st.Last.IsZero() {
+		meta = append(meta, "last synced "+st.Last.Format("15:04"))
+	}
+	if !st.Retry.IsZero() {
+		meta = append(meta, "retrying at "+st.Retry.Format("15:04"))
+	}
+	tail := strings.Join(meta, " · ")
+	switch st.Kind {
+	case syncFailureLock:
+		if tail == "" {
+			tail = "Another device is syncing this vault."
+		}
+		return syncNotice{Line: "Sync paused · another device is syncing", Hint: tail}
+	case syncFailureOffline:
+		if tail == "" {
+			tail = "Changes are kept here until it syncs."
+		} else {
+			tail = "Changes are kept here · " + tail
+		}
+		return syncNotice{Line: "Offline · sync paused", Hint: tail}
+	case syncFailureTarget:
+		return syncNotice{Line: "Sync stopped · target needs a newer Joplin", Hint: clip(st.Err, 80), Err: true}
+	}
+	hint := clip(st.Err, 80)
+	if tail != "" {
+		hint = strings.TrimSpace(hint + " · " + tail)
+	}
+	return syncNotice{Line: "Sync failed", Hint: hint, Err: true}
 }
 
 // watchSync starts polling if an initial background sync is already running
@@ -1359,14 +1404,23 @@ func (a *nativeApp) notebooksPane(c *ui.Context, t *ui.Theme) {
 
 		ui.Divider(c)
 		ui.Column(c).Padding(10, 14).Gap(6).Children(func() {
-			line, isErr := a.syncLine()
-			text := ui.Text(c, line).FontSize(10).TextColor(t.TextMuted)
-			if isErr {
+			st := a.syncState()
+			notice := a.syncNotice()
+			text := ui.Text(c, notice.Line).FontSize(10).TextColor(t.TextMuted)
+			if notice.Err {
 				text.TextColor(t.Danger)
 			}
-			st := a.syncState()
+			if notice.Hint != "" {
+				ui.Text(c, notice.Hint).FontSize(9).TextColor(t.TextMuted)
+			}
 			ui.Row(c).Gap(6).Children(func() {
-				if ui.Button(c, "Sync now").Disabled(!st.Enabled || st.Running || st.Pending).Clicked() {
+				if !st.Enabled {
+					// Sync now has nothing to do on a vault without a target, so
+					// the first button leads to the dialog that sets one up.
+					if ui.Button(c, "Set up sync").Tooltip("Choose a sync target").Clicked() {
+						a.openSettings()
+					}
+				} else if ui.Button(c, "Sync now").Disabled(st.Running || st.Pending).Clicked() {
 					a.syncNow()
 				}
 				if ui.Button(c, "Settings").Tooltip("Sync target, master password and clipper token").Clicked() {

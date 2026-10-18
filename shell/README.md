@@ -88,7 +88,16 @@ row, is the drag source so a click still chooses rows.
 
 The sidebar footer shows sync state, a **Sync now** button and **Settings**;
 when a pass finishes, rows and notebooks reload and an idle open note picks up
-pulled changes (unsaved edits are never overwritten).
+pulled changes (unsaved edits are never overwritten). The state is spelled out
+rather than folded into one error line: **Local only** with a hint that notes
+stay on this computer (and **Set up sync** in place of the unusable **Sync
+now**), **Sync paused · another device is syncing** when the target's lock is
+held, **Offline · sync paused** when the target cannot be reached, **Sync
+stopped · target needs a newer Joplin** for an unsupported format, and
+**Sync failed** with the reason for everything else. A lock or a lost
+connection is retried by the loop itself (45 s and 30 s), and the footer says
+when ("retrying at 15:05"); failures that need the user wait for the ten-minute
+pass or **Sync now**.
 
 **Settings** edits the sync target (off, file system folder, or Joplin Server
 URL/email/password), the E2EE master password and the clipper API token
@@ -132,9 +141,10 @@ sets the directory without the flag.
 
 ## What is still missing
 
-- Native drag/drop moves, multi-select, sort and saved searches (the
-  notebook/tag/note actions are all reachable from menus and dialogs).
 - A Windows icon and installer, and an updated macOS bundle smoke run.
+- Lock and offline states were exercised headlessly and against a fake
+  engine, not by pulling a real network cable or contending with a second
+  device on a live target.
 - Real-target gates: clipper pairing has a native Accept/Reject dialog, but it
   has not been exercised with the actual browser extension yet; Dropbox/S3
   sync is rehearsal-tested only.
