@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -336,4 +337,21 @@ func folderContains(t *testing.T, dir, want string) bool {
 		return nil
 	})
 	return found
+}
+
+func TestBaseURLForLoopback(t *testing.T) {
+	cases := []struct {
+		addr *net.TCPAddr
+		want string
+	}{
+		{&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 41888}, "http://127.0.0.1:41888"},
+		{&net.TCPAddr{IP: net.ParseIP("::1"), Port: 41888}, "http://127.0.0.1:41888"},
+		{&net.TCPAddr{IP: net.IPv4zero, Port: 41888}, "http://127.0.0.1:41888"},
+		{&net.TCPAddr{IP: net.ParseIP("192.168.1.5"), Port: 80}, "http://192.168.1.5:80"},
+	}
+	for _, c := range cases {
+		if got := baseURLFor(c.addr); got != c.want {
+			t.Errorf("baseURLFor(%v) = %q, want %q", c.addr, got, c.want)
+		}
+	}
 }

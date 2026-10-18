@@ -1,4 +1,9 @@
-package main
+// Package webui serves the built SPA (web/dist/client) as an optional browser
+// preview of the same vault. The desktop app no longer embeds the SPA — the
+// native window is the product shell — so this handler is only mounted by
+// `gojoplin serve --web-dir`, which keeps the web build usable in a browser
+// without putting Chromium back in the desktop binary.
+package webui
 
 import (
 	"bytes"
@@ -11,24 +16,27 @@ import (
 	"strings"
 )
 
-// runtimeConfig is injected into the page before the app bundle runs. The
-// API listens on a port chosen at launch, so baking it into the build would
-// make the binary depend on the machine's free ports.
-type runtimeConfig struct {
+// RuntimeConfig is injected into the page before the app bundle runs. The API
+// listens on a port chosen at launch, so baking it into the build would make
+// the preview depend on the machine's free ports.
+type RuntimeConfig struct {
 	Base    string `json:"base"`
 	Token   string `json:"token"`
 	Shell   string `json:"shell"`
 	Profile string `json:"profile"`
 }
 
-func newFrontendHandler(fsys fs.FS, rt runtimeConfig) (http.Handler, error) {
+// New returns the SPA handler: index.html with the runtime config injected
+// before </head>, immutable caching for hashed assets, and an index fallback
+// for client-side routes. Missing assets with an extension still 404.
+func New(fsys fs.FS, rt RuntimeConfig) (http.Handler, error) {
 	payload, err := json.Marshal(rt)
 	if err != nil {
 		return nil, err
 	}
 	index, err := fs.ReadFile(fsys, "index.html")
 	if err != nil {
-		return nil, fmt.Errorf("frontend index.html (run shell/build.sh): %w", err)
+		return nil, fmt.Errorf("frontend index.html (run cd web && npm run build): %w", err)
 	}
 	if !bytes.Contains(index, []byte("</head>")) {
 		return nil, fmt.Errorf("frontend index.html has no </head> to inject the runtime config")

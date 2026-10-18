@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Packages the desktop binary as a macOS .app bundle so the Dock shows the
-# product icon/name instead of the generic executable tile. The runtime still
-# calls Dock.SetIcon with the embedded PNG; this is the M5 packaging shell.
+# Packages the native desktop binary as a macOS .app bundle so the Dock shows
+# the product icon/name instead of the generic executable tile. The bundle is
+# the package, not a wrapper around a webview: the binary already has no SPA
+# to embed, and the icon now lives in the bundle rather than in Go code.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -17,9 +18,11 @@ if [ ! -f "$ICNS" ]; then
 fi
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/licenses"
 cp "$BIN" "$APP/Contents/MacOS/Joplin Lite"
 cp "$ICNS" "$APP/Contents/Resources/app-icon.icns"
+# AGPL: ship the license and the attributed notices with the app.
+cp LICENSE NOTICE "$APP/Contents/Resources/licenses/"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

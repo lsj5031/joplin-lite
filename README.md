@@ -59,22 +59,32 @@ the UI talks to the local clipper API (`VITE_GOJOPLIN_URL`, `VITE_GOJOPLIN_TOKEN
 
 ### Desktop app
 
-The MyGO shell in [`shell/`](shell/README.md) embeds that build, starts the clipper
-API in the same process, and shows the UI in the system webview:
+The desktop app in [`shell/`](shell/README.md) is native: it draws the workspace
+with MyGO `ui` and starts the clipper API in the same process. It embeds no
+browser and no frontend bundle:
 
 ```sh
 bash shell/build.sh
 ./tmp/gojoplin-desktop.exe -config tmp/try-config.yaml -no-sync
 ```
 
-Go 1.27+ (pinned via the toolchain) and WebView2 on Windows are the only extra
-requirements; the MyGO CLI is not needed. The API address is chosen at launch and
-injected into the page, so there is no build-time localhost wiring. Closing the
-window stops the server and closes SQLite.
+Go 1.27+ (pinned via the toolchain) is the only extra requirement; the MyGO CLI
+is not needed and WebView2 is never started. Closing the window stops the server
+and closes SQLite.
+
+The web build is still available as an optional browser preview over the same
+vault, served from disk rather than embedded:
+
+```sh
+cd web && npm run build
+cd .. && go build -o tmp/gojoplin.exe .
+./tmp/gojoplin.exe serve --config tmp/try-config.yaml --no-sync --web-dir web/dist/client
+# open http://127.0.0.1:41185 (API stays on the configured port)
+```
 
 For a safe end-to-end E2EE and sync rehearsal against Joplin desktop's File
 system target, see [docs/local-sync-test.md](docs/local-sync-test.md). The
-memory plan for replacing the WebView2 UI with MyGO native UI is in
+migration record and the measured numbers are in
 [docs/native-ui-migration.md](docs/native-ui-migration.md).
 
 ## Status

@@ -1,3 +1,0 @@
-# web/dist/client, copied here for go:embed by build.sh
-webdist/*
-!webdist/.gitkeep

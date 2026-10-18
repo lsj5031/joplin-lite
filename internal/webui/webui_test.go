@@ -1,8 +1,7 @@
-package main
+package webui
 
 import (
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,16 +9,16 @@ import (
 	"testing/fstest"
 )
 
-func testHandler(t *testing.T, rt runtimeConfig) http.Handler {
+func testHandler(t *testing.T, rt RuntimeConfig) http.Handler {
 	t.Helper()
 	fsys := fstest.MapFS{
 		"index.html":    {Data: []byte("<html><head><title>x</title></head><body>shell</body></html>")},
 		"assets/app.js": {Data: []byte("console.log(1)")},
 		"favicon.ico":   {Data: []byte("ico")},
 	}
-	h, err := newFrontendHandler(fsys, rt)
+	h, err := New(fsys, rt)
 	if err != nil {
-		t.Fatalf("newFrontendHandler: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	return h
 }
@@ -32,14 +31,14 @@ func get(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder,
 	return rec, string(body)
 }
 
-func TestFrontendInjectsRuntimeConfig(t *testing.T) {
-	h := testHandler(t, runtimeConfig{Base: "http://127.0.0.1:4123", Token: "secret", Shell: "desktop", Profile: "profile-a"})
+func TestInjectsRuntimeConfig(t *testing.T) {
+	h := testHandler(t, RuntimeConfig{Base: "http://127.0.0.1:4123", Token: "secret", Shell: "browser", Profile: "profile-a"})
 
 	rec, body := get(t, h, "/")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if !strings.Contains(body, `window.__GOJOPLIN__={"base":"http://127.0.0.1:4123","token":"secret","shell":"desktop","profile":"profile-a"}`) {
+	if !strings.Contains(body, `window.__GOJOPLIN__={"base":"http://127.0.0.1:4123","token":"secret","shell":"browser","profile":"profile-a"}`) {
 		t.Fatalf("runtime config not injected before </head>:\n%s", body)
 	}
 	if strings.Index(body, "__GOJOPLIN__") > strings.Index(body, "</head>") {
@@ -50,8 +49,8 @@ func TestFrontendInjectsRuntimeConfig(t *testing.T) {
 	}
 }
 
-func TestFrontendEscapesScriptBreakout(t *testing.T) {
-	h := testHandler(t, runtimeConfig{Base: "http://127.0.0.1:1", Token: `</script><script>alert(1)</script>`, Shell: "desktop"})
+func TestEscapesScriptBreakout(t *testing.T) {
+	h := testHandler(t, RuntimeConfig{Base: "http://127.0.0.1:1", Token: `</script><script>alert(1)</script>`, Shell: "browser"})
 	_, body := get(t, h, "/")
 	if strings.Contains(body, "<script>alert(1)") {
 		t.Fatal("token can break out of the injected script tag")
@@ -61,8 +60,8 @@ func TestFrontendEscapesScriptBreakout(t *testing.T) {
 	}
 }
 
-func TestFrontendSPAFallbackAndAssets(t *testing.T) {
-	h := testHandler(t, runtimeConfig{Base: "http://127.0.0.1:1", Token: "t", Shell: "desktop"})
+func TestSPAFallbackAndAssets(t *testing.T) {
+	h := testHandler(t, RuntimeConfig{Base: "http://127.0.0.1:1", Token: "t", Shell: "browser"})
 
 	rec, body := get(t, h, "/notes/some-note")
 	if rec.Code != http.StatusOK || !strings.Contains(body, "<body>shell</body>") {
@@ -83,8 +82,8 @@ func TestFrontendSPAFallbackAndAssets(t *testing.T) {
 	}
 }
 
-func TestFrontendServesHeadWithoutBody(t *testing.T) {
-	h := testHandler(t, runtimeConfig{Shell: "desktop"})
+func TestServesHeadWithoutBody(t *testing.T) {
+	h := testHandler(t, RuntimeConfig{Shell: "browser"})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/", nil))
 	body, _ := io.ReadAll(rec.Result().Body)
@@ -96,8 +95,8 @@ func TestFrontendServesHeadWithoutBody(t *testing.T) {
 	}
 }
 
-func TestFrontendRejectsWrites(t *testing.T) {
-	h := testHandler(t, runtimeConfig{Shell: "desktop"})
+func TestRejectsWrites(t *testing.T) {
+	h := testHandler(t, RuntimeConfig{Shell: "browser"})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -105,19 +104,9 @@ func TestFrontendRejectsWrites(t *testing.T) {
 	}
 }
 
-func TestBaseURLForLoopback(t *testing.T) {
-	cases := []struct {
-		addr *net.TCPAddr
-		want string
-	}{
-		{&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 41888}, "http://127.0.0.1:41888"},
-		{&net.TCPAddr{IP: net.ParseIP("::1"), Port: 41888}, "http://127.0.0.1:41888"},
-		{&net.TCPAddr{IP: net.IPv4zero, Port: 41888}, "http://127.0.0.1:41888"},
-		{&net.TCPAddr{IP: net.ParseIP("192.168.1.5"), Port: 80}, "http://192.168.1.5:80"},
-	}
-	for _, c := range cases {
-		if got := baseURLFor(c.addr); got != c.want {
-			t.Errorf("baseURLFor(%v) = %q, want %q", c.addr, got, c.want)
-		}
+func TestMissingIndexNamesTheBuild(t *testing.T) {
+	_, err := New(fstest.MapFS{}, RuntimeConfig{})
+	if err == nil || !strings.Contains(err.Error(), "npm run build") {
+		t.Fatalf("error = %v, want the build hint", err)
 	}
 }

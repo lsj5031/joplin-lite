@@ -3,9 +3,11 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +18,7 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/clipper"
 	"github.com/lsj5031/joplin-lite/internal/store"
 	"github.com/lsj5031/joplin-lite/internal/sync"
+	"github.com/lsj5031/joplin-lite/internal/webui"
 	"github.com/spf13/cobra"
 )
 
@@ -115,6 +118,30 @@ var serveCmd = &cobra.Command{
 			Handler: srv.Router(),
 		}
 
+		// Optional browser preview: the web build is no longer embedded in any
+		// binary, but serving the same vault's SPA from disk keeps the web UI
+		// usable without a Node dev server. It gets its own listener because
+		// the Data API owns the top-level paths (`/notes`, `/tags`, ...).
+		var webSrv *http.Server
+		if dir := webDirPath(); dir != "" {
+			handler, err := webui.New(os.DirFS(dir), webui.RuntimeConfig{
+				Base:    apiBase(cfg.ListenAddr()),
+				Token:   cfg.APIToken,
+				Shell:   "browser",
+				Profile: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.DataDir))),
+			})
+			if err != nil {
+				return err
+			}
+			webSrv = &http.Server{Addr: webAddr, Handler: handler}
+			go func() {
+				slog.Info("web preview listening", "addr", webAddr, "dir", dir, "api", apiBase(cfg.ListenAddr()))
+				if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("web preview stopped", "error", err)
+				}
+			}()
+		}
+
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -125,6 +152,9 @@ var serveCmd = &cobra.Command{
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer shutdownCancel()
 			httpSrv.Shutdown(shutdownCtx)
+			if webSrv != nil {
+				webSrv.Shutdown(shutdownCtx)
+			}
 		}()
 
 		if err := clipper.Serve(httpSrv); err != nil {
@@ -153,7 +183,37 @@ func (p consoleAuthPrompt) PromptAuth(authToken string) bool {
 	return false
 }
 
+// webDirPath returns the SPA directory to serve, from --web-dir or
+// GOJOPLIN_WEB_DIR.
+func webDirPath() string {
+	if webDir != "" {
+		return webDir
+	}
+	return strings.TrimSpace(os.Getenv("GOJOPLIN_WEB_DIR"))
+}
+
+// apiBase turns the API listen address into a URL a browser can call. A
+// wildcard bind is reachable at loopback.
+func apiBase(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "::1":
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+var (
+	webDir  string
+	webAddr string
+)
+
 func init() {
 	serveCmd.Flags().BoolVar(&noSync, "no-sync", false, "serve the local database without a sync remote (no background sync)")
+	serveCmd.Flags().StringVar(&webDir, "web-dir", "", "serve the built SPA (web/dist/client) as a browser preview (env: GOJOPLIN_WEB_DIR)")
+	serveCmd.Flags().StringVar(&webAddr, "web-addr", "127.0.0.1:41185", "listen address for the --web-dir preview")
 	rootCmd.AddCommand(serveCmd)
 }

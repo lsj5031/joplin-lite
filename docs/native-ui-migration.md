@@ -112,6 +112,13 @@ view.
 - Installer, icon, AGPL notices; record the new binary and memory numbers.
 - **Gate:** no WebView2 process appears at runtime.
 
+Status: **gate met; packaging is partly done.** `shell/main.go` has no
+`go:embed` and no webview path, `shell/build.sh` no longer runs the frontend
+build, and the SPA handler moved to `internal/webui`, where `gojoplin serve
+--web-dir` serves it from disk on its own loopback port. The macOS bundle
+carries `LICENSE`/`NOTICE` and the icon; the Windows icon/installer is still
+open.
+
 ## Note-management UX to fix in the same pass
 
 The current UI works but file-manager actions are hidden behind "Manage
@@ -233,10 +240,43 @@ Remaining Phase 2 UX (not the gate): drag/drop moves, multi-select, note
 sorting, saved searches, and a first-class lock/offline state beyond the
 sync footer's error line.
 
+## Phase 3 result (2026-10-19)
+
+The desktop binary is native-only. `-native` and the embedded SPA are gone:
+`main.go` opens the workspace directly, `shell/build.sh` is a single
+`go build`, and `shell/webdist` no longer exists. The SPA handler now lives in
+`internal/webui` and is mounted only by `gojoplin serve --web-dir <dist>`
+(default `127.0.0.1:41185`, injected `base` pointing at the API port), which
+keeps the web build usable in a browser without putting Chromium back in the
+desktop process.
+
+| Measurement | Phase 1 shell | Phase 3 shell |
+|---|---:|---:|
+| Processes | 1 | 1 |
+| WebView2 processes | 0 | **0** |
+| Working set | 92–97 MB | **95.9 MB steady** (98.7 MB at first read) |
+| Binary | 19.5 MiB | **18.6 MiB** (19,501,056 bytes) |
+
+The binary shrank by the staged bundle (~0.9 MiB) and contains no
+`__GOJOPLIN__` runtime-config string. A windowed smoke run captured a valid
+2534×1529 frame with clean logs; `wmic` shows no `msedgewebview2.exe` whose
+parent is the app.
+
+The preview was verified against the real build: `/` injects
+`{"base":"http://127.0.0.1:41186",...,"shell":"browser"}`, a client route
+falls back to `index.html` (200), a missing `.js` asset 404s, and the API on
+the configured port answers `/ping`.
+
+Still open for full packaging: a Windows icon resource and installer (the
+macOS bundle already ships the icon, `LICENSE` and `NOTICE`), and a signed
+bundle run on macOS.
+
 ## Decision
 
-Phase 1 meets its gate: the daily note loop works without the web UI. Phase 2
-is measured against its gate — settings and sync no longer require editing
-YAML — and passes. Next is Phase 3: package the native shell, drop the
-embedded SPA from the desktop binary and record the final numbers. Every
-phase is measured with zero webview processes running.
+Phases 1–3 meet their gates: the daily note loop works without the web UI,
+settings and sync no longer require editing YAML, and the desktop binary runs
+with zero WebView2 processes. The native workspace is the product shell; the
+web build remains an optional browser preview. Remaining work is UX polish
+(drag/drop, multi-select, sort, saved searches), release packaging for
+Windows, and the real-target loops (extension pairing, Dropbox/S3, Joplin
+Server).
