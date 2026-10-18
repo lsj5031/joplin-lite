@@ -15,8 +15,10 @@ it). No frontend toolchain is needed for the app.
 bash shell/build.sh              # -> tmp/gojoplin-desktop.exe
 ```
 
-The script only runs `go build` with `-trimpath -ldflags="-s -w"`; there is no
-`npm` step and nothing is staged for `go:embed`.
+The script only runs `go build` with `-trimpath` and `-s -w`, plus
+`-H=windowsgui` when the target is Windows so double-clicking the executable
+does not open a console window. There is no `npm` step and nothing is staged
+for `go:embed`.
 
 ### macOS app bundle
 
@@ -31,10 +33,28 @@ The bundle is the package and supplies the icon; the Go code no longer calls
 
 ### Windows packaging
 
-Not done yet: the executable has no icon resource and there is no installer.
-Adding an icon needs a `.syso` resource step (for example `rsrc`/`windres`) and
-the installer choice is still open (see Phase 3 in
-[`docs/native-ui-migration.md`](../docs/native-ui-migration.md)).
+```sh
+bash shell/package-windows.sh   # -> tmp/Joplin-Lite-0.1.0-windows-amd64.zip
+```
+
+The zip holds `gojoplin-desktop.exe` (GUI subsystem: double-clicking opens no
+console), `LICENSE`, `NOTICE` and a short `README.txt`. The executable's icon
+and version block come from `shell/rsrc_windows_amd64.syso`, which `go build`
+embeds automatically; the icon is the same 512 px artwork the web preview and
+the macOS bundle use, and it is resource `#1` because MyGO loads that for the
+window class (title bar and taskbar). Regenerate the resource with
+
+```sh
+bash shell/winres.sh            # go-winres v0.3.3, VERSION defaults to 0.1.0
+```
+
+after changing the artwork or the version, then commit the `.syso`. There is
+no manifest on purpose: the app sets per-monitor-v2 DPI awareness itself, and
+a manifest declaring a DPI mode would override that and blur the window on a
+scaled display.
+
+Still open: a real installer (Inno Setup, NSIS or MSIX); the portable zip and
+the macOS bundle are the current packages.
 
 ## Run
 
@@ -141,7 +161,8 @@ sets the directory without the flag.
 
 ## What is still missing
 
-- A Windows icon and installer, and an updated macOS bundle smoke run.
+- A Windows installer (the icon and portable zip are done), and an updated
+  macOS bundle smoke run.
 - Lock and offline states were exercised headlessly and against a fake
   engine, not by pulling a real network cable or contending with a second
   device on a live target.
