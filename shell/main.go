@@ -26,6 +26,10 @@ var (
 	noSync   = flag.Bool("no-sync", false, "serve the local database without syncing")
 	addrFlag = flag.String("addr", "", "override the API listen address, e.g. 127.0.0.1:41888")
 
+	// nativeUI opens the Phase 0 native-UI spike (MyGO ui, no webview) for the
+	// memory comparison in docs/native-ui-migration.md.
+	nativeUI = flag.Bool("native", false, "open the native UI spike instead of the webview")
+
 	// Development-only verification: load the app, probe the live page, save
 	// a screenshot and quit. Used by the desktop smoke check.
 	smoke   = flag.Bool("smoke", false, "probe the loaded page, capture tmp/desktop-smoke.png, then quit")
@@ -60,6 +64,12 @@ func main() {
 		be, err = startBackend(*cfgPath, *dataDir, *noSync, *addrFlag)
 		if err != nil {
 			showFatal(err)
+			return
+		}
+
+		if *nativeUI {
+			win = openNativeWindow(be)
+			win.OnClosed(func() { be.Close() })
 			return
 		}
 

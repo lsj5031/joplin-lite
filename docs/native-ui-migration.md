@@ -115,8 +115,29 @@ note". The native rewrite is the moment to make them obvious:
 - The visual system (Overpass, paper/navy, the sync line) must be rebuilt in
   native drawing code; screenshots and `DESIGN.md` remain the reference.
 
+## Phase 0 result (2026-10-18)
+
+`shell/native.go` is the spike: a read-only three-pane shell (notebooks rail,
+500-row note list, rendered Markdown for the selected note) over the existing
+snapshot, opened with `-native`. It reads through `service/` directly, so the
+HTTP API and the webview are not involved.
+
+| Shell | Processes | Working set |
+|---|---:|---:|
+| WebView2 shell | 7 | ~453 MB |
+| Native spike | 1 | **~99.6 MB** |
+
+The difference is ~354 MB, a 4.5× reduction, with no `msedgewebview2.exe`
+process at all. A captured frame (`tmp/native-smoke.png`, 2534×1529 at the
+window's 2× scale) confirms the content actually renders.
+
+The 100 MB gate passes, but narrowly. Phase 1 should bring it down further
+before the window grows: page the note list instead of loading 500 rows,
+keep one Markdown parse per selection, and measure again at idle.
+
 ## Decision
 
-Do the Phase 0 spike before committing to the rewrite. It is a bounded piece
-of work that answers the only question that matters: what does the native
-window actually cost on this machine?
+Proceed to Phase 1 on this spike — note selection/editing, autosave and
+search — while the webview shell stays the shipping UI until parity.
+Re-measure at every phase gate and keep the webview process count at zero in
+the native build.
