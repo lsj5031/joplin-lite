@@ -76,6 +76,12 @@ before it. Saved searches name the active query, apply it with one click and
 live in `key_values` (`desktop.saved_searches`), so they are per-device and
 never synced.
 
+The note list is multi-select (Cmd/Ctrl-click adds a row, Shift-click a range,
+Cmd/Ctrl+A all): a bar above the list shows the count and moves every chosen
+note to a notebook or deletes them after confirmation. The choice is pruned
+whenever the rows change, so it never counts a hidden note; pending edits to a
+note that is being deleted are dropped instead of written back.
+
 The sidebar footer shows sync state, a **Sync now** button and **Settings**;
 when a pass finishes, rows and notebooks reload and an idle open note picks up
 pulled changes (unsaved edits are never overwritten).

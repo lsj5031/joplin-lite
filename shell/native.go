@@ -51,6 +51,11 @@ type nativeApp struct {
 	selectedNote     int
 	selectedID       string
 	list             ui.ListState
+	// selection is the multi-row choice, keyed by note ID. Selected stays the
+	// row the editor follows; this is what bulk actions act on.
+	selection         ui.Selection[string]
+	bulkMoveOpen      bool
+	confirmBulkDelete bool
 
 	query    string
 	sort     string
@@ -393,6 +398,7 @@ func (a *nativeApp) reloadNotes() {
 	}
 	a.notes = page.Notes
 	a.hasMore, a.cursor = page.HasMore, page.NextCursor
+	a.pruneSelection()
 
 	idx := -1
 	for i, n := range a.notes {
@@ -406,6 +412,27 @@ func (a *nativeApp) reloadNotes() {
 	}
 	a.selectedNote = idx
 	a.loadNote()
+}
+
+// pruneSelection drops chosen keys the current rows no longer show, so the
+// bulk bar never counts notes that a filter or reload hid.
+func (a *nativeApp) pruneSelection() {
+	if a.selection.Len() == 0 {
+		return
+	}
+	visible := make(map[string]bool, len(a.notes))
+	for _, n := range a.notes {
+		visible[n.ID] = true
+	}
+	var stale []string
+	for id := range a.selection.All() {
+		if !visible[id] {
+			stale = append(stale, id)
+		}
+	}
+	for _, id := range stale {
+		a.selection.Remove(id)
+	}
 }
 
 // loadMore appends the next keyset page without disturbing the selection.
@@ -1217,6 +1244,15 @@ func (a *nativeApp) view(c *ui.Context) {
 		}
 	}
 
+	if a.confirmBulkDelete {
+		n := a.selection.Len()
+		if ui.AlertDialog(c, &a.confirmBulkDelete, "Delete notes?",
+			fmt.Sprintf("The %d selected notes are removed from this device and the deletions are queued for the next sync.", n),
+			"Delete notes", "Cancel") == 0 {
+			a.deleteSelected()
+		}
+	}
+
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		a.notebooksPane(c, t)
 		a.notesPane(c, t)
@@ -1387,9 +1423,26 @@ func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
 			}
 			ui.Popover(c, saved, &a.savedMenuOpen, func() { a.savedSearchMenu(c, t) })
 		})
+		if n := a.selection.Len(); n > 0 {
+			ui.Row(c).Padding(4, 14).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Textf(c, "%d selected", n).FontSize(11).Grow(1)
+				move := ui.Button(c, "Move…").Label("Move selected notes").Tooltip("Move the selected notes")
+				if move.Clicked() {
+					a.bulkMoveOpen = !a.bulkMoveOpen
+				}
+				ui.Popover(c, move, &a.bulkMoveOpen, func() { a.bulkMoveMenu(c, t) })
+				if ui.Button(c, "Delete…").Label("Delete selected notes").Tooltip("Delete the selected notes").Clicked() {
+					a.confirmBulkDelete = true
+				}
+				if ui.Button(c, "Clear").Label("Clear selection").Clicked() {
+					a.selection.Clear()
+				}
+			})
+		}
 		ui.Divider(c)
 
 		a.list.Selected = &a.selectedNote
+		a.list.Selection = &a.selection
 		a.list.Key = func(i int) any { return a.notes[i].ID }
 		a.list.Label = func(i int) string { return noteRowTitle(a.notes[i]) }
 		list := ui.List(c, &a.list, len(a.notes), func(i int) {
@@ -1604,41 +1657,125 @@ func (a *nativeApp) sortMenu(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// moveMenu lists the notebooks the open note can move to.
-func (a *nativeApp) moveMenu(c *ui.Context, t *ui.Theme) {
-	// Keep a long notebook list a scrollable menu instead of a popover taller
-	// than the window.
+// notebookPicker is the scrollable "move to notebook" menu shared by the open
+// note and the multi-row selection.
+func (a *nativeApp) notebookPicker(c *ui.Context, t *ui.Theme, heading, current string, onPick func(string)) {
 	height := 28 + 30*len(a.notebooks)
 	if height > 320 {
 		height = 320
 	}
 	ui.Scroll(c).Width(240).Height(float32(height)).Children(func() {
 		ui.Column(c).Width(240).Padding(6).Gap(2).Children(func() {
-			ui.Text(c, "Move to notebook").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, heading).FontSize(11).TextColor(t.TextMuted)
 			if len(a.notebooks) == 0 {
 				ui.Text(c, "No notebooks").TextColor(t.TextMuted)
 				return
 			}
 			for _, nb := range a.notebooks {
-				current := a.note != nil && a.note.ParentID == nb.ID
 				entry := ui.Row(c.Key("move:"+nb.ID)).Padding(6, 10).Radius(5).
 					Gap(6).AlignItems(ui.Center)
 				if entry.Hovered() {
 					entry.Background(t.Accent).TextColor(t.AccentText)
 				}
 				if entry.Clicked() {
-					a.moveOpen = false
-					a.moveTo(nb.ID)
+					onPick(nb.ID)
 				}
 				entry.Children(func() {
 					ui.Text(c, "Move to "+strings.Repeat("  ", a.notebookDepth[nb.ID])+nb.Title).Grow(1)
-					if current {
+					if current != "" && current == nb.ID {
 						ui.Text(c, "✓")
 					}
 				})
 			}
 		})
 	})
+}
+
+// moveMenu lists the notebooks the open note can move to.
+func (a *nativeApp) moveMenu(c *ui.Context, t *ui.Theme) {
+	current := ""
+	if a.note != nil {
+		current = a.note.ParentID
+	}
+	a.notebookPicker(c, t, "Move to notebook", current, func(id string) {
+		a.moveOpen = false
+		a.moveTo(id)
+	})
+}
+
+// bulkMoveMenu moves every selected note to one notebook.
+func (a *nativeApp) bulkMoveMenu(c *ui.Context, t *ui.Theme) {
+	a.notebookPicker(c, t, "Move selected notes", "", func(id string) {
+		a.moveSelected(id)
+	})
+}
+
+// selectedIDs returns the chosen notes in list order. The choice may name
+// rows that a reload has since dropped, so only visible rows are returned.
+func (a *nativeApp) selectedIDs() []string {
+	if a.selection.Len() == 0 {
+		return nil
+	}
+	ids := make([]string, 0, a.selection.Len())
+	for _, n := range a.notes {
+		if a.selection.Has(n.ID) {
+			ids = append(ids, n.ID)
+		}
+	}
+	return ids
+}
+
+// moveSelected moves the chosen notes, saving pending edits first. The
+// selection clears because those rows leave the current notebook view.
+func (a *nativeApp) moveSelected(folderID string) {
+	ids := a.selectedIDs()
+	if folderID == "" || len(ids) == 0 {
+		return
+	}
+	a.flush()
+	for _, id := range ids {
+		n, err := a.svc.GetNote(id)
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		if n == nil || n.ParentID == folderID {
+			continue
+		}
+		n.ParentID = folderID
+		if err := a.svc.UpdateNote(n); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+	}
+	a.bulkMoveOpen = false
+	a.selection.Clear()
+	a.reloadNotes()
+}
+
+// deleteSelected deletes every chosen note. Pending edits to a note that is
+// going away are dropped instead of being written first.
+func (a *nativeApp) deleteSelected() {
+	ids := a.selectedIDs()
+	if len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		if a.note != nil && a.note.ID == id {
+			a.dirty = false
+			a.note = nil
+			a.selectedID = ""
+			a.title, a.body = "", ""
+			a.todo = false
+			a.noteTags = nil
+		}
+		if err := a.svc.DeleteNote(id); err != nil {
+			a.saveErr = err.Error()
+			break
+		}
+	}
+	a.selection.Clear()
+	a.reloadNotes()
 }
 
 func (a *nativeApp) emptyEditor(c *ui.Context, t *ui.Theme) {

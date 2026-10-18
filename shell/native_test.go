@@ -1160,3 +1160,135 @@ func TestNativeSavedSearchReplacesByName(t *testing.T) {
 	}
 	app.savedOpen = false
 }
+
+// TestNativeBulkMoveAndDelete drives multi-select through the real list: a
+// plain click chooses one row, Cmd/Ctrl-click adds another, and the bulk bar
+// moves both notes or deletes them after confirmation.
+func TestNativeBulkMoveAndDelete(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+
+	inbox := &models.Folder{Title: "Inbox"}
+	target := &models.Folder{Title: "Target"}
+	for _, f := range []*models.Folder{inbox, target} {
+		if err := svc.CreateNotebook(f); err != nil {
+			t.Fatalf("CreateNotebook: %v", err)
+		}
+	}
+	alpha := addTestNote(t, svc, inbox.ID, "Alpha", "first")
+	beta := addTestNote(t, svc, inbox.ID, "Beta", "second")
+	gamma := addTestNote(t, svc, inbox.ID, "Gamma", "third")
+
+	app.reloadNotebooks()
+	app.selectedNotebook = inbox.ID
+	app.reloadNotes()
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	if err := tt.Click("Alpha"); err != nil {
+		t.Fatalf("select Alpha: %v", err)
+	}
+	if err := tt.ClickWith(ui.Cmd, "Beta"); err != nil {
+		t.Fatalf("cmd-click Beta: %v", err)
+	}
+	if app.selection.Len() != 2 {
+		t.Fatalf("selection = %d rows, want 2", app.selection.Len())
+	}
+	if !tt.HasText("2 selected") {
+		t.Fatalf("bulk bar missing; texts = %v", tt.Texts())
+	}
+
+	// Move both to Target.
+	if err := tt.Click("Move selected notes"); err != nil {
+		t.Fatalf("open bulk move: %v", err)
+	}
+	if !app.bulkMoveOpen {
+		t.Fatal("bulk move menu did not open")
+	}
+	if err := tt.Click("Move to Target"); err != nil {
+		t.Fatalf("click Target: %v", err)
+	}
+	for _, n := range []*models.Note{alpha, beta} {
+		got, err := svc.GetNote(n.ID)
+		if err != nil || got == nil {
+			t.Fatalf("GetNote %s: %v", n.ID, err)
+		}
+		if got.ParentID != target.ID {
+			t.Fatalf("%s parent = %q, want %q", n.Title, got.ParentID, target.ID)
+		}
+	}
+	if app.selection.Len() != 0 {
+		t.Fatalf("selection after move = %d rows", app.selection.Len())
+	}
+	if got, _ := svc.GetNote(gamma.ID); got == nil || got.ParentID != inbox.ID {
+		t.Fatalf("Gamma moved unexpectedly: %#v", got)
+	}
+
+	// Select two others in All notes and delete them; Beta is one of them, so
+	// the open editor must let go of it instead of saving it back.
+	app.selectedNotebook = ""
+	app.reloadNotes()
+	tt.Frame()
+	if err := tt.Click("Beta"); err != nil {
+		t.Fatalf("select Beta: %v", err)
+	}
+	if app.note == nil || app.note.ID != beta.ID {
+		t.Fatalf("open note = %#v, want Beta", app.note)
+	}
+	if err := tt.ClickWith(ui.Cmd, "Gamma"); err != nil {
+		t.Fatalf("cmd-click Gamma: %v", err)
+	}
+	if err := tt.Click("Delete selected notes"); err != nil {
+		t.Fatalf("open bulk delete: %v", err)
+	}
+	if !app.confirmBulkDelete {
+		t.Fatal("bulk delete confirmation did not open")
+	}
+	if !tt.HasText("The 2 selected notes") {
+		t.Fatalf("confirmation does not name the count; texts = %v", tt.Texts())
+	}
+	if err := tt.Click("Delete notes"); err != nil {
+		t.Fatalf("confirm delete: %v", err)
+	}
+	for _, n := range []*models.Note{beta, gamma} {
+		if got, _ := svc.GetNote(n.ID); got != nil {
+			t.Fatalf("%s still exists after bulk delete", n.Title)
+		}
+	}
+	if got, _ := svc.GetNote(alpha.ID); got == nil {
+		t.Fatal("bulk delete removed an unselected note")
+	}
+	if app.saveErr != "" {
+		t.Fatalf("save error after bulk delete: %s", app.saveErr)
+	}
+	if app.note != nil && app.note.ID == beta.ID {
+		t.Fatal("the editor kept a deleted note")
+	}
+}
+
+// TestNativeSelectionPrunesOnFilter checks that a selection made under one
+// filter does not linger (and count) after the rows change.
+func TestNativeSelectionPrunesOnFilter(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	addTestNote(t, svc, "", "Alpha", "first")
+	addTestNote(t, svc, "", "Beta", "second")
+	app.reloadNotes()
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	if err := tt.Click("Alpha"); err != nil {
+		t.Fatalf("select Alpha: %v", err)
+	}
+	if app.selection.Len() != 1 {
+		t.Fatalf("selection = %d, want 1", app.selection.Len())
+	}
+	if err := tt.Click("Search notes"); err != nil {
+		t.Fatalf("click search: %v", err)
+	}
+	tt.Type("second")
+	if app.selection.Len() != 0 {
+		t.Fatalf("hidden note stayed selected: %d", app.selection.Len())
+	}
+	if tt.HasText("selected") {
+		t.Fatalf("bulk bar still shows; texts = %v", tt.Texts())
+	}
+}
