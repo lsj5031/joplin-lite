@@ -89,6 +89,47 @@ func TestLoadFromJoplinJSON(t *testing.T) {
 	}
 }
 
+func TestLoadFromYAML_LocalFolder(t *testing.T) {
+	os.Setenv("SYNC_DIR", `C:\notes\joplin-sync`)
+	defer os.Unsetenv("SYNC_DIR")
+	yaml := `
+sync:
+  target: 2
+  local_dir: "${SYNC_DIR}"
+api:
+  token: "t"
+  key: "k"
+server:
+  port: 41184
+`
+	cfg, err := loadFromYAML([]byte(yaml))
+	if err != nil {
+		t.Fatalf("loadFromYAML: %v", err)
+	}
+	if cfg.SyncTarget != 2 {
+		t.Errorf("SyncTarget = %d, want 2", cfg.SyncTarget)
+	}
+	if cfg.LocalDir != `C:\notes\joplin-sync` {
+		t.Errorf("LocalDir = %q", cfg.LocalDir)
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Errorf("validateConfig: %v", err)
+	}
+}
+
+func TestLoadFromJoplinJSON_LocalFolder(t *testing.T) {
+	cfg, err := loadFromJoplinJSON([]byte(`{"sync.target":2,"sync.2.path":"C:\\notes\\joplin-sync"}`))
+	if err != nil {
+		t.Fatalf("loadFromJoplinJSON: %v", err)
+	}
+	if cfg.SyncTarget != 2 {
+		t.Errorf("SyncTarget = %d, want 2", cfg.SyncTarget)
+	}
+	if cfg.LocalDir != `C:\notes\joplin-sync` {
+		t.Errorf("LocalDir = %q", cfg.LocalDir)
+	}
+}
+
 func TestLoadFromYAML_Observability(t *testing.T) {
 	yaml := `
 sync:
@@ -185,6 +226,20 @@ func TestValidateConfig(t *testing.T) {
 		err := validateConfig(cfg)
 		if err == nil {
 			t.Fatal("expected error for sync target 7")
+		}
+	})
+	t.Run("target 2 missing local dir", func(t *testing.T) {
+		cfg := &Config{SyncTarget: 2}
+		err := validateConfig(cfg)
+		if err == nil {
+			t.Fatal("expected error for missing local folder")
+		}
+	})
+	t.Run("target 2 ok", func(t *testing.T) {
+		cfg := &Config{SyncTarget: 2, LocalDir: `C:\notes\joplin-sync`}
+		err := validateConfig(cfg)
+		if err != nil {
+			t.Fatalf("validateConfig: %v", err)
 		}
 	})
 	t.Run("target 9 missing URL", func(t *testing.T) {

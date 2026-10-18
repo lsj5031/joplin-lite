@@ -82,10 +82,13 @@ func ExpandEnv(s string) string {
 
 // Config holds the resolved configuration for go-joplin.
 type Config struct {
-	SyncTarget int    `json:"sync.target"`
-	ServerURL  string `json:"sync.9.path"`
-	Username   string `json:"sync.9.username"`
-	Password   string `json:"sync.9.password"`
+	SyncTarget int `json:"sync.target"`
+	// Local folder (sync target 2). Joplin's File system target: the engine's
+	// rehearsal/interop path that needs no OAuth app or server.
+	LocalDir  string `json:"sync.2.path"`
+	ServerURL string `json:"sync.9.path"`
+	Username  string `json:"sync.9.username"`
+	Password  string `json:"sync.9.password"`
 	// S3 (sync target 8)
 	S3Bucket         string `json:"sync.8.path"`
 	S3URL            string `json:"sync.8.url"`
@@ -258,6 +261,7 @@ func loadFromJoplinJSON(data []byte) (*Config, error) {
 
 	cfg := &Config{}
 	cfg.SyncTarget = getInt("sync.target")
+	cfg.LocalDir = getString("sync.2.path")
 	cfg.ServerURL = getString("sync.9.path")
 	cfg.Username = getString("sync.9.username")
 	cfg.Password = getString("sync.9.password")

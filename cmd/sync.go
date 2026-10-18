@@ -26,7 +26,9 @@ var syncCmd = &cobra.Command{
 		defer db.Close()
 
 		var backend sync.SyncBackend
-		if cfg.SyncTarget == 8 {
+		if cfg.SyncTarget == 2 {
+			backend = sync.NewLocalFolderBackend(cfg.LocalDir)
+		} else if cfg.SyncTarget == 8 {
 			backend, err = sync.NewS3Backend(cfg)
 			if err != nil {
 				return fmt.Errorf("S3 backend: %w", err)

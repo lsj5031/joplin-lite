@@ -22,10 +22,11 @@ type yamlConfig struct {
 }
 
 type yamlSync struct {
-	Target        int             `yaml:"target"`
-	S3            yamlS3          `yaml:"s3"`
-	JoplinServer  yamlJoplinServer `yaml:"joplin_server"`
-	Dropbox       yamlDropbox     `yaml:"dropbox"`
+	Target       int              `yaml:"target"`
+	LocalDir     string           `yaml:"local_dir"`
+	S3           yamlS3           `yaml:"s3"`
+	JoplinServer yamlJoplinServer `yaml:"joplin_server"`
+	Dropbox      yamlDropbox      `yaml:"dropbox"`
 }
 
 // yamlDropbox is the user's own Dropbox OAuth app (sync target 7). The app
@@ -112,6 +113,10 @@ func loadFromYAML(data []byte) (*Config, error) {
 	if cfg.SyncTarget == 0 {
 		cfg.SyncTarget = 8
 	}
+
+	// File system (target 2): Joplin's local-folder target, used for safe
+	// end-to-end rehearsals and Joplin desktop interop tests.
+	cfg.LocalDir = ExpandEnv(y.Sync.LocalDir)
 
 	// S3 (target 8)
 	cfg.S3Bucket = y.Sync.S3.Bucket
@@ -267,8 +272,13 @@ func validateConfig(cfg *Config) error {
 		// Local-only: no sync target is required or validated.
 		return nil
 	}
-	if cfg.SyncTarget != 7 && cfg.SyncTarget != 8 && cfg.SyncTarget != 9 {
-		return fmt.Errorf("unsupported sync target %d (Dropbox target 7, S3 target 8 and Joplin Server target 9 are supported)", cfg.SyncTarget)
+	if cfg.SyncTarget != 2 && cfg.SyncTarget != 7 && cfg.SyncTarget != 8 && cfg.SyncTarget != 9 {
+		return fmt.Errorf("unsupported sync target %d (file system target 2, Dropbox target 7, S3 target 8 and Joplin Server target 9 are supported)", cfg.SyncTarget)
+	}
+	if cfg.SyncTarget == 2 {
+		if cfg.LocalDir == "" {
+			return fmt.Errorf("sync.local_dir (the Joplin file-system sync folder) is required for sync target 2")
+		}
 	}
 	if cfg.SyncTarget == 7 {
 		if cfg.DropboxAppKey == "" {

@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/lsj5031/joplin-lite/internal/config"
 )
 
 func writeDesktopConfig(t *testing.T, body string) string {
@@ -118,6 +120,19 @@ func TestDesktopBackendConfiguredTokenKeepsStable(t *testing.T) {
 	}
 	if code, _ := httpGet(be.baseURL + "/notes?token=" + fixed); code != 200 {
 		t.Fatalf("configured token rejected: %d", code)
+	}
+}
+
+// TestNewSyncBackendLocalFolder pins the file-system target (2) so the desktop
+// shell can run the local E2EE/sync rehearsal, not only remote targets.
+func TestNewSyncBackendLocalFolder(t *testing.T) {
+	dir := t.TempDir()
+	be, err := newSyncBackend(&config.Config{SyncTarget: 2, LocalDir: dir})
+	if err != nil {
+		t.Fatalf("newSyncBackend: %v", err)
+	}
+	if be.SyncTarget() != 2 {
+		t.Fatalf("SyncTarget() = %d, want 2", be.SyncTarget())
 	}
 }
 

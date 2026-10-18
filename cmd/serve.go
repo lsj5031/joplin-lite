@@ -53,13 +53,22 @@ var serveCmd = &cobra.Command{
 			slog.Info("sync disabled (--no-sync): serving the local database only")
 		} else {
 			var backend sync.SyncBackend
-			if cfg.SyncTarget == 8 {
+			switch cfg.SyncTarget {
+			case 2:
+				backend = sync.NewTracedBackend(sync.NewLocalFolderBackend(cfg.LocalDir), "local")
+			case 7:
+				b, err := sync.NewDropboxBackend(cfg)
+				if err != nil {
+					return fmt.Errorf("Dropbox backend: %w", err)
+				}
+				backend = sync.NewTracedBackend(b, "dropbox")
+			case 8:
 				b, err := sync.NewS3Backend(cfg)
 				if err != nil {
 					return fmt.Errorf("S3 backend: %w", err)
 				}
 				backend = sync.NewTracedBackend(b, "s3")
-			} else {
+			default:
 				c, err := sync.NewClient(cfg)
 				if err != nil {
 					return err

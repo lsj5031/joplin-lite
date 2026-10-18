@@ -148,18 +148,28 @@ func baseURLFor(addr net.Addr) string {
 // newSyncBackend selects the configured remote. The S3 backend is compiled
 // out unless the binary is built with -tags s3, and its stub explains that.
 func newSyncBackend(cfg *config.Config) (jsync.SyncBackend, error) {
-	if cfg.SyncTarget == 8 {
+	switch cfg.SyncTarget {
+	case 2:
+		return jsync.NewTracedBackend(jsync.NewLocalFolderBackend(cfg.LocalDir), "local"), nil
+	case 7:
+		b, err := jsync.NewDropboxBackend(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("Dropbox backend: %w", err)
+		}
+		return jsync.NewTracedBackend(b, "dropbox"), nil
+	case 8:
 		b, err := jsync.NewS3Backend(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("S3 backend: %w", err)
 		}
 		return jsync.NewTracedBackend(b, "s3"), nil
+	default:
+		c, err := jsync.NewClient(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return jsync.NewTracedBackend(c, "joplin_server"), nil
 	}
-	c, err := jsync.NewClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return jsync.NewTracedBackend(c, "joplin_server"), nil
 }
 
 func randomToken() (string, error) {
