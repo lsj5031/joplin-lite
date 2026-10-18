@@ -6,6 +6,17 @@ import { useVault } from '~/lib/vault'
 import { IconBack, IconConflict, IconTodo, Mark } from './icons'
 
 const md = new MarkdownIt({ linkify: true })
+// Links leave the app: the desktop shell opens a new-window request in the
+// system browser, and the explicit target keeps the same behavior in a tab.
+md.renderer.rules.link_open = (tokens, idx, options, _env, self) => {
+  const token = tokens[idx]
+  const href = String(token.attrGet('href') ?? '')
+  if (/^https?:\/\//i.test(href)) {
+    token.attrSet('target', '_blank')
+    token.attrSet('rel', 'noopener noreferrer')
+  }
+  return self.renderToken(tokens, idx, options)
+}
 // Only list-item text becomes a task checkbox; raw HTML remains disabled and
 // the complete rendered document still passes through DOMPurify.
 md.core.ruler.after('inline', 'task_lists', (state) => {
@@ -33,7 +44,7 @@ type Props = {
 
 export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNote, onBack }: Props) {
   const { notebookTitle, tagTitle, notebooks, tags, source, canWrite, patchNote, deleteNote, createTag, setNoteTags, error: vaultError } = useVault()
-  const [tab, setTab] = React.useState<'write' | 'preview'>('write')
+  const [tab, setTab] = React.useState<'write' | 'preview'>('preview')
   const [managing, setManaging] = React.useState(false)
   const [title, setTitle] = React.useState('')
   const [notebookId, setNotebookId] = React.useState('')
@@ -46,11 +57,21 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
   const disabled = !!loading || !canWrite || busy
 
   React.useEffect(() => {
+    // Notes open as rendered pages; Write is a deliberate switch.
+    setTab('preview')
     setManaging(false)
     setError(null)
     setNewTag('')
     setConfirmDelete(false)
   }, [note?.id])
+
+  function handlePreviewClick(event: React.MouseEvent<HTMLDivElement>) {
+    const anchor = (event.target as HTMLElement | null)?.closest('a')
+    const href = anchor?.getAttribute('href') ?? ''
+    if (!/^https?:\/\//i.test(href)) return
+    event.preventDefault()
+    window.open(href, '_blank', 'noopener,noreferrer')
+  }
 
   const preview = React.useRef<{ id: string; body: string; html: string } | null>(null)
   // Keep only this note's last preview across tab changes; edits discard it even in Write.
@@ -256,7 +277,7 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
           className="editor-body mono flex-1 resize-none bg-transparent text-ink outline-none"
         />
       ) : (
-        <div className="editor-body flex-1 overflow-y-auto">
+        <div className="editor-body flex-1 overflow-y-auto" onClick={handlePreviewClick} onAuxClick={handlePreviewClick}>
           <div className="prose-note" dangerouslySetInnerHTML={{ __html: html }} />
         </div>
       )}
