@@ -37,6 +37,12 @@ fi
 
 export GOJOPLIN_USERNAME="$USERNAME" GOJOPLIN_PASSWORD="$PASSWORD"
 
+# Absolute paths go into the config files, in the form the Go binary can read:
+# on Windows the shell's /t/... spelling would resolve against the current
+# drive, so ask cygpath for the mixed T:/... form.
+ROOT="$(pwd)"
+if command -v cygpath >/dev/null 2>&1; then ROOT="$(cygpath -m "$ROOT")"; fi
+
 RUN="tmp/joplin-server-e2e"
 PORT_A=41821
 PORT_B=41822
@@ -87,10 +93,19 @@ sync:
 
 api:
   token: "$3"
+  key: "$3-key"
   master_password: "\${GOJOPLIN_MASTER_PASSWORD}"
 
+# The clipper policy is read-only by default, which is right for third-party
+# clients; this test vault is the owner of its data, so it may write anywhere.
+mcp:
+  allow_folders: "*"
+  allow_tags: "*"
+  allow_create_folder: true
+  allow_create_tag: true
+
 server:
-  data_dir: "$PWD/$RUN/$1"
+  data_dir: "$ROOT/$RUN/$1"
   port: $2
   listen_host: "127.0.0.1"
 

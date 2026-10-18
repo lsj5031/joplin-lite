@@ -19,23 +19,32 @@ This covers the engine-level loop: master key from `info.json`, encrypted
 note and resource metadata (StringV1 envelopes), a FileV1-encrypted resource
 blob, decrypt on pull, and the "edit keeps unknown metadata keys" round trip.
 
+## Automated end-to-end run
+
+```sh
+bash qa/local-sync-e2e.sh
+```
+
+That script is the reproducible gate for this document: it pushes a plaintext
+note between two throwaway vaults, then does the same with E2EE on (owner with
+a master key, second vault joining with the password, plus a third vault
+without the password that must not read anything), and checks the target files
+for plaintext leaks. Everything it writes is under `tmp/local-sync-e2e`.
+
 ## CLI rehearsal (recorded evidence, 2026-10-18)
 
-This leg was run once with a **scratch seeder kept in `tmp/` and not part of
-the repository**, so the commands below are a record of what was verified,
-not a copy-paste reproduction. The reproducible gate is the `go test` above;
-for the config-file path, the Joplin desktop procedure in
-[local-sync-test.md](local-sync-test.md) is the reproducible one.
-
-The seeder created a local database that already had a KeyV1 master key, one
-folder, one note and one resource. Then the regular CLI did the work, so the
-run exercised the real config path (`sync.target`, `sync.local_dir`,
-`api.master_password`).
+The commands below are the same run done by hand, and they are now
+reproducible: the seeder lives in the repository as `tools/e2eeseed`, which
+creates a local database that already has a KeyV1 master key (what Joplin
+desktop creates when a user turns encryption on — joplin-lite joins an
+encrypted library, it does not create one), one folder, one note and one
+resource. The regular CLI then does the work, so the run exercises the real
+config path (`sync.target`, `sync.local_dir`, `api.master_password`).
 
 1. Seed an encrypted owner:
 
    ```sh
-   go run ./tmp/e2ee-seed tmp/e2ee-source 'test-password'
+   go run ./tools/e2eeseed -data-dir tmp/e2ee-source -password 'test-password'
    ```
 
 2. Push encrypted:

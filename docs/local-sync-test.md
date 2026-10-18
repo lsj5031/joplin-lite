@@ -3,6 +3,11 @@
 This is the safe way to exercise the full Joplin item format, E2EE and sync
 loop without touching your production Dropbox library.
 
+For the automated version of the same target — two throwaway vaults, a
+plaintext round trip and an E2EE one, no Joplin desktop needed — run
+`bash qa/local-sync-e2e.sh`. Use this document when the point is the
+**Joplin desktop interop**, which that script cannot cover.
+
 For the fast client-side gate (encrypted push, pull and decrypt without
 Joplin desktop), see [e2ee-sync-rehearsal.md](e2ee-sync-rehearsal.md) first.
 
@@ -134,6 +139,10 @@ silently overwritten.
   including case, spaces or a trailing newline. Do not trim it.
 - **Port 41184 in use**: Joplin desktop's clipper owns it. Use 41185 for the
   app during the test; the Web Clipper scans 41184–41194.
+- **A resource shows as ciphertext (`JED01…`) after a later sync**: fixed —
+  a blob re-fetched for an already-decrypted resource is flagged encrypted
+  again so the decrypt pass picks it up. An old build that still does this
+  needs to sync once more with the master password set.
 - **Wrong target path**: YAML uses `sync.local_dir`; Joplin's own
   `settings.json` uses `sync.2.path`. Both map to the same file-system target.
 
