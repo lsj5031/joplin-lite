@@ -19,12 +19,18 @@ This covers the engine-level loop: master key from `info.json`, encrypted
 note and resource metadata (StringV1 envelopes), a FileV1-encrypted resource
 blob, decrypt on pull, and the "edit keeps unknown metadata keys" round trip.
 
-## CLI rehearsal (what was run on 2026-10-18)
+## CLI rehearsal (recorded evidence, 2026-10-18)
 
-A scratch seeder creates a local database that already has a KeyV1 master
-key, one folder, one note and one resource. Then the regular CLI does the
-work, so the rehearsal exercises the real config path
-(`sync.target`, `sync.local_dir`, `api.master_password`).
+This leg was run once with a **scratch seeder kept in `tmp/` and not part of
+the repository**, so the commands below are a record of what was verified,
+not a copy-paste reproduction. The reproducible gate is the `go test` above;
+for the config-file path, the Joplin desktop procedure in
+[local-sync-test.md](local-sync-test.md) is the reproducible one.
+
+The seeder created a local database that already had a KeyV1 master key, one
+folder, one note and one resource. Then the regular CLI did the work, so the
+run exercised the real config path (`sync.target`, `sync.local_dir`,
+`api.master_password`).
 
 1. Seed an encrypted owner:
 

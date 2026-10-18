@@ -57,6 +57,7 @@ adopt `mygo build` without changing the app code.
 | `-data-dir` | override the database directory |
 | `-no-sync` | local-only: no remote, no background sync |
 | `-addr` | override the API listen address |
+| `-native` | Phase 0 spike: draw the read-only three-pane workspace with MyGO `ui` and no webview (see `docs/native-ui-migration.md`) |
 | `-smoke` | development check: load, probe the live page, POST/DELETE a probe note, screenshot, quit |
 
 `-no-sync` is needed for a config without a sync target: the YAML loader
