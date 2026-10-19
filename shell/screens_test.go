@@ -207,6 +207,7 @@ func TestCaptureScreens(t *testing.T) {
 	app.selectedID = long.ID
 	app.reloadNotes()
 	app.showNote(long.ID)
+	app.toggleEdit()
 	capture(t, dir, "01-workspace", tt)
 
 	// 2. The rendered preview.

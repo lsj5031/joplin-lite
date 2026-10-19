@@ -162,7 +162,7 @@ func (a *nativeApp) targetLabel() string {
 }
 
 func newNativeApp(db *store.DB) *nativeApp {
-	app := &nativeApp{svc: service.New(db), selectedNote: -1, editing: true}
+	app := &nativeApp{svc: service.New(db), selectedNote: -1}
 	app.reloadNotebooks()
 	app.reloadTags()
 	app.loadSavedSearches()
@@ -504,8 +504,8 @@ func (a *nativeApp) showNote(id string) {
 	a.note = note
 	a.selectedID = id
 	a.title, a.body = note.Title, note.Body
-	a.editing = true
-	a.focusBody = true
+	a.editing = false
+	a.focusBody = false
 	a.dirty = false
 	a.saveErr = ""
 	a.todo = note.IsTodo != 0
@@ -700,9 +700,9 @@ func (a *nativeApp) newNote() {
 	a.selectedID = note.ID
 	a.note = nil
 	a.dirty = false
+	a.reloadNotes()
 	a.editing = true
 	a.focusBody = true
-	a.reloadNotes()
 	a.remember(note.ID)
 }
 

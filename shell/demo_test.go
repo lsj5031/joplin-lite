@@ -91,7 +91,7 @@ func TestCaptureDemo(t *testing.T) {
 	d := &demo{t: t, tt: tt, dir: frames}
 	d.hold(0.2)
 
-	// The workspace, then the rendered preview of the same note and back.
+	// Existing notes start in preview; show the editor and return to reading.
 	d.hold(1.2)
 	tt.Key(ui.Cmd, ui.KeyE)
 	d.hold(2.0)

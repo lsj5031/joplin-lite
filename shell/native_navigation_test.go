@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -47,11 +48,17 @@ func TestNativeNavigation(t *testing.T) {
 					t.Fatalf("modifier selection left list or lost selection: editor=%v selection=%v", app.narrowEditor, app.selectedIDs())
 				}
 				shot("bulk-list")
-				if err := tt.ClickWith(ui.Shift, "Alpha"); err != nil {
+				// Windows uses Ctrl+Shift to retain the existing choice while
+				// extending a range; macOS Shift already retains other rows.
+				mods := ui.Shift
+				if runtime.GOOS != "darwin" {
+					mods |= ui.Cmd
+				}
+				if err := tt.ClickWith(mods, "Alpha"); err != nil {
 					t.Fatal(err)
 				}
 				if app.narrowEditor || app.selection.Len() != 2 {
-					t.Fatal("Shift selection must preserve list and range")
+					t.Fatalf("Shift selection must preserve list and range: editor=%v selection=%v", app.narrowEditor, app.selectedIDs())
 				}
 				click(t, tt, "Delete selected notes")
 				tt.Key(0, ui.KeyEnter)
@@ -65,6 +72,9 @@ func TestNativeNavigation(t *testing.T) {
 			// A shortcut must move actual focus away from the note body, even
 			// after the search input has already mounted.
 			for _, key := range []ui.Key{ui.KeyK, ui.KeyF} {
+				if !app.editing {
+					click(t, tt, "Edit")
+				}
 				click(t, tt, "Note body")
 				tt.Key(ui.Cmd, key)
 				tt.Type("Alpha")
@@ -197,7 +207,11 @@ func TestNativeConflictComparisonNavigation(t *testing.T) {
 				t.Fatal("View original did not navigate to original")
 			}
 			if app.narrow {
-				tt.Key(ui.Cmd, ui.KeyBracketLeft)
+				if runtime.GOOS == "darwin" {
+					tt.Key(ui.Cmd, ui.KeyBracketLeft)
+				} else {
+					tt.Key(ui.Alt, ui.KeyLeft)
+				}
 			} else {
 				click(t, tt, "Back")
 			}

@@ -39,7 +39,7 @@ func addTestNote(t *testing.T, svc *service.Service, parent, title, body string)
 }
 
 // TestNativeWorkspaceDrivesTheView runs the real native view headlessly: it
-// types into the focused body, waits for the autosave deadline, switches to
+// opens an existing note in preview, edits its body, waits for autosave, switches to
 // the Markdown preview, creates a note with the keyboard shortcut and types
 // in the title and search fields. This covers the widget wiring that the
 // direct method tests above cannot.
@@ -52,10 +52,9 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 		t.Fatalf("CreateNotebook: %v", err)
 	}
 	seed := addTestNote(t, svc, folder.ID, "Seed", "")
-	app.reloadNotebooks()
-	app.reloadNotes()
-	if app.note == nil || app.note.ID != seed.ID || !app.focusBody {
-		t.Fatalf("seed note not focused: %#v", app.note)
+	app = newNativeApp(db)
+	if app.note == nil || app.note.ID != seed.ID {
+		t.Fatalf("seed note not opened: %#v", app.note)
 	}
 
 	tt := ui.NewTester(app.view, 1200, 800)
@@ -66,8 +65,11 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 		t.Fatalf("status does not report a backend-less app as local only; texts = %v", tt.Texts())
 	}
 
-	// The body has the keyboard on load, so typing goes straight into the
-	// note and the debounce timer writes it.
+	// Existing notes open as rendered pages; Edit focuses the body for writing.
+	if _, ok := tt.Find("Note body"); ok {
+		t.Fatal("an existing note opened in Write instead of Preview")
+	}
+	click(t, tt, "Edit")
 	tt.Type("Hello native")
 	time.Sleep(600 * time.Millisecond)
 	tt.Frame()
@@ -186,6 +188,12 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 	if app.note == nil || app.note.ID != seed.ID {
 		t.Fatalf("search did not select the match: %#v", app.note)
 	}
+	if _, ok := tt.Find("Note body"); ok {
+		t.Fatal("switching to an existing note did not return to Preview")
+	}
+	if _, ok := tt.Find("Edit"); !ok {
+		t.Fatal("the existing note has no Edit action")
+	}
 
 	// The Todo checkbox writes through immediately.
 	if err := tt.Click("Todo"); err != nil {
@@ -291,11 +299,13 @@ func TestNativeHistoryAndMove(t *testing.T) {
 		t.Fatalf("after %s = %#v, want alpha", historyHint(true), app.note)
 	}
 	if runtime.GOOS == "darwin" {
-		// Pins the decision above: with the note open, Alt and an arrow must
+		// Pins the decision above: while editing, Alt and an arrow must
 		// stay the editor's word movement, not a navigation.
+		click(t, tt, "Edit")
+		click(t, tt, "Note body")
 		tt.Key(ui.Alt, ui.KeyLeft)
 		if app.note == nil || app.note.ID != alpha.ID {
-			t.Fatalf("Alt+Left moved the history while a note was open; the editor owns it on macOS")
+			t.Fatalf("Alt+Left moved the history while editing; the editor owns it on macOS")
 		}
 	}
 
@@ -766,9 +776,10 @@ func TestNativeAppLoadAndAutosave(t *testing.T) {
 	if app.note == nil || app.note.ID != note.ID {
 		t.Fatalf("loaded note = %#v, want %s", app.note, note.ID)
 	}
-	if !app.editing {
-		t.Fatal("a newly opened note should be in edit mode")
+	if app.editing {
+		t.Fatal("an existing note should open in preview")
 	}
+	app.toggleEdit()
 
 	app.title = "Renamed"
 	app.body = "alpha with more words"
