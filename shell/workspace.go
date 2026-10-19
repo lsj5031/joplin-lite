@@ -13,11 +13,8 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
-// This file draws the workspace itself: the navy top bar and status strip that
-// bookend the shell, the three-pane grid, every screen state of it, and the
-// transient surfaces (menus and dialogs) that hang off it. Everything here
-// reads its tokens from design.go — no color, size or duration is picked
-// locally.
+// Field Notes workspace: sage navigation beside a paper editor, with notebook
+// management on demand. Shared typography and palette live in design.go.
 
 const navRowHeight = float32(32)
 
@@ -88,22 +85,23 @@ func (a *nativeApp) view(c *ui.Context) {
 
 	width, height := c.Size()
 	a.narrow = width < narrowWidth
-	if !a.narrow {
-		// The slide-over only exists while the shell is collapsed.
-		a.railOpen = false
-	}
 	// The grid is sized explicitly — chrome top and bottom, work between
 	// them — so a tall pane can never push the status strip off the window.
 	strip := statusHeight
 	if a.narrow {
 		strip = narrowStatusHeight
 	}
-	body := height - topBarHeight - strip
+	body := height - strip
+	if a.narrow {
+		body -= topBarHeight
+	}
 	if body < 0 {
 		body = 0
 	}
 
-	a.topBar(c, t)
+	if a.narrow {
+		a.topBar(c, t)
+	}
 	if a.saveErr != "" {
 		ui.Text(c, a.statusText()).Height(36).Shrink(0).Padding(8, 14).
 			TextColor(signalRed).Background(paperRaised).SingleLine().Tooltip(a.statusText())
@@ -112,8 +110,13 @@ func (a *nativeApp) view(c *ui.Context) {
 	ui.Row(c).Height(body).Shrink(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		switch {
 		case !a.narrow:
-			a.railPane(c, t, true)
-			a.notesPane(c, t)
+			if a.railOpen {
+				a.railPane(c, t, true)
+			}
+			ui.Column(c).Width(listWidth).Shrink(0).Background(paperSunken).Children(func() {
+				a.topBar(c, t)
+				a.notesPane(c, t)
+			})
 			a.editorPane(c, t)
 		case a.narrowEditor:
 			a.editorPane(c, t)
@@ -132,6 +135,28 @@ func (a *nativeApp) view(c *ui.Context) {
 // topBar is the upper chrome bar: the wordmark, the search field that filters
 // the note list, and the three controls that are always available.
 func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
+	if !a.narrow {
+		ui.Column(c).Padding(24, 18, 12, 18).Gap(18).Children(func() {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				mark(c)
+				ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(25).Grow(1)
+				if chromeButton(c, "⚙").Label("Settings").Clicked() {
+					a.openSettings()
+				}
+			})
+			ui.Row(c).Height(36).Children(func() { a.searchField(c, t) })
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if chromeButton(c, "+ New note").Label("New note").Clicked() {
+					a.newNote()
+				}
+				ui.Spacer(c)
+				if chromeButton(c, "Notebooks").Label("Open notebooks").Tooltip("Notebooks and tags").Clicked() {
+					a.railOpen = !a.railOpen
+				}
+			})
+		})
+		return
+	}
 	ui.Row(c).Height(topBarHeight).Shrink(0).AlignItems(ui.Center).Gap(12).Padding(0, 14).
 		Background(navyDeep).Children(func() {
 		if a.narrow {
@@ -144,9 +169,7 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		}
 		mark(c)
 		ui.Column(c).Gap(0).Shrink(0).Children(func() {
-			ui.Text(c, "joplin").FontSize(14).Bold().TextColor(paper).
-				Children(func() { ui.Text(c, "-lite").FontSize(14).TextColor(routeBlueSoft) })
-			ui.Text(c, "A little room to think").FontSize(sizeMonoSm).TextColor(navyText)
+			ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(22).TextColor(inkNavy)
 		})
 		a.searchField(c, t)
 		primary := primaryAction(c, "New note")
@@ -166,25 +189,30 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// mark is the wordmark: the two letters of joplin-lite in a route-blue tile.
+// mark is the folded sheet beside the Humanist wordmark.
 func mark(c *ui.Context) ui.Element {
-	return ui.Box(c).Size(26, 26).Radius(radiusControl).Background(routeBlue).Shrink(0).
-		Center().Children(func() {
-		ui.Text(c, "jl").FontSize(13).Bold().TextColor(paper)
+	return ui.Box(c).Size(26, 32).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+		x, y := r.X, r.Y
+		var page, fold, crease ui.Path
+		page.MoveTo(x+3, y+2).LineTo(x+18, y+2).LineTo(x+24, y+10).LineTo(x+24, y+30).LineTo(x+3, y+30).Close()
+		fold.MoveTo(x+3, y+30).LineTo(x+18, y+12).LineTo(x+24, y+12).LineTo(x+14, y+30).Close()
+		crease.MoveTo(x+18, y+2).LineTo(x+18, y+12).LineTo(x+24, y+12).Close()
+		p.FillPath(&page, routeBlue.Alpha(0.25))
+		p.FillPath(&fold, routeBlue.Alpha(0.75))
+		p.FillPath(&crease, routeBlue)
 	})
 }
 
-// chromeButton is a button living on the ink-navy bars: no face until it is
-// hovered, paper text, a navy-line fill on hover.
+// chromeButton is quiet at rest, with a tonal fill on hover.
 func chromeButton(c *ui.Context, label string) ui.Element {
 	chrome := designTheme()
 	chrome.Surface = ui.Transparent
 	chrome.SurfaceHover = navyLine
 	chrome.SurfacePressed = navyLine
 	chrome.Border = ui.Transparent
-	chrome.Text = paper
+	chrome.Text = inkNavy
 	chrome.TextMuted = navyText
-	chrome.InverseText = paper
+	chrome.InverseText = inkNavy
 	return underTheme(c, func() *ui.Theme { return chrome }, func() ui.Element {
 		return ui.Button(c, label).Padding(6, 10).Radius(radiusControl)
 	})
@@ -196,15 +224,14 @@ func chromeGlyph(c *ui.Context, glyph string, size float32) ui.Element {
 	return ui.Text(c, glyph).FontSize(size).TextColor(navyText).MinWidth(size)
 }
 
-// searchField is DESIGN.md's search input: 32px high on navy-deep, themed so
+// searchField is the compact paper search input, themed so
 // its placeholder, caret and selection read on the chrome, with the mono kbd
 // hint at its end.
 func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 	field := designTheme()
-	field.Text = paper
+	field.Text = inkNavy
 	field.TextMuted = navyText
 	field.Surface = navyDeep
-	field.Text = paper
 	field.Accent = routeBlueSoft
 	field.Selection = routeBlueSoft.Alpha(0.35)
 	field.Border = navyLine
@@ -218,7 +245,7 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 				in := ui.TextInput(c.Key("search"), &a.query).
 					Placeholder("Search all notes…").
 					Label("Search notes").
-					TextColor(paper).
+					TextColor(inkNavy).
 					SelectionColor(routeBlueSoft.Alpha(0.35)).
 					Background(ui.Transparent).
 					Padding(0).
@@ -264,14 +291,13 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 func (a *nativeApp) statusStrip(c *ui.Context, t *ui.Theme) {
 	st := a.syncState()
 	notice := a.syncNotice()
-	target := a.targetLabel()
 
 	state := func() {
 		dot := ui.Box(c).Size(7, 7).Radius(3.5).Shrink(0)
 		dot.Background(statusDotColor(st, notice))
-		ui.Text(c, notice.Line).FontSize(sizeSmall).Bold().TextColor(paper)
+		ui.Text(c, notice.Line).FontSize(sizeSmall).TextColor(inkSoft)
 		if notice.Hint != "" {
-			ui.Text(c, notice.Hint).FontSize(sizeMonoSm).TextColor(navyText)
+			ui.Text(c, notice.Hint).FontSize(sizeMonoSm).TextColor(navyText).SingleLine().MinWidth(0)
 		}
 	}
 	controls := func() {
@@ -293,23 +319,8 @@ func (a *nativeApp) statusStrip(c *ui.Context, t *ui.Theme) {
 		}
 	}
 
-	if a.narrow {
-		// Below the breakpoint the strip stacks (DESIGN.md): the diagram keeps
-		// the full width and the status text sits beneath it.
-		ui.Column(c).Shrink(0).Background(navyDeep).Padding(8, 14).Gap(4).Children(func() {
-			syncLine(c, target, st, notice)
-			ui.Row(c).Fill().AlignItems(ui.Center).Gap(10).Children(func() {
-				state()
-				ui.Spacer(c)
-				controls()
-			})
-		})
-		return
-	}
-
 	ui.Row(c).Height(statusHeight).Shrink(0).AlignItems(ui.Center).Gap(12).Padding(0, 14).
 		Background(navyDeep).Children(func() {
-		syncLine(c, target, st, notice)
 		ui.Row(c).Grow(1).AlignItems(ui.Center).Gap(10).MinWidth(0).Children(func() {
 			state()
 			ui.Spacer(c)
@@ -351,7 +362,13 @@ func (a *nativeApp) chosenRail() string {
 // railPane is the notebook rail: every notebook as a tree, its tags below, and
 // the counts in mono at the end of each row.
 func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme, withHeader bool) {
-	ui.Column(c).Width(railWidth).Shrink(0).Background(paperSunken).Children(func() {
+	pane := ui.Column(c).Width(railWidth).Background(paperSunken)
+	if a.narrow {
+		pane.Grow(1)
+	} else {
+		pane.FillHeight().Shrink(0)
+	}
+	pane.Children(func() {
 		if withHeader {
 			ui.Row(c).Padding(12, 14, 8, 14).Gap(6).AlignItems(ui.Center).Children(func() {
 				label(c, "Notebooks")
@@ -373,6 +390,9 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme, withHeader bool) {
 					a.menu(c, actions, &a.notebookActions, "notebook", 190, func() {
 						a.notebookMenu(c, t)
 					})
+				}
+				if !a.narrow && ui.Button(c, "×").Label("Close notebooks").Clicked() {
+					a.railOpen = false
 				}
 			})
 		}
@@ -516,7 +536,7 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 func (a *nativeApp) railOverlay(c *ui.Context, t *ui.Theme) {
 	run := a.surfaces.opening("rail", a.railOpen)
 	ui.DialogBase(c, &a.railOpen, func(back, panel ui.Element) {
-		back.Background(navyDeep.Alpha(0.34))
+		back.Background(inkNavy.Alpha(0.24))
 		v := panel.Keyframes("rail-slide", []ui.Keyframe{
 			{At: 0, Value: 0},
 			{At: 220 * time.Millisecond, Value: 1, Ease: ui.EaseOut},
@@ -541,27 +561,7 @@ func (a *nativeApp) railOverlay(c *ui.Context, t *ui.Theme) {
 							a.railOpen = false
 						}
 					})
-					a.notebookRows(c, t)
-					ui.Divider(c)
-					ui.Row(c).Padding(8, 14).Gap(6).AlignItems(ui.Center).Children(func() {
-						label(c, "Tags")
-						ui.Spacer(c)
-						add := ui.Button(c, "+").Label("New tag").Tooltip("New tag")
-						add.Padding(2, 6).MinWidth(24)
-						if add.Clicked() {
-							a.openNewTag()
-						}
-						if a.selectedTag != "" {
-							clear := ui.Button(c, "×").Label("Clear tag").Tooltip("Clear the tag filter")
-							clear.Padding(2, 6).MinWidth(24)
-							if clear.Clicked() {
-								a.selectedTag, a.selectedID = "", ""
-								a.reloadNotes()
-								a.railOpen = false
-							}
-						}
-					})
-					a.tagRows(c, t)
+					a.railPane(c, t, true)
 				})
 				// The rest of the window is the way out, as a dialog's backdrop.
 				outside := ui.Box(c).Grow(1).Label("Close the notebook drawer")
@@ -582,7 +582,7 @@ func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
 	if a.narrow {
 		width = 0
 	}
-	pane := ui.Column(c).Shrink(0).Background(paper).Border(0, hairline)
+	pane := ui.Column(c).Grow(1).MinHeight(0).Background(paperSunken)
 	if width > 0 {
 		pane.Width(width)
 	} else {
@@ -812,7 +812,7 @@ func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string)
 			ui.Text(c, excerpt(meta)).FontSize(sizeLabel).LineHeight(1.25).
 				TextColor(inkSoft).SingleLine()
 		})
-		ui.Text(c, time.UnixMilli(n.UpdatedTime).Format("02 Jan 15:04")).
+		ui.Text(c, time.UnixMilli(n.UpdatedTime).Format("02 Jan")).
 			Font(fontMono).FontSize(sizeMonoSm).TextColor(inkSoft).Shrink(0)
 	})
 }
@@ -856,16 +856,14 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		if a.editing {
-			// The body is a borderless mono field (DESIGN.md): 13px Overpass
-			// Mono on the raised surface, padded to the pane's rhythm so its
-			// first line sits under the title.
+			// Keep the writing surface quiet; code remains monospace in preview.
 			editor := ui.TextArea(c.Key("body:"+a.note.ID), &a.body).
 				Placeholder("Write in Markdown…").
 				Label("Note body").
-				Font(fontMono).
-				FontSize(sizeUI).
-				LineHeight(1.7).
-				Padding(contentPad, contentPad).
+				Font(fontSans).
+				FontSize(sizeBody).
+				LineHeight(1.9).
+				Padding(32, 48).
 				Background(paperRaised).
 				Border(0, ui.Transparent).
 				FillWidth().
@@ -879,17 +877,16 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 			}
 			return
 		}
-		ui.Scroll(c).Grow(1).Padding(contentPad, 24).Children(func() {
-			ui.Column(c).MaxWidth(760).Gap(4).Children(func() {
-				if a.title != "" {
-					ui.Text(c, a.title).FontSize(sizeDisplay).Bold().LetterSpacing(-0.015).
-						LineHeight(1.2).TextColor(inkNavy)
-				}
-				if a.body == "" {
-					ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
-					return
-				}
-				markdown.View(c, a.body, &a.md)
+		ui.Scroll(c).Grow(1).Padding(48, 48).Children(func() {
+			ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).MaxWidth(700).Gap(20).Children(func() {
+					if a.body == "" {
+						ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
+						return
+					}
+					a.md.Theme = &markdown.Theme{Font: fontSans, FontSize: sizeBody, LineHeight: 1.9, CodeFont: fontMono}
+					markdown.View(c, a.body, &a.md)
+				})
 			})
 		})
 	})
@@ -918,7 +915,7 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 				Placeholder("Untitled").
 				Label("Note title").
 				FontSize(sizeTitle).
-				Bold().
+				Font(fontHeading).
 				Padding(0).
 				Background(ui.Transparent).
 				Border(0, ui.Transparent).

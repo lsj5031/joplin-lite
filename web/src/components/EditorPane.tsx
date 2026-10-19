@@ -128,7 +128,7 @@ export function EditorPane({ note, loading, startWriting = false, onToggleTodo, 
           >
             <IconBack width={16} height={16} />
           </button>
-          <h1 className="editor-title min-w-0 flex-1 truncate leading-tight text-ink" title={note.title}>
+          <h1 className="editor-title min-w-0 flex-1 leading-tight text-ink" title={note.title}>
             {note.title}
           </h1>
           {note.isTodo && (

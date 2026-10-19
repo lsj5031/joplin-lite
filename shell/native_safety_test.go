@@ -44,6 +44,7 @@ func TestNativeOrphanConflictPreservesVersion(t *testing.T) {
 			if len(app.notes) != 0 {
 				t.Fatalf("resolved note remains in Conflicts: %#v", app.notes)
 			}
+			click(t, tt, "Open notebooks")
 			click(t, tt, "All notes")
 			click(t, tt, "☐ Recovered draft")
 			if app.body != conflict.Body || len(app.noteTags) != 1 || app.noteTags[0].ID != tag.ID {
@@ -211,6 +212,7 @@ func TestNativeHistoryClearsUnrelatedTag(t *testing.T) {
 	app.selectedID = alpha.ID
 	app.reloadNotes()
 	tt := ui.NewTester(app.view, 1280, 800)
+	click(t, tt, "Open notebooks")
 	click(t, tt, "Only beta")
 	click(t, tt, "Back")
 	if app.selectedTag != "" || app.selectedID != alpha.ID || app.selectedNote < 0 || !tt.HasText("Alpha") {

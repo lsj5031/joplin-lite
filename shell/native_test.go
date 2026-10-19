@@ -155,6 +155,7 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 	}
 
 	// The tag rail filters the note list and can be cleared.
+	click(t, tt, "Open notebooks")
 	if err := tt.Click("Alpha"); err != nil {
 		t.Fatalf("click tag Alpha: %v", err)
 	}
@@ -470,6 +471,7 @@ func TestNativeTagManagement(t *testing.T) {
 	app.reloadNotes()
 
 	tt := ui.NewTester(app.view, 1200, 800)
+	click(t, tt, "Open notebooks")
 	if err := tt.Click("New tag"); err != nil {
 		t.Fatalf("click New tag: %v", err)
 	}
@@ -540,6 +542,7 @@ func TestNativeNotebookManagement(t *testing.T) {
 	app.reloadNotes()
 
 	tt := ui.NewTester(app.view, 1200, 800)
+	click(t, tt, "Open notebooks")
 	if err := tt.Click("New notebook"); err != nil {
 		t.Fatalf("click New notebook: %v", err)
 	}
@@ -1380,6 +1383,7 @@ func TestNativeDragNoteToNotebook(t *testing.T) {
 	}
 
 	// A single, unchosen row drags itself.
+	click(t, tt, "Open notebooks")
 	drag("Alpha", "Target")
 	if got, _ := svc.GetNote(alpha.ID); got == nil || got.ParentID != target.ID {
 		t.Fatalf("Alpha parent = %#v, want Target", got)

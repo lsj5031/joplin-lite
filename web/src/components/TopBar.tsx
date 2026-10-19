@@ -41,7 +41,7 @@ export function TopBar({ query, onQuery, source, canWrite, reloading, onReload, 
     <header className="app-header flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-4 py-3 text-ink md:flex-nowrap md:gap-6 md:px-6">
       <div className="flex shrink-0 items-center gap-3 md:w-[194px]">
         <Mark />
-        <div><div className="brand-name">joplin<span>-lite</span></div><p className="brand-caption">A little room to think</p></div>
+        <div className="brand-name">joplin-lite</div>
       </div>
 
       <div className="relative order-last w-full md:order-none md:mx-auto md:max-w-[420px] md:min-w-0">
@@ -58,7 +58,7 @@ export function TopBar({ query, onQuery, source, canWrite, reloading, onReload, 
         <kbd className="mono pointer-events-none absolute top-1/2 right-3 hidden -translate-y-1/2 rounded border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-soft md:block">⌘K</kbd>
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5 md:ml-0">
+      <div className="header-actions ml-auto flex shrink-0 items-center gap-1.5 md:ml-0">
         <button
           type="button"
           onClick={onNewNote}

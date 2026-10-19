@@ -121,7 +121,10 @@ export const IconClipper = (p: React.SVGProps<SVGSVGElement>) => (
 
 /** The folded-page mark, shared with the favicon and platform icons. */
 export const Mark = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg width="36" height="36" viewBox="0 0 64 64" fill="none" aria-hidden {...p}>
-    <image href="/logo.svg" width="64" height="64" />
+  <svg width="36" height="36" viewBox="0 0 64 64" fill="none" className="text-route" aria-hidden {...p}>
+    <path d="M12 5h28l12 15v39H12z" fill="currentColor" opacity=".2" />
+    <path d="M12 5h28v18L12 59z" fill="currentColor" opacity=".3" />
+    <path d="m12 59 28-36h12L34 59z" fill="currentColor" opacity=".75" />
+    <path d="M40 5v18h12z" fill="currentColor" />
   </svg>
 )

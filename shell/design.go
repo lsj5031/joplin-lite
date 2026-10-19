@@ -4,8 +4,6 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -22,55 +20,54 @@ var overpassTTF []byte
 //go:embed fonts/OverpassMono.ttf
 var overpassMonoTTF []byte
 
-// The palette. Line colors carry state and only state (the Service Color
-// Rule); every state color has a paper-safe and a navy-safe value (the
-// Two-Value Rule), so chrome text never uses the dark value and vice versa.
+// Field Notes: sage binding, warm paper, green ink. Semantic colors remain
+// distinct so warnings and failures are never merely decorative.
 var (
-	paper       = ui.Hex("#F6F4EE") // the ground everything sits on
-	paperSunken = ui.Hex("#EDE8DD") // sidebar rail, hover fills, code chips
-	paperRaised = ui.Hex("#FBFAF6") // the editor surface, one step brighter
-	inkNavy     = ui.Hex("#16283C") // body text and the chrome bars
-	inkSoft     = ui.Hex("#4A5A6E") // secondary text: meta, counts, hints
+	paper       = ui.Hex("#F9FAF5") // warm paper
+	paperSunken = ui.Hex("#E9EEE3") // sage binding
+	paperRaised = ui.Hex("#F9FAF5") // a continuous reading surface
+	inkNavy     = ui.Hex("#344238") // deep green ink
+	inkSoft     = ui.Hex("#606F5A") // secondary text: at least 4.5:1 on sage and paper
 
-	hairline       = ui.Hex("#D9D2C4") // row rules, borders, control strokes
-	hairlineStrong = ui.Hex("#BEB5A3")
+	hairline       = ui.Hex("#DCE3D6")
+	hairlineStrong = ui.Hex("#A8B69F")
 
-	navyDeep = ui.Hex("#0F1D2D") // chrome interiors
-	navyLine = ui.Hex("#33455C") // chrome borders
-	navyText = ui.Hex("#A8B4C4") // chrome secondary text
+	navyDeep = paperRaised
+	navyLine = hairline
+	navyText = inkSoft
 
-	routeBlue     = ui.Hex("#1D5FA8") // primary actions, focus, syncing
-	routeBlueSoft = ui.Hex("#9CC1E8") // the syncing line on navy chrome
-	routeBlueDeep = ui.Hex("#1A5490")
-	routeBlueDown = ui.Hex("#164878")
+	routeBlue     = ui.Hex("#566C4A") // primary actions and focus
+	routeBlueSoft = routeBlue
+	routeBlueDeep = ui.Hex("#485C3D")
+	routeBlueDown = ui.Hex("#3C4E32")
 
 	moss       = ui.Hex("#276B43") // synced
-	mossBright = ui.Hex("#3E9B63")
+	mossBright = moss
 
 	signalRed     = ui.Hex("#C8322B") // conflict and disruption
-	signalRedSoft = ui.Hex("#E05A52")
+	signalRedSoft = signalRed
 
 	amberInk    = ui.Hex("#8A5A12") // degraded, locked, waiting
-	amberBright = ui.Hex("#C9821B")
+	amberBright = amberInk
 
-	violet = ui.Hex("#6B4E9B") // selection: rows, caret, text selection
+	violet = routeBlue // selection: rows, caret, text selection
 
 	shadowPopover = ui.RGBA(15, 29, 45, 0.22) // the one shadow vocabulary entry
 )
 
-// Fonts. The web build self-hosts the same two families under
-// web/public/fonts; the native shell registers the TrueType originals.
-const (
-	fontSans = "Overpass"
-	fontMono = "Overpass Mono"
+// Installed Humanist families with bundled Overpass fallbacks.
+var (
+	fontSans    = "Overpass"
+	fontHeading = "Overpass"
 )
 
-// The type scale: display 24, title 20, body 15, UI 13, meta 11-12, label 11
-// uppercase with +0.08em tracking, mono 10-11 with tabular figures.
+const fontMono = "Overpass Mono"
+
+// Spacious reading text, compact controls, and quiet sentence-case labels.
 const (
-	sizeDisplay = float32(24)
-	sizeTitle   = float32(20)
-	sizeBody    = float32(15)
+	sizeDisplay = float32(36)
+	sizeTitle   = float32(24)
+	sizeBody    = float32(17)
 	sizeUI      = float32(13)
 	sizeSmall   = float32(12)
 	sizeLabel   = float32(11)
@@ -78,25 +75,22 @@ const (
 	sizeMonoSm  = float32(10)
 )
 
-// The layout metrics of DESIGN.md: the three-pane grid, the chrome bars, and
-// the 4px spacing rhythm (4/8/12/16/24).
+// Two panes by default; notebook management opens on demand.
 const (
-	railWidth          = float32(248)
-	listWidth          = float32(360)
-	topBarHeight       = float32(56)
-	statusHeight       = float32(56)
-	narrowStatusHeight = float32(96)
+	railWidth          = float32(300)
+	listWidth          = float32(300)
+	topBarHeight       = float32(68)
+	statusHeight       = float32(40)
+	narrowStatusHeight = float32(40)
 	narrowWidth        = float32(1024)
-	rowHeight          = float32(40)
+	rowHeight          = float32(56)
 	contentPad         = float32(20)
 	radiusControl      = float32(6)
 	radiusSmall        = float32(4)
 	radiusPanel        = float32(8)
 )
 
-// Motion. Nothing moves while the app is idle: each of these is triggered by
-// an interaction, and only the sync line keeps drawing frames, and only while
-// a pass runs. Values follow the toolkit's reduced-motion preference.
+// Motion runs only in response to interaction and respects reduced motion.
 var (
 	motionFade        = ui.Animation{Duration: 160 * time.Millisecond, Ease: ui.EaseOut}
 	motionMove        = ui.Animation{Duration: 200 * time.Millisecond, Ease: ui.EaseOut}
@@ -111,19 +105,25 @@ var (
 // the first window; a failure is logged rather than fatal, because the widget
 // toolkit falls back to the system family and the app still works.
 func registerFonts() {
-	if err := ui.RegisterFont(overpassTTF, fontSans); err != nil {
+	if err := ui.RegisterFont(overpassTTF, "Overpass"); err != nil {
 		slog.Warn("cannot register Overpass; falling back to the system font", "error", err)
 	}
 	if err := ui.RegisterFont(overpassMonoTTF, fontMono); err != nil {
 		slog.Warn("cannot register Overpass Mono; falling back to the system font", "error", err)
 	}
+	// Use installed fonts without redistributing Apple's font files. Other
+	// platforms retain the bundled family rather than relying on a silent fallback.
+	for _, family := range ui.FontFamilies() {
+		switch family.Name {
+		case "Avenir Next":
+			fontSans = family.Name
+		case "Optima":
+			fontHeading = family.Name
+		}
+	}
 }
 
-// designTheme is DESIGN.md as MyGO's widgets read it. Accent is violet because
-// the toolkit uses it for what DESIGN.md reserves for selection — chosen rows,
-// chosen nav items, the caret and text selection — and route blue, which
-// DESIGN.md allows only on primary actions and focus, is applied by
-// primaryAction and Focus.
+// designTheme carries Field Notes into MyGo's standard widgets.
 func designTheme() *ui.Theme {
 	t := ui.LightTheme()
 	t.Background = paper
@@ -134,8 +134,8 @@ func designTheme() *ui.Theme {
 	t.Text = inkNavy
 	t.TextMuted = inkSoft
 	t.Accent = violet
-	t.AccentHover = ui.Hex("#5D4388")
-	t.AccentPressed = ui.Hex("#4F396F")
+	t.AccentHover = routeBlueDeep
+	t.AccentPressed = routeBlueDown
 	t.AccentText = paper
 	t.Dark = false
 	t.Danger = signalRed
@@ -143,7 +143,7 @@ func designTheme() *ui.Theme {
 	t.Success = moss
 	t.Selection = violet.Alpha(0.25)
 	t.Focus = routeBlue.Alpha(0.6)
-	t.Inverse = navyDeep
+	t.Inverse = inkNavy
 	t.InverseText = paper
 	t.Scrollbar = hairlineStrong
 	t.ScrollbarWidth = 6
@@ -154,11 +154,7 @@ func designTheme() *ui.Theme {
 	return t
 }
 
-// listTheme is designTheme with DESIGN.md's chosen row on the accent: violet
-// 10% over paper with ink text. MyGO's List paints the rows it carries in the
-// accent color, and a timetable row is a tint with a violet edge, never a
-// solid fill — so the note list is built with this theme and keeps its own
-// row look.
+// listTheme keeps selection as a sage tint with readable ink text.
 func listTheme() *ui.Theme {
 	t := designTheme()
 	t.Accent = paper.Mix(violet, 0.10)
@@ -168,10 +164,7 @@ func listTheme() *ui.Theme {
 	return t
 }
 
-// actionTheme is designTheme with route blue on the accent, for the one
-// primary action a screen carries (New note, Create, Save, Keep this
-// version): the theme is swapped around the button's construction so the
-// widget keeps route blue for its hover and press as well.
+// actionTheme carries sage through primary controls and their hover states.
 func actionTheme() *ui.Theme {
 	t := designTheme()
 	t.Accent = routeBlue
@@ -243,10 +236,8 @@ func label(c *ui.Context, text string) ui.Element {
 }
 
 func labelOn(c *ui.Context, text string, color ui.Color) ui.Element {
-	return ui.Text(c, strings.ToUpper(text)).
+	return ui.Text(c, text).
 		FontSize(sizeLabel).
-		Bold().
-		LetterSpacing(sizeLabel * 0.08).
 		TextColor(color)
 }
 
@@ -321,74 +312,6 @@ func menuRow(c *ui.Context, key string, chosen bool) ui.Element {
 	return row
 }
 
-// --- The sync line ----------------------------------------------------------
-
-// syncLine is DESIGN.md's route diagram, explicitly illustrative: the shell
-// cannot establish which peers are connected. Segments and stations take service colors;
-// the active segment carries a running dash while a pass is in flight; a
-// disrupted sync marks the target station with a red cross. Nothing animates
-// while no sync is running.
-func syncLine(c *ui.Context, target string, st syncSnapshot, notice syncNotice) ui.Element {
-	seg, station, dash := syncLineColors(st, notice)
-	el := ui.Box(c).Width(syncLineWidth).Height(syncLineHeight).Shrink(0)
-	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		x0, y0 := r.X, r.Y
-
-		// A route between this device and the configured target, without
-		// inventing peer devices or a clipper endpoint.
-		const (
-			mainY     = float32(20)
-			deviceX   = float32(12)
-			targetX   = float32(132)
-			lineWidth = float32(3)
-		)
-		destination := "sync target"
-		if !st.Enabled {
-			destination = "local storage"
-		}
-
-		dot := func(x float32, c ui.Color) {
-			p.Fill(ui.Rect{X: x0 + x - 3.5, Y: y0 + mainY - 3.5, W: 7, H: 7}, c, 3.5)
-		}
-
-		p.Line(x0+deviceX, y0+mainY, x0+targetX, y0+mainY, lineWidth, seg)
-
-		// The running dash, on the active segment only.
-		if dash {
-			phase := float32(math.Mod(float64(p.Now().UnixNano())/float64(90*time.Millisecond), 1))
-			const dashLen, gap = float32(9), float32(9)
-			for x := deviceX + phase*(dashLen+gap) - (dashLen + gap); x < targetX; x += dashLen + gap {
-				from, to := max(x, deviceX), min(x+dashLen, targetX)
-				if to <= from {
-					continue
-				}
-				p.Line(x0+from, y0+mainY, x0+to, y0+mainY, lineWidth+0.5, paper)
-			}
-			p.AnimationFrame()
-		}
-
-		p.Text(x0+deviceX-6, y0+2, "this device", 10, navyText)
-		p.Text(x0+targetX-6, y0+2, target, 10, station)
-		p.Text(x0+deviceX-6, y0+30, "sync route illustration · "+destination, 10, navyText)
-
-		dot(deviceX, navyText)
-		dot(targetX, station)
-		if notice.Err {
-			// The disruption cross on the target station.
-			const s = float32(7)
-			cross := signalRedSoft
-			p.Line(x0+targetX-s, y0+mainY-s, x0+targetX+s, y0+mainY+s, 2, cross)
-			p.Line(x0+targetX-s, y0+mainY+s, x0+targetX+s, y0+mainY-s, 2, cross)
-		}
-	})
-	return el
-}
-
-const (
-	syncLineWidth  = float32(340)
-	syncLineHeight = float32(46)
-)
-
 // magnifier draws the search glyph: a ring and its handle, coords given by the
 // box it is drawn in.
 func magnifier(p *ui.Painter, r ui.Rect, c ui.Color) {
@@ -396,26 +319,6 @@ func magnifier(p *ui.Painter, r ui.Rect, c ui.Color) {
 	x, y := r.X+(r.W-s)/2-1, r.Y+(r.H-s)/2-1
 	p.Stroke(ui.Rect{X: x, Y: y, W: s, H: s}, c, s/2, 1.5)
 	p.Line(x+s*0.78, y+s*0.78, x+s+2, y+s+2, 1.5, c)
-}
-
-// syncLineColors maps the sync state onto the service vocabulary: an active
-// pass is route blue with a running dash, a finished pass is moss, a paused
-// one amber, a failure red, and a vault with no target a plain navy line.
-func syncLineColors(st syncSnapshot, notice syncNotice) (segment, station ui.Color, dash bool) {
-	switch {
-	case !st.Enabled:
-		return navyLine, navyText, false
-	case st.Running || st.Pending:
-		return routeBlueSoft, routeBlueSoft, true
-	case notice.Err:
-		return signalRedSoft, signalRedSoft, false
-	case notice.Line == "Offline · sync paused" || strings.HasPrefix(notice.Line, "Sync paused"):
-		return amberBright, amberBright, false
-	case st.Last.IsZero():
-		return navyText, navyText, false
-	default:
-		return mossBright, mossBright, false
-	}
 }
 
 // noteCountLabel counts notes the machine way, noun included, so a number is

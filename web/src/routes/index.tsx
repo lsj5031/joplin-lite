@@ -158,7 +158,7 @@ function Workspace() {
   />
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="workspace-shell flex h-dvh flex-col">
       <TopBar
         query={query}
         onQuery={changeQuery}
@@ -171,7 +171,6 @@ function Workspace() {
       />
 
       <div className="workspace-grid grid min-h-0 flex-1">
-        <div className="hidden min-h-0 lg:block">{sidebar}</div>
         <dialog ref={navRef} aria-label="Notebooks and tags" onClick={(event) => { if (event.target === event.currentTarget) navRef.current?.close() }} className="fixed inset-y-0 left-0 m-0 h-dvh max-h-none w-[min(300px,85vw)] max-w-none bg-paper-2 p-0 text-ink shadow-xl backdrop:bg-navy/40">
           <div className="flex h-full flex-col">
             <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-2">
@@ -182,7 +181,7 @@ function Workspace() {
           </div>
         </dialog>
 
-        <div className={`min-h-0 min-w-0 ${mobileView === 'edit' ? 'hidden lg:block' : 'block'}`}>
+        <div className={`library-column min-h-0 min-w-0 ${mobileView === 'edit' ? 'hidden lg:block' : 'block'}`}>
           <NoteList
             notes={notes}
             selectedId={selectedId}
@@ -202,7 +201,7 @@ function Workspace() {
           />
         </div>
 
-        <div className={`min-h-0 min-w-0 ${mobileView === 'list' ? 'hidden lg:block' : 'block'}`}>
+        <div className={`reading-column min-h-0 min-w-0 ${mobileView === 'list' ? 'hidden lg:block' : 'block'}`}>
           <EditorPane
             note={selected}
             startWriting={!!selected && selected.id === newNoteId}

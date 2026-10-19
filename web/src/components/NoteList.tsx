@@ -41,7 +41,7 @@ export function NoteList({ notes, selectedId, onSelect, query, onClearQuery, lis
               type="button"
               onClick={onOpenNav}
               aria-haspopup="dialog"
-              className="min-h-11 shrink-0 rounded-[6px] border border-line-strong px-2 text-[12px] font-medium text-ink transition-colors duration-100 hover:bg-paper-2 lg:hidden"
+              className="min-h-11 shrink-0 rounded-[6px] px-2 text-[12px] font-medium text-ink transition-colors duration-100 hover:bg-paper-2"
             >
               Notebooks
             </button>

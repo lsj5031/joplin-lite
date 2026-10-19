@@ -99,7 +99,9 @@ func TestCaptureDemo(t *testing.T) {
 	d.hold(0.5)
 
 	// The whole library, and another note in it.
+	d.click("Open notebooks")
 	d.click("All notes")
+	d.click("Close notebooks")
 	d.hold(0.9)
 	d.click("Meeting 12 Oct")
 	d.hold(1.0)
