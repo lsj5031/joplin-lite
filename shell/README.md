@@ -97,13 +97,16 @@ The window has a notebook tree with create/rename/delete, a keyset-paged note
 list with search, **Saved** searches and a **Sort** menu (updated, created or
 title; either direction), tags with create/rename/delete, filtering and
 per-note assignment, a Conflicts view with **Resolve conflict** (keep this
-version on the original), a title and Markdown body editor that autosaves
+version on the original, or preserve it as a regular note if the original
+was deleted), a title and Markdown body editor that autosaves
 after 500 ms, a rendered preview, new note, todo toggle, move to another
 notebook, delete with confirmation, and Back/Forward through visited notes.
 Sorting pages with the same keyset cursor, so a deep page never scans the rows
 before it. Saved searches name the active query, apply it with one click and
 live in `key_values` (`desktop.saved_searches`), so they are per-device and
-never synced.
+never synced. Reusing a name requires an explicit **Replace saved search**
+action; deleting a saved search asks for confirmation. Destructive dialogs
+initially focus **Cancel**, so Enter alone does not delete work.
 
 The note list is multi-select (Cmd/Ctrl-click adds a row, Shift-click a range,
 Cmd/Ctrl+A all): a bar above the list shows the count and moves every chosen
@@ -135,10 +138,12 @@ URL/email/password), the E2EE master password and the clipper API token
 `settings.json` — and are applied on save: the clipper accepts only the new
 token at once, and the sync loop is replaced after its current pass ends.
 The master password is stored locally and unencrypted, like Joplin's own
-settings; it never leaves the device. Dropbox and S3 targets still come from
+settings; it never leaves the device. Server and master passwords are masked
+when Settings opens; **Show passwords** reveals them for the current dialog.
+Dropbox and S3 targets still come from
 the config file and are kept (shown read-only) by the dialog.
 
-Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+F search, Cmd/Ctrl+S save now,
+Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+K (or Cmd/Ctrl+F) search, Cmd/Ctrl+S save now,
 Cmd/Ctrl+E edit/preview, and back/forward: Alt+Left/Right, or Cmd+[ / Cmd+]
 on macOS, where the focused editor keeps Alt and an arrow for word movement.
 Edits are flushed

@@ -195,16 +195,7 @@ func underTheme(c *ui.Context, t func() *ui.Theme, make func() ui.Element) ui.El
 	return el
 }
 
-// underThemeValue is underTheme for a builder that returns a value, as an
-// alert dialog returns the button chosen.
-func underThemeValue[T any](c *ui.Context, t func() *ui.Theme, make func() T) T {
-	c.SetTheme(t())
-	v := make()
-	c.SetTheme(designTheme())
-	return v
-}
-
-// dangerTheme is designTheme with signal red on the accent, for the default
+// dangerTheme is designTheme with signal red on the accent, for the destructive
 // button of a confirmation that deletes something: destroying work is red,
 // never the violet selection or the route-blue primary action.
 func dangerTheme() *ui.Theme {
@@ -216,14 +207,25 @@ func dangerTheme() *ui.Theme {
 	return t
 }
 
-// confirmDialog is the toolkit's alert with DESIGN's vocabulary on its two
-// buttons: the safe choice first, the one the alert is about last, in the
-// theme that choice deserves. It returns the index of the button chosen — 1
-// for the action — or -1 while the alert stays open.
+// confirmDialog focuses Cancel so Enter cannot destroy work on opening.
+// It returns 1 for the explicit action, 0 for Cancel, or -1 otherwise.
 func confirmDialog(c *ui.Context, theme func() *ui.Theme, open *bool, title, message, action string) int {
-	return underThemeValue(c, theme, func() int {
-		return ui.AlertDialog(c, open, title, message, "Cancel", action)
+	chosen := -1
+	ui.Modal(c, open, func() {
+		ui.Text(c, title).FontSize(sizeBody).Bold()
+		ui.Text(c, message).MaxWidth(320).TextColor(inkSoft)
+		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+			if ui.Button(c, "Cancel").AutoFocus().Clicked() {
+				chosen = 0
+				*open = false
+			}
+			if underTheme(c, theme, func() ui.Element { return ui.PrimaryButton(c, action) }).Clicked() {
+				chosen = 1
+				*open = false
+			}
+		})
 	})
+	return chosen
 }
 
 // sidebarButtons keeps the toolbar chrome of a nav pane compact: the arrows
@@ -321,10 +323,8 @@ func menuRow(c *ui.Context, key string, chosen bool) ui.Element {
 
 // --- The sync line ----------------------------------------------------------
 
-// syncLine is DESIGN.md's one signature: a Beck-grammar route diagram of the
-// library's network — this device, the sync target, Joplin desktop, a 45°
-// branch to mobile and a stub to the local clipper — drawn full width in the
-// status strip and nowhere else. Segments and stations take service colors;
+// syncLine is DESIGN.md's route diagram, explicitly illustrative: the shell
+// cannot establish which peers are connected. Segments and stations take service colors;
 // the active segment carries a running dash while a pass is in flight; a
 // disrupted sync marks the target station with a red cross. Nothing animates
 // while no sync is running.
@@ -334,41 +334,24 @@ func syncLine(c *ui.Context, target string, st syncSnapshot, notice syncNotice) 
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		x0, y0 := r.X, r.Y
 
-		// The geometry: the labels above the main line at y=20, stations at
-		// 12 / 132 / 256, the clipper stub down from this device and the
-		// mobile branch down from the desktop peer. 90° and 45° only.
+		// A route between this device and the configured target, without
+		// inventing peer devices or a clipper endpoint.
 		const (
 			mainY     = float32(20)
 			deviceX   = float32(12)
 			targetX   = float32(132)
-			desktopX  = float32(256)
-			branchY   = float32(38)
-			branchDx  = float32(16)
 			lineWidth = float32(3)
 		)
-		desktop := "Joplin desktop"
+		destination := "sync target"
 		if !st.Enabled {
-			desktop = "not connected"
+			destination = "local storage"
 		}
-		clipper := "clipper :41184"
 
-		dot := func(x float32, c ui.Color, solid bool) {
-			if solid {
-				p.Fill(ui.Rect{X: x0 + x - 3.5, Y: y0 + mainY - 3.5, W: 7, H: 7}, c, 3.5)
-				return
-			}
-			p.Fill(ui.Rect{X: x0 + x - 4, Y: y0 + mainY - 4, W: 8, H: 8}, navyDeep, 4)
-			p.Stroke(ui.Rect{X: x0 + x - 4, Y: y0 + mainY - 4, W: 8, H: 8}, c, 4, 1.5)
+		dot := func(x float32, c ui.Color) {
+			p.Fill(ui.Rect{X: x0 + x - 3.5, Y: y0 + mainY - 3.5, W: 7, H: 7}, c, 3.5)
 		}
 
 		p.Line(x0+deviceX, y0+mainY, x0+targetX, y0+mainY, lineWidth, seg)
-		p.Line(x0+targetX, y0+mainY, x0+desktopX, y0+mainY, lineWidth, station)
-		// The clipper stub, off this device.
-		p.Line(x0+deviceX, y0+mainY, x0+deviceX+branchDx, y0+branchY, lineWidth, navyLine)
-		p.Fill(ui.Rect{X: x0 + deviceX + branchDx - 2.5, Y: y0 + branchY - 2.5, W: 5, H: 5}, navyText, 2.5)
-		// The mobile branch, off the desktop peer.
-		p.Line(x0+desktopX, y0+mainY, x0+desktopX+branchDx, y0+branchY, lineWidth, navyLine)
-		p.Fill(ui.Rect{X: x0 + desktopX + branchDx - 2.5, Y: y0 + branchY - 2.5, W: 5, H: 5}, navyText, 2.5)
 
 		// The running dash, on the active segment only.
 		if dash {
@@ -386,17 +369,10 @@ func syncLine(c *ui.Context, target string, st syncSnapshot, notice syncNotice) 
 
 		p.Text(x0+deviceX-6, y0+2, "this device", 10, navyText)
 		p.Text(x0+targetX-6, y0+2, target, 10, station)
-		p.Text(x0+desktopX-34, y0+2, desktop, 10, navyText)
-		p.Text(x0+deviceX+branchDx+6, y0+30, clipper, 10, navyText)
-		p.Text(x0+desktopX+branchDx+6, y0+30, "mobile", 10, navyText)
+		p.Text(x0+deviceX-6, y0+30, "sync route illustration · "+destination, 10, navyText)
 
-		dot(deviceX, navyText, true)
-		dot(targetX, station, true)
-		if st.Enabled {
-			dot(desktopX, genColor(station, 0.75), true)
-		} else {
-			dot(desktopX, navyLine, false)
-		}
+		dot(deviceX, navyText)
+		dot(targetX, station)
 		if notice.Err {
 			// The disruption cross on the target station.
 			const s = float32(7)
@@ -440,11 +416,6 @@ func syncLineColors(st syncSnapshot, notice syncNotice) (segment, station ui.Col
 	default:
 		return mossBright, mossBright, false
 	}
-}
-
-// genColor dims a chrome color without leaving the palette.
-func genColor(c ui.Color, a float32) ui.Color {
-	return c.Mix(navyDeep, 1-a)
 }
 
 // noteCountLabel counts notes the machine way, noun included, so a number is

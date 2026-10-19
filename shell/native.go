@@ -67,6 +67,7 @@ type nativeApp struct {
 	savedOpen     bool
 	savedName     string
 	savedErr      string
+	savedDelete   string
 
 	editing     bool
 	note        *models.Note
@@ -87,12 +88,13 @@ type nativeApp struct {
 
 	// settings is the dialog's draft; settingsPick indexes the target segment
 	// (the labels and targets come from settingsTargets).
-	settingsOpen  bool
-	settings      desktopSettings
-	settingsPick  int
-	settingsErr   string
-	loadSettings  func() desktopSettings
-	applySettings func(desktopSettings) error
+	settingsOpen   bool
+	settings       desktopSettings
+	settingsPick   int
+	settingsErr    string
+	settingsReveal bool
+	loadSettings   func() desktopSettings
+	applySettings  func(desktopSettings) error
 
 	tagMenuOpen           bool
 	tagActions            bool
@@ -583,23 +585,32 @@ func historyHint(forward bool) string {
 }
 
 // goHistory moves delta steps through the visited notes. When the target is
-// hidden by the current search or notebook, it falls back to All notes so the
-// note can be shown again.
+// hidden by the current filters, it falls back to All notes or Conflicts so
+// the note can be shown again with a matching selected row.
 func (a *nativeApp) goHistory(delta int) {
 	pos := a.histPos + delta
 	if pos < 0 || pos >= len(a.history) {
 		return
 	}
 	a.flush()
-	a.histPos = pos
 	id := a.history[pos]
 	if !a.noteInRows(id) {
+		note, err := a.svc.GetNote(id)
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
 		a.query = ""
 		a.selectedNotebook = ""
+		if note != nil && note.IsConflict != 0 {
+			a.selectedNotebook = conflictsRail
+		}
+		a.selectedTag = ""
 		a.restoring = true
 		a.reloadNotes()
 		a.restoring = false
 	}
+	a.histPos = pos
 	if a.note == nil || a.note.ID != id {
 		a.showNote(id)
 	}
@@ -832,6 +843,10 @@ func (a *nativeApp) deleteNotebook() {
 
 // notebookDialogs draws the create/rename modal and the delete confirmations.
 func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
+	if a.confirmDeleteNotebook && a.notebookHasChildren(a.selectedNotebook) {
+		a.confirmDeleteNotebook = false
+		a.notebookBlocked = true
+	}
 	if a.notebookOpen {
 		ui.Modal(c, &a.notebookOpen, func() {
 			title, action := "New notebook", "Create"
@@ -870,7 +885,7 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 	}
 	if a.notebookBlocked {
 		ui.AlertDialog(c, &a.notebookBlocked, "Notebook has child notebooks",
-			"Move or delete its child notebooks first.", "OK")
+			"Delete its child notebooks first. Their notes will also be deleted; move any notes you want to keep to another notebook before deleting.", "OK")
 	}
 	if a.confirmDeleteNotebook {
 		name, count := "this notebook", 0
@@ -916,30 +931,45 @@ func (a *nativeApp) setTodo(on bool) {
 }
 
 // keepConflictVersion copies the conflict's title and body onto the original
-// note and deletes the conflict. If the original is gone, the conflict is
-// simply deleted.
+// note and deletes the conflict. If the original is gone, the conflict becomes
+// a normal note in place, preserving its content, tags and ID.
 func (a *nativeApp) keepConflictVersion() {
 	if a.note == nil || a.note.IsConflict == 0 {
 		return
 	}
 	a.flush()
-	conflict := *a.note
-	originalID := conflict.ConflictOriginalID
-	if originalID != "" {
-		original, err := a.svc.GetNote(originalID)
-		if err == nil && original != nil {
-			updated := *original
-			updated.Title, updated.Body = conflict.Title, conflict.Body
-			if err := a.svc.UpdateNote(&updated); err != nil {
-				a.saveErr = err.Error()
-				return
-			}
-		}
-	}
-	if err := a.svc.DeleteNote(conflict.ID); err != nil {
-		a.saveErr = err.Error()
+	if a.dirty {
 		return
 	}
+	conflict := *a.note
+	var original *models.Note
+	if conflict.ConflictOriginalID != "" {
+		var err error
+		original, err = a.svc.GetNote(conflict.ConflictOriginalID)
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+	}
+	if original == nil {
+		conflict.IsConflict = 0
+		conflict.ConflictOriginalID = ""
+		if err := a.svc.UpdateNote(&conflict); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+	} else {
+		original.Title, original.Body = conflict.Title, conflict.Body
+		if err := a.svc.UpdateNote(original); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		if err := a.svc.DeleteNote(conflict.ID); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+	}
+	a.saveErr = ""
 	a.note = nil
 	a.selectedID = ""
 	a.title, a.body = "", ""
@@ -1147,6 +1177,7 @@ func (a *nativeApp) openSettings() {
 		a.settings = desktopSettings{}
 	}
 	a.settingsErr = ""
+	a.settingsReveal = false
 	a.settingsPick = 0
 	a.target, a.targetSet = a.settings.Target, true
 	_, targets := a.settingsTargets()
@@ -1205,67 +1236,79 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 		ui.Text(c, "Sync and the web clipper, without editing a config file.").
 			FontSize(12).TextColor(t.TextMuted)
 
-		labels, targets := a.settingsTargets()
-		seg := ui.Segmented(c, &a.settingsPick, labels...).Label("Sync target")
-		if seg.Changed() {
-			a.settings.Target = targets[a.settingsPick]
-		}
-
-		switch a.settings.Target {
-		case targetFolder:
-			ui.Text(c, "Sync folder").FontSize(12).Bold()
-			ui.TextInput(c.Key("settings-folder"), &a.settings.LocalDir).
-				Placeholder("Folder Joplin's File system target uses").
-				Label("Sync folder path").Width(360)
-		case targetServer:
-			ui.Text(c, "Server URL").FontSize(12).Bold()
-			ui.TextInput(c.Key("settings-url"), &a.settings.ServerURL).
-				Placeholder("https://sync.example.com").
-				Label("Joplin Server URL").Width(360)
-			ui.Text(c, "Email").FontSize(12).Bold()
-			ui.TextInput(c.Key("settings-user"), &a.settings.Username).
-				Label("Server account email").Width(360)
-			ui.Text(c, "Password").FontSize(12).Bold()
-			ui.TextInput(c.Key("settings-pass"), &a.settings.Password).
-				Label("Server account password").Width(360)
-		case 7, 8:
-			ui.Text(c, targetLabel(a.settings.Target)+" is configured in the config file; this dialog keeps it.").
-				FontSize(11).TextColor(t.TextMuted)
-		case targetOff:
-			ui.Text(c, "Notes stay on this device; nothing is sent anywhere.").
-				FontSize(11).TextColor(t.TextMuted)
-		}
-
-		ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
-		ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
-			Placeholder("Leave empty when E2EE is off").
-			Label("E2EE master password").Width(360)
-		ui.Text(c, "Decrypts synced notes on this device. Stored locally and never sent anywhere.").
-			FontSize(11).TextColor(t.TextMuted)
-
-		ui.Text(c, "Clipper token").FontSize(12).Bold()
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.TextInput(c.Key("settings-token"), &a.settings.APIToken).
-				Label("Clipper API token").Width(300)
-			if ui.Button(c, "Regenerate").Tooltip("Replace the token with a fresh one").Clicked() {
-				if token, err := randomToken(); err == nil {
-					a.settings.APIToken = token
-				} else {
-					a.settingsErr = err.Error()
+		_, height := c.Size()
+		ui.Scroll(c.Key("settings-fields")).Width(420).MaxHeight(max(120, height-210)).Children(func() {
+			ui.Column(c).Gap(8).Children(func() {
+				labels, targets := a.settingsTargets()
+				seg := ui.Segmented(c, &a.settingsPick, labels...).Label("Sync target")
+				if seg.Changed() {
+					a.settings.Target = targets[a.settingsPick]
 				}
-			}
+
+				switch a.settings.Target {
+				case targetFolder:
+					ui.Text(c, "Sync folder").FontSize(12).Bold()
+					ui.TextInput(c.Key("settings-folder"), &a.settings.LocalDir).
+						Placeholder("Folder Joplin's File system target uses").
+						Label("Sync folder path").Width(360)
+				case targetServer:
+					ui.Text(c, "Server URL").FontSize(12).Bold()
+					ui.TextInput(c.Key("settings-url"), &a.settings.ServerURL).
+						Placeholder("https://sync.example.com").
+						Label("Joplin Server URL").Width(360)
+					ui.Text(c, "Email").FontSize(12).Bold()
+					ui.TextInput(c.Key("settings-user"), &a.settings.Username).
+						Label("Server account email").Width(360)
+					ui.Text(c, "Password").FontSize(12).Bold()
+					password := ui.TextInput(c.Key("settings-pass"), &a.settings.Password).
+						Label("Server account password").Width(360)
+					if !a.settingsReveal {
+						password.Password()
+					}
+				case 7, 8:
+					ui.Text(c, targetLabel(a.settings.Target)+" is configured in the config file; this dialog keeps it.").
+						FontSize(11).TextColor(t.TextMuted)
+				case targetOff:
+					ui.Text(c, "Notes stay on this device; nothing is sent anywhere.").
+						FontSize(11).TextColor(t.TextMuted)
+				}
+
+				ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
+				master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
+					Placeholder("Leave empty when E2EE is off").
+					Label("E2EE master password").Width(360)
+				if !a.settingsReveal {
+					master.Password()
+				}
+				ui.Checkbox(c, &a.settingsReveal, "Show passwords")
+				ui.Text(c, "Decrypts synced notes on this device. Stored locally and never sent anywhere.").
+					FontSize(11).TextColor(t.TextMuted)
+
+				ui.Text(c, "Clipper token").FontSize(12).Bold()
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c.Key("settings-token"), &a.settings.APIToken).
+						Label("Clipper API token").Width(300)
+					if ui.Button(c, "Regenerate").Tooltip("Replace the token with a fresh one").Clicked() {
+						if token, err := randomToken(); err == nil {
+							a.settings.APIToken = token
+						} else {
+							a.settingsErr = err.Error()
+						}
+					}
+				})
+				ui.Text(c, "Paste this into the Joplin Web Clipper. Saving signs out any old token.").
+					FontSize(11).TextColor(t.TextMuted)
+			})
 		})
-		ui.Text(c, "Paste this into the Joplin Web Clipper. Saving signs out any old token.").
-			FontSize(11).TextColor(t.TextMuted)
 
 		if a.settingsErr != "" {
 			ui.Text(c, a.settingsErr).FontSize(12).TextColor(t.Danger)
 		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "Cancel").Clicked() {
+			if ui.Button(c, "Cancel").Label("Cancel settings").Clicked() {
 				a.settingsOpen = false
 			}
-			if primaryAction(c, "Save").Clicked() {
+			if primaryAction(c, "Save").Label("Save settings").Clicked() {
 				a.submitSettings()
 			}
 		})
@@ -1339,6 +1382,7 @@ func (a *nativeApp) moveNotes(ids []string, folderID string) {
 	}
 	a.bulkMoveOpen = false
 	a.selection.Clear()
+	a.reloadNotebooks()
 	a.reloadNotes()
 }
 

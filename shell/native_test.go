@@ -625,11 +625,8 @@ func TestNativeNotebookManagement(t *testing.T) {
 	if err := tt.Click("Delete notebook…"); err != nil {
 		t.Fatalf("click Delete notebook: %v", err)
 	}
-	if err := tt.Click("Delete notebook"); err != nil {
-		t.Fatalf("confirm Delete notebook: %v", err)
-	}
-	if !app.notebookBlocked {
-		t.Fatal("deleting a parent notebook was not blocked")
+	if !tt.HasText("Notebook has child notebooks") || tt.HasText("Delete notebook") {
+		t.Fatalf("parent deletion should explain the block before confirmation: %v", tt.Texts())
 	}
 	if err := tt.Click("OK"); err != nil {
 		t.Fatalf("dismiss blocked dialog: %v", err)
@@ -1155,6 +1152,13 @@ func TestNativeSavedSearches(t *testing.T) {
 	}
 	if err := tt.Click("Delete saved search Work"); err != nil {
 		t.Fatalf("delete saved search: %v", err)
+	}
+	tt.Frame()
+	if len(app.savedSearches) != 1 {
+		t.Fatal("saved search removed before confirmation")
+	}
+	if err := tt.Click("Delete saved search"); err != nil {
+		t.Fatalf("confirm delete saved search: %v", err)
 	}
 	if len(app.savedSearches) != 0 {
 		t.Fatalf("saved searches after delete = %+v", app.savedSearches)

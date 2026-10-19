@@ -36,13 +36,15 @@ type Props = {
   note: Note | null
   /** loading is true while the selected note's body is being fetched. */
   loading?: boolean
+  startWriting?: boolean
   onToggleTodo: (id: string) => void
   onChangeBody: (id: string, body: string) => void
   onOpenNote: (id: string) => void
+  onManage: (id: string) => void
   onBack: () => void
 }
 
-export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNote, onBack }: Props) {
+export function EditorPane({ note, loading, startWriting = false, onToggleTodo, onChangeBody, onOpenNote, onManage, onBack }: Props) {
   const { notebookTitle, tagTitle, notebooks, tags, source, canWrite, patchNote, deleteNote, createTag, setNoteTags, error: vaultError } = useVault()
   const [tab, setTab] = React.useState<'write' | 'preview'>('preview')
   const [managing, setManaging] = React.useState(false)
@@ -55,15 +57,25 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const disabled = !!loading || !canWrite || busy
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null)
+  const focusedNewNote = React.useRef<string | null>(null)
 
   React.useEffect(() => {
-    // Notes open as rendered pages; Write is a deliberate switch.
-    setTab('preview')
+    // Existing notes open as rendered pages; a new page is ready to write.
+    setTab(startWriting ? 'write' : 'preview')
     setManaging(false)
     setError(null)
     setNewTag('')
     setConfirmDelete(false)
-  }, [note?.id])
+  }, [note?.id, startWriting])
+
+  React.useEffect(() => {
+    if (!startWriting) focusedNewNote.current = null
+    if (startWriting && note && focusedNewNote.current !== note.id && tab === 'write' && !disabled && bodyRef.current) {
+      bodyRef.current.focus()
+      focusedNewNote.current = note.id
+    }
+  }, [note?.id, startWriting, tab, disabled])
 
   function handlePreviewClick(event: React.MouseEvent<HTMLDivElement>) {
     const anchor = (event.target as HTMLElement | null)?.closest('a')
@@ -94,6 +106,9 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
   if (!note) {
     return (
       <section className="flex h-full flex-1 flex-col items-center justify-center gap-4 bg-paper-3 px-8 text-center" aria-label="Note editor">
+        <button type="button" onClick={onBack} className="flex min-h-11 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-ink-soft lg:hidden">
+          <IconBack width={16} height={16} /> Back to note list
+        </button>
         <Mark width={56} height={56} />
         <h1 className="editor-title">{source === 'error' ? 'A moment to reconnect.' : 'A little room to think.'}</h1>
         <p className="max-w-[32ch] text-[14px] text-ink-soft">{source === 'error' ? 'Reconnect to your local database to read or create notes.' : loading || source === 'loading' ? 'Opening your workspace…' : 'Select a note, or start a new page. Your next idea belongs here.'}</p>
@@ -161,9 +176,11 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
             </button>
           ))}
           <button type="button" disabled={disabled} aria-expanded={managing} onClick={() => {
+            onManage(note.id)
             setTitle(note.title)
             setNotebookId(note.notebookId)
             setTagIds(note.tagIds)
+            setNewTag('')
             setConfirmDelete(false)
             setManaging(!managing)
           }} className="ml-auto min-h-10 rounded px-3 text-[12.5px] font-medium text-ink disabled:opacity-50">
@@ -214,7 +231,7 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
             </label>
             <div className="flex flex-wrap gap-2">
               <button type="submit" disabled={!title.trim()} className="primary-button min-h-10 rounded-lg px-3 text-[13px] font-semibold disabled:opacity-50">Save details</button>
-              <button type="button" onClick={() => setManaging(false)} className="min-h-10 rounded-[6px] border border-line-strong px-3 text-[13px]">Cancel</button>
+              <button type="button" onClick={() => { setNewTag(''); setManaging(false) }} className="min-h-10 rounded-[6px] border border-line-strong px-3 text-[13px]">Cancel</button>
               <button type="button" className="ml-auto min-h-10 rounded-[6px] border border-signal/40 px-3 text-[13px] text-signal" onClick={() => setConfirmDelete(true)}>Delete note</button>
             </div>
             {confirmDelete && <div role="group" aria-label="Confirm note deletion" className="rounded-[6px] border border-signal/40 p-3">
@@ -231,9 +248,9 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
       {!canWrite && <p role="status" className="border-b border-line px-6 py-2 text-[12px] text-ink-soft">Editing unavailable. Reconnect to your backend to make changes.</p>}
 
       {note.isConflict && acknowledgedConflict !== note.id && (
-        <div className="flex items-start gap-2.5 border-b border-line bg-signal/[0.07] px-6 py-2.5">
+        <div className="flex flex-wrap items-start gap-2.5 border-b border-line bg-signal/[0.07] px-6 py-2.5">
           <IconConflict width={16} height={16} className="mt-0.5 shrink-0 text-signal" />
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <p className="text-[12.5px] font-semibold text-signal">
               Another device changed this note at the same time — nothing was overwritten.
             </p>
@@ -241,7 +258,7 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
               This note is your kept copy. The synced version is still filed as the original note.
             </p>
           </div>
-          <div className="flex shrink-0 gap-1.5">
+          <div className="flex w-full flex-wrap gap-1.5 xl:w-auto">
             <button
               type="button"
               disabled={!note.conflictOriginalId}
@@ -255,7 +272,7 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
               onClick={() => setAcknowledgedConflict(note.id)}
               className="rounded-[6px] border border-line-strong bg-paper px-2.5 py-1 text-[12px] font-medium text-ink transition-colors duration-100 hover:bg-paper-2"
             >
-              Keep my copy
+              Dismiss for now
             </button>
           </div>
         </div>
@@ -269,6 +286,7 @@ export function EditorPane({ note, loading, onToggleTodo, onChangeBody, onOpenNo
 
       {tab === 'write' ? (
         <textarea
+          ref={bodyRef}
           value={note.body}
           disabled={disabled}
           onChange={(e) => onChangeBody(note.id, e.target.value)}

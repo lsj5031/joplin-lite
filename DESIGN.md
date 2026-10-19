@@ -245,8 +245,9 @@ Standard web controls throughout, rebuilt in the signage vocabulary.
 
 ### Signature: The Sync Line
 - A Beck-grammar route diagram (3px strokes, 90°/45° bends only, ringed station dots) of the
-  library's network: joplin-lite → Dropbox (target 7) → Joplin desktop, with a 45° branch to
-  Joplin mobile and a stub to the clipper (:41184). Segments and stations take service colors;
+  route from this device to its configured sync target, explicitly labeled as an illustration.
+  Do not imply that another desktop or phone is connected, or hardcode a clipper port.
+  Segments and stations take service colors;
   syncing runs a paper dash along the active segment; a conflict marks the target station with
   a red disruption cross. It lives full-width in the status strip and nowhere else.
 

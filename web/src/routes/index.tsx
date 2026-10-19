@@ -21,6 +21,7 @@ function Workspace() {
   const vault = useVault()
   const { notes, notebooks, notebookTitle, tagTitle, source, activeNote, listLoading, hasMore } = vault
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [newNoteId, setNewNoteId] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState('')
   const [notebookFilter, setNotebookFilter] = React.useState<string | null>(null)
   const [tagFilter, setTagFilter] = React.useState<string | null>(null)
@@ -102,6 +103,7 @@ function Workspace() {
 
   const selectNote = (id: string) => {
     pinned.current = id
+    setNewNoteId(null)
     setSelectedId(id)
     setMobileView('edit')
   }
@@ -117,10 +119,13 @@ function Workspace() {
   const createNote = async () => {
     setActionError(null)
     try {
-      const id = await vault.createNote({ notebookId: notebookFilter ?? '' })
       setQuery('')
       setTagFilter(null)
+      // Finish leaving the old scope before focusing the new editable page.
+      if (query.trim() || tagFilter) await vault.loadList({ notebookId: notebookFilter })
+      const id = await vault.createNote({ notebookId: notebookFilter ?? '' })
       setSelectedId(id)
+      setNewNoteId(id)
       setMobileView('edit')
     } catch (error) {
       reportError(error)
@@ -200,10 +205,12 @@ function Workspace() {
         <div className={`min-h-0 min-w-0 ${mobileView === 'list' ? 'hidden lg:block' : 'block'}`}>
           <EditorPane
             note={selected}
+            startWriting={!!selected && selected.id === newNoteId}
             loading={vault.activeLoading}
             onToggleTodo={toggleTodo}
             onChangeBody={changeBody}
             onOpenNote={selectNote}
+            onManage={(id) => { pinned.current = id }}
             onBack={() => setMobileView('list')}
           />
         </div>

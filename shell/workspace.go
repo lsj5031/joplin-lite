@@ -42,8 +42,9 @@ func (a *nativeApp) view(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyN) {
 		a.newNote()
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyF) {
+	if c.Shortcut(ui.Cmd, ui.KeyK) || c.Shortcut(ui.Cmd, ui.KeyF) {
 		a.focusSearch = true
+		a.focusBody = false
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyS) {
 		a.flush()
@@ -62,7 +63,7 @@ func (a *nativeApp) view(c *ui.Context) {
 
 	if a.resolveConflict {
 		if confirmDialog(c, actionTheme, &a.resolveConflict, "Keep this version?",
-			"Copies this conflict's title and body to the original note, then deletes the conflict.",
+			"Copies this version to the original, then removes the conflict. If the original is missing, keeps this note as a regular note. Errors leave the conflict intact.",
 			"Keep this version") == 1 {
 			a.keepConflictVersion()
 		}
@@ -103,6 +104,11 @@ func (a *nativeApp) view(c *ui.Context) {
 	}
 
 	a.topBar(c, t)
+	if a.saveErr != "" {
+		ui.Text(c, a.statusText()).Height(36).Shrink(0).Padding(8, 14).
+			TextColor(signalRed).Background(paperRaised).SingleLine().Tooltip(a.statusText())
+		body = max(0, body-36)
+	}
 	ui.Row(c).Height(body).Shrink(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		switch {
 		case !a.narrow:
@@ -218,7 +224,7 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 					Padding(0).
 					Grow(1)
 				if a.focusSearch {
-					in.AutoFocus()
+					in.Focus()
 					a.focusSearch = false
 				}
 				if in.Changed() {
@@ -714,10 +720,13 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 		})
 	}).Grow(1)
 	if list.Changed() {
-		if a.narrow {
+		if a.narrow && c.Modifiers()&(ui.Cmd|ui.Shift) == 0 {
 			a.narrowEditor = true
 		}
 		a.loadNote()
+		if a.narrow && !a.narrowEditor {
+			a.focusBody = false
+		}
 	}
 	if a.hasMore {
 		ui.Row(c).Padding(6, 14).Children(func() {
@@ -821,12 +830,14 @@ func (a *nativeApp) emptyList(c *ui.Context, t *ui.Theme) {
 			}
 		case a.selectedNotebook == conflictsRail:
 			ui.Text(c, "No conflicts").FontSize(sizeUI).TextColor(inkSoft)
-			ui.Text(c, "Every note on this device agrees with the sync target.").
+			ui.Text(c, "No conflicts found on this device.").
 				FontSize(sizeLabel).TextColor(inkSoft)
 		default:
 			ui.Text(c, "No notes here yet").FontSize(sizeUI).TextColor(inkSoft)
-			if primaryAction(c, "New note").Clicked() {
-				a.newNote()
+			ui.Text(c, "Use New note above to start writing.").FontSize(sizeLabel).TextColor(inkSoft)
+			if a.narrow && a.selectedNotebook == "" && a.selectedTag == "" {
+				ui.Text(c, "Notes save automatically on this device. Set up sync to keep another copy.").
+					MaxWidth(320).FontSize(sizeUI).TextColor(inkSoft)
 			}
 		}
 	})
@@ -894,6 +905,7 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 				back.Label("Back to notes")
 				if back.Clicked() {
 					a.narrowEditor = false
+					a.selectedNote = -1
 				}
 			}
 			if a.note == nil {
@@ -929,27 +941,52 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 		}
 		ui.Row(c).Padding(0, contentPad, 8, contentPad).Gap(6).AlignItems(ui.Center).Children(func() {
 			meta := a.noteMeta()
-			ui.Text(c, meta).Font(fontMono).FontSize(sizeMonoSm).TextColor(inkSoft).Shrink(0)
-			if a.note.IsConflict != 0 {
+			ui.Text(c, meta).Font(fontMono).FontSize(sizeMonoSm).TextColor(inkSoft).SingleLine().MinWidth(0).Grow(1)
+		})
+		if len(a.noteTags) > 0 {
+			ui.Row(c).Padding(0, contentPad, 8, contentPad).Children(func() {
+				names := make([]string, 0, len(a.noteTags))
+				for _, tag := range a.noteTags {
+					names = append(names, tag.Title)
+				}
+				ui.Text(c, strings.Join(names, " · ")).FontSize(sizeMonoSm).TextColor(inkSoft).
+					SingleLine().MinWidth(0).Grow(1).Tooltip(strings.Join(names, ", "))
+			})
+		}
+		if a.note.IsConflict != 0 {
+			ui.Row(c).Padding(0, contentPad, 8, contentPad).Gap(6).AlignItems(ui.Center).Children(func() {
 				chip := ui.Row(c).Gap(4).AlignItems(ui.Center).Radius(radiusControl).
 					Border(1, amberInk).Padding(2, 8).Shrink(0)
 				chip.Children(func() {
 					ui.Text(c, "Conflict").FontSize(sizeMonoSm).Bold().TextColor(amberInk)
 				})
 				resolve := ui.Button(c, "Resolve conflict").
-					Tooltip("Keep this version and delete the conflict")
+					Tooltip("Choose how to keep this version")
 				resolve.Padding(4, 8)
 				if resolve.Clicked() {
 					a.resolveConflict = true
 				}
-			}
-			for _, tag := range a.noteTags {
-				chip := ui.Row(c).Radius(999).Border(1, hairlineStrong).Padding(2, 8).Shrink(0)
-				chip.Children(func() {
-					ui.Text(c, tag.Title).FontSize(sizeMonoSm).TextColor(inkSoft)
-				})
-			}
-			ui.Spacer(c)
+				if a.note.ConflictOriginalID != "" {
+					if ui.Button(c, "View original").Tooltip("Inspect the original; return with " + historyHint(false)).Clicked() {
+						id := a.note.ConflictOriginalID
+						if original, err := a.svc.GetNote(id); err != nil {
+							a.saveErr = err.Error()
+						} else if original == nil {
+							a.saveErr = "The original note is no longer on this device."
+						} else {
+							a.remember(a.note.ID)
+							a.selectedNotebook, a.selectedTag, a.query = "", "", ""
+							a.restoring = true
+							a.reloadNotes()
+							a.restoring = false
+							a.showNote(id)
+							a.remember(id)
+						}
+					}
+				}
+			})
+		}
+		ui.Row(c).Padding(0, contentPad, 8, contentPad).Gap(6).AlignItems(ui.Center).Children(func() {
 			tags := ui.Button(c, "Tags").Label("Note tags").Tooltip("Tags on this note")
 			tags.Padding(4, 8)
 			if tags.Clicked() {
@@ -964,7 +1001,7 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 			}
 			a.menu(c, move, &a.moveOpen, "move", 240, func() { a.moveMenu(c, t) })
 
-			del := ui.Button(c, "Delete…").Tooltip("Delete note")
+			del := ui.Button(c, "Delete…").Label("Delete note").Tooltip("Delete note")
 			del.Padding(4, 8)
 			if del.Clicked() {
 				a.confirmDelete = true
@@ -995,10 +1032,12 @@ func (a *nativeApp) emptyEditor(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Grow(1).AlignItems(ui.Center).Justify(ui.Center).Gap(10).Padding(24).Children(func() {
 		// The header already names the state, so the body offers the way out
 		// rather than saying it twice.
-		ui.Text(c, "Pick a note from the list, or start a new one.").
-			FontSize(sizeUI).TextColor(inkSoft)
-		if primaryAction(c, "New note").Clicked() {
-			a.newNote()
+		if len(a.notes) == 0 && a.query == "" && a.selectedNotebook == "" && a.selectedTag == "" {
+			ui.Text(c, "Your notes start here.").FontSize(sizeBody).TextColor(inkNavy)
+			ui.Text(c, "Use New note above to write. Notes save automatically on this device; set up sync when you’re ready to keep another copy.").
+				FontSize(sizeUI).TextColor(inkSoft)
+		} else {
+			ui.Text(c, "Pick a note from the list, or use New note above.").FontSize(sizeUI).TextColor(inkSoft)
 		}
 		kbdHint(c, shortcutN())
 	})

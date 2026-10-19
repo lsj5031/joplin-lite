@@ -17,7 +17,6 @@ export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSel
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const disabled = !canWrite || activeLoading || busy
-  const allCount = notes.length
   // Per-notebook/tag counts are only meaningful when the loaded rows are the
   // whole library; a summary page must not present page-limited counts as
   // totals.
@@ -85,7 +84,7 @@ export function Sidebar({ selectedNotebook, onSelectNotebook, selectedTag, onSel
             <button type="button" aria-current={selectedNotebook === null && selectedTag === null ? 'page' : undefined} className={row(selectedNotebook === null && selectedTag === null)} onClick={() => { onSelectNotebook(null); onSelectTag(null) }}>
               <IconNotebook className="shrink-0 text-ink-soft" />
               <span className="flex-1 truncate">All notes</span>
-              <span className="mono text-[11px] text-ink-soft">{allCount}{countsExact ? '' : '+'}</span>
+              {count(notes.length)}
             </button>
           </li>
           {notebookRows(null)}

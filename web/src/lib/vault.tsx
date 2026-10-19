@@ -65,6 +65,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const active = React.useRef<Note | null>(null)
   const rows = React.useRef(notes)
   rows.current = notes
+  const metadata = React.useRef({ notebooks, tags })
+  metadata.current = { notebooks, tags }
   const demo = React.useRef(mock.notes)
   const pending = React.useRef(new Map<string, Edit>())
   const edits = React.useRef(new Map<string, Partial<Note>>())
@@ -140,7 +142,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     setMetaReady(true)
   }, [])
 
-  const loadList = React.useCallback(async (filter: ListFilter) => {
+  const loadList = React.useCallback(async (filter: ListFilter, preserveActive = false) => {
     lastFilter.current = filter
     const my = ++seq.current
     const before = new Map(edits.current)
@@ -150,6 +152,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       let page: { notes: Note[]; hasMore: boolean; nextCursor: string }
       if (api.isLive()) page = await api.fetchNoteSummaries(filter)
       else {
+        const { notebooks, tags } = metadata.current
         const scope = filter.notebookId ? descendants(filter.notebookId, notebooks) : null
         const q = filter.query?.trim().toLowerCase()
         page = { notes: demo.current.filter((n) => (!scope || scope.has(n.notebookId))
@@ -160,7 +163,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       }
       if (my !== seq.current) return
       setNotes(page.notes.map((n) => overlay(applyEdit(n, recovering.has(n.id) || before.get(n.id) !== edits.current.get(n.id) ? edits.current.get(n.id) : undefined))))
-      if (active.current && !page.notes.some((n) => n.id === active.current!.id) && !pending.current.has(active.current.id)) {
+      if (!preserveActive && active.current && !page.notes.some((n) => n.id === active.current!.id) && !pending.current.has(active.current.id)) {
         ++loadSeq.current
         showActive(null)
         setActiveLoading(false)
@@ -172,7 +175,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       setSource((prev) => prev === 'error' ? prev : api.isLive() ? 'live' : 'mock')
     } catch (e) { if (my === seq.current) fail(e) }
     finally { if (my === seq.current) setListLoading(false) }
-  }, [fail, notebooks, tags, overlay, showActive])
+  }, [fail, overlay, showActive])
 
   const loadMore = React.useCallback(async () => {
     if (!api.isLive() || !nextCursor.current || listLoading) return
@@ -250,6 +253,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       if (patch[key] !== undefined) Object.assign(edit, { [key]: patch[key] })
     }
     if (!Object.keys(edit).length) return
+    const priorNote = active.current?.id === id ? active.current : rows.current.find((n) => n.id === id)
+    const moved = edit.notebookId !== undefined && edit.notebookId !== priorNote?.notebookId
     if (live) {
       const prior = pending.current.get(id)
       pending.current.set(id, { ...prior, ...edit })
@@ -263,11 +268,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const update = (n: Note) => n.id === id ? { ...applyEdit(n, edit), updatedTime: Date.now() } : n
     setNotes((prev) => prev.map(update))
     if (active.current) showActive(update(active.current))
-    if (!live) { demo.current = demo.current.map(update); return }
+    if (!live) {
+      demo.current = demo.current.map(update)
+      if (moved && lastFilter.current.notebookId) await loadList(lastFilter.current, true)
+      return
+    }
     window.clearTimeout(timers.current.get(id))
     if (Object.keys(edit).length === 1 && edit.body !== undefined) {
       timers.current.set(id, window.setTimeout(() => { void flushSave(id).catch(() => {}) }, 600))
-    } else await flushSave(id)
+    } else {
+      await flushSave(id)
+      if (moved && lastFilter.current.notebookId) await loadList(lastFilter.current, true)
+    }
   }
   async function createNote(init?: Partial<Note>): Promise<string> {
     return mutate(async () => {
@@ -319,18 +331,22 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         // Multiple API routes are not transactional: show actual partial results on failure.
         try {
           const actual = await api.fetchNoteTags(id)
-          updateTags(actual.map((t) => t.id))
+          await updateTags(actual.map((t) => t.id))
         } catch { /* Keep existing associations until the connection can be retried. */ }
         throw e
       }
-      updateTags([...new Set(tagIds)])
+      await updateTags([...new Set(tagIds)])
     })
-    function updateTags(ids: string[]) {
+    async function updateTags(ids: string[]) {
+      const priorNote = active.current?.id === id ? active.current : rows.current.find((n) => n.id === id)
+      const changed = !priorNote || ids.length !== priorNote.tagIds.length || ids.some((tag) => !priorNote.tagIds.includes(tag))
       edits.current.set(id, { ...edits.current.get(id), tagIds: ids })
       const update = (n: Note) => n.id === id ? { ...n, tagIds: ids } : n
       setNotes((prev) => prev.map(update))
       if (active.current) showActive(update(active.current))
       if (!live) demo.current = demo.current.map(update)
+      const filter = lastFilter.current
+      if (changed && filter.tagId) await loadList(filter, true)
     }
   }
   const reload = React.useCallback(async () => {

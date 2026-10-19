@@ -54,6 +54,45 @@ try {
   assert.equal(await page.evaluate((id) => window.testVault.noteCountByNotebook(id), ids.folders[0]), 1)
   result('CRUD create notebook/tag/note, rename/move/todo and recursive counts')
 
+  // Asymmetric membership: a sibling stays, an unrelated note never enters.
+  const kept = await api('/notes', 'POST', { title: 'Scoped control', body: 'Control body', parent_id: ids.folders[2] })
+  const outside = await api('/notes', 'POST', { title: 'Outside control', body: 'Outside body' })
+  ids.notes.push(kept.id, outside.id)
+  await page.evaluate((notebookId) => window.testVault.loadList({ notebookId }), ids.folders[2]); await ready()
+  await page.evaluate((id) => window.testVault.selectNote(id), id)
+  await page.evaluate((id) => window.testVault.patchNote(id, { notebookId: '' }), id); await ready()
+  assert.deepEqual(await page.evaluate(() => window.testVault.notes.map((n) => n.id)), [kept.id])
+  assert.equal(await page.evaluate(() => window.testVault.activeNote.id), id)
+  assert.equal(await page.evaluate(() => window.testVault.activeNote.body), 'Original server body')
+  // Continue the same details save after moving out: metadata must not reset the scope/editor.
+  ids.tags.push(await page.evaluate(() => window.testVault.createTag('unrelated-contract-tag'))); await ready()
+  await page.evaluate(({ id, tags }) => window.testVault.setNoteTags(id, tags), { id, tags: ids.tags })
+  assert.deepEqual(await page.evaluate(() => window.testVault.notes.map((n) => n.id)), [kept.id])
+  assert.equal(await page.evaluate(() => window.testVault.activeNote.id), id)
+  await page.evaluate(({ id, notebookId }) => window.testVault.patchNote(id, { notebookId }), { id, notebookId: ids.folders[2] }); await ready()
+  assert.deepEqual(new Set(await page.evaluate(() => window.testVault.notes.map((n) => n.id))), new Set([id, kept.id]))
+  result('notebook move reconciles removal/re-entry; compound tag creation keeps scope/editor')
+
+  await page.evaluate(({ id, tags }) => window.testVault.setNoteTags(id, tags), { id: kept.id, tags: ids.tags })
+  await page.evaluate(({ id, tag }) => window.testVault.setNoteTags(id, [tag]), { id: outside.id, tag: ids.tags[1] })
+  await page.evaluate((tagId) => window.testVault.loadList({ tagId }), ids.tags[0]); await ready()
+  await page.evaluate((id) => window.testVault.patchNote(id, { body: 'UNSAVED BODY DURING TAG REMOVAL' }), id)
+  await page.evaluate(({ id, tag }) => window.testVault.setNoteTags(id, [tag]), { id, tag: ids.tags[1] }); await ready()
+  assert.deepEqual(await page.evaluate(() => window.testVault.notes.map((n) => n.id)), [kept.id])
+  assert.equal(await page.evaluate(() => window.testVault.activeNote.body), 'UNSAVED BODY DURING TAG REMOVAL')
+  await saved()
+  assert.equal((await api(`/notes/${id}`)).body, 'UNSAVED BODY DURING TAG REMOVAL')
+  assert.deepEqual((await api(`/notes/${id}/tags`)).items.map((t) => t.id), [ids.tags[1]])
+  await page.evaluate(({ id, tags }) => window.testVault.setNoteTags(id, tags), { id, tags: ids.tags }); await ready()
+  assert.deepEqual(new Set(await page.evaluate(() => window.testVault.notes.map((n) => n.id))), new Set([id, kept.id]))
+  result('tag removal/addition reconciles scope, retains unrelated tags and unsaved body')
+  await page.evaluate((id) => window.testVault.setNoteTags(id, []), kept.id)
+  await page.evaluate(({ id, tag }) => window.testVault.setNoteTags(id, [tag]), { id, tag: ids.tags[0] })
+  await page.evaluate(() => window.testVault.loadList({})); await ready()
+
+  let listGets = 0
+  const countLists = (req) => { if (req.method() === 'GET' && req.url().includes('summary=1')) listGets++ }
+  page.on('request', countLists)
   let puts = 0
   const countPut = (req) => { if (req.method() === 'PUT' && req.url().includes(`/notes/${id}?`)) puts++ }
   page.on('request', countPut)
@@ -66,6 +105,8 @@ try {
   assert.equal(row.excerpt, 'New excerpt 中文 🚶')
   assert.deepEqual(row.tagIds, [ids.tags[0]])
   assert.deepEqual((await api(`/notes/${id}/tags`)).items.map((t) => t.id), [ids.tags[0]])
+  assert.equal(listGets, 0, 'Ordinary body saves do not reload the list')
+  page.off('request', countLists)
   result('debounced body save retains tags and updates excerpt', { puts, excerpt: row.excerpt })
 
   // Reload before the 600ms debounce expires, with writes held across the navigation.
@@ -173,8 +214,17 @@ try {
   await demoPage.evaluate((id) => window.testVault.patchNote(id, { body: 'DEMO EDIT' }), demoId)
   await demoPage.evaluate(() => window.testVault.loadList({ query: 'DEMO EDIT' }))
   assert.equal(await demoPage.evaluate(() => window.testVault.notes[0].body), 'DEMO EDIT')
+  const demoFolder = await demoPage.evaluate(() => window.testVault.createNotebook('Fresh demo parent'))
+  const demoChild = await demoPage.evaluate((id) => window.testVault.createNotebook('Fresh demo child', id), demoFolder)
+  await demoPage.evaluate(({ id, notebookId }) => window.testVault.patchNote(id, { notebookId }), { id: demoId, notebookId: demoChild })
+  await demoPage.evaluate((notebookId) => window.testVault.loadList({ notebookId }), demoFolder)
+  assert.deepEqual(await demoPage.evaluate(() => window.testVault.notes.map((n) => n.id)), [demoId])
+  const demoTag = await demoPage.evaluate(() => window.testVault.createTag('freshdemometadata'))
+  await demoPage.evaluate(({ id, tag }) => window.testVault.setNoteTags(id, [tag]), { id: demoId, tag: demoTag })
+  await demoPage.evaluate(() => window.testVault.loadList({ query: 'freshdemometadata' }))
+  assert.deepEqual(await demoPage.evaluate(() => window.testVault.notes.map((n) => n.id)), [demoId])
   await demoContext.close()
-  result('unconfigured demo remains editable across list refreshes')
+  result('unconfigured demo remains editable and filters with newly created notebook/tag metadata')
 
   const profileContext = await browser.newContext()
   await profileContext.route(url => url.pathname === '/profile-key-test', route => route.fulfill({ contentType: 'text/html', body: `<script type="module">

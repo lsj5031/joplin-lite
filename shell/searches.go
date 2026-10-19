@@ -111,6 +111,16 @@ func (a *nativeApp) deleteSavedSearch(name string) {
 
 // savedSearchDialog asks for the name to save the active query under.
 func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
+	if a.savedDelete != "" {
+		open := true
+		if confirmDialog(c, dangerTheme, &open, "Delete saved search?",
+			"Remove “"+a.savedDelete+"” from this device? Your notes are not deleted.", "Delete saved search") == 1 {
+			a.deleteSavedSearch(a.savedDelete)
+		}
+		if !open {
+			a.savedDelete = ""
+		}
+	}
 	if !a.savedOpen {
 		return
 	}
@@ -122,7 +132,15 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 			Label("Saved search name").
 			Width(280).
 			AutoFocus()
-		if input.Submitted() {
+		replacing := false
+		for _, s := range a.savedSearches {
+			if strings.EqualFold(s.Name, strings.TrimSpace(a.savedName)) {
+				replacing = true
+				ui.Text(c, "This replaces “"+s.Name+"” ("+clip(s.Query, 60)+").").MaxWidth(280).FontSize(12).TextColor(amberInk)
+				break
+			}
+		}
+		if input.Submitted() && !replacing {
 			a.submitSavedSearch()
 		}
 		if a.savedErr != "" {
@@ -132,7 +150,11 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 			if ui.Button(c, "Cancel").Clicked() {
 				a.savedOpen = false
 			}
-			if primaryAction(c, "Save").Clicked() {
+			action := "Save"
+			if replacing {
+				action = "Replace saved search"
+			}
+			if primaryAction(c, action).Clicked() {
 				a.submitSavedSearch()
 			}
 		})
@@ -147,26 +169,31 @@ func (a *nativeApp) savedSearchMenu(c *ui.Context, t *ui.Theme) {
 		if len(a.savedSearches) == 0 {
 			ui.Text(c, "No saved searches yet").FontSize(12).TextColor(t.TextMuted)
 		}
-		for _, s := range a.savedSearches {
-			ui.Row(c.Key("saved:" + s.Name)).Padding(2).Gap(4).AlignItems(ui.Center).Children(func() {
-				apply := ui.Row(c.Key("saved-apply:"+s.Name)).
-					Label("Apply saved search "+s.Name).
-					Padding(6, 8).Radius(5).Grow(1)
-				if apply.Hovered() {
-					apply.Background(t.Accent).TextColor(t.AccentText)
-				}
-				if apply.Clicked() {
-					a.applySavedSearch(s)
-				}
-				apply.Children(func() {
-					ui.Text(c, s.Name).Grow(1)
-					ui.Text(c, s.Query).FontSize(10).TextColor(t.TextMuted)
-				})
-				if ui.Button(c, "×").Label("Delete saved search " + s.Name).Clicked() {
-					a.deleteSavedSearch(s.Name)
+		height := min(float32(len(a.savedSearches))*40, float32(240))
+		ui.Scroll(c).Height(height).Shrink(0).Children(func() {
+			ui.Column(c).Children(func() {
+				for _, s := range a.savedSearches {
+					ui.Row(c.Key("saved:" + s.Name)).Padding(2).Gap(4).AlignItems(ui.Center).Children(func() {
+						apply := ui.Row(c.Key("saved-apply:"+s.Name)).
+							Label("Apply saved search "+s.Name).
+							Padding(6, 8).Radius(5).Grow(1)
+						if apply.Hovered() {
+							apply.Background(t.Accent).TextColor(t.AccentText)
+						}
+						if apply.Clicked() {
+							a.applySavedSearch(s)
+						}
+						apply.Children(func() {
+							ui.Text(c, s.Name).Grow(1).MinWidth(0).SingleLine().Tooltip(s.Query)
+						})
+						if ui.Button(c, "×").Label("Delete saved search " + s.Name).Clicked() {
+							a.savedMenuOpen = false
+							a.savedDelete = s.Name
+						}
+					})
 				}
 			})
-		}
+		})
 		ui.Divider(c)
 		entry := ui.Row(c.Key("save-current-search")).
 			Label("Save current search").
