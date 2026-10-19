@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -67,32 +68,44 @@ func TestSearchNotes_FTS5RoundTrip(t *testing.T) {
 }
 
 func TestResourceBlobRoundTrip(t *testing.T) {
-	db := testDB(t)
-
-	id := "cccccccccccccccccccccccccccccccc"
-	r := &models.Resource{ID: id, Title: "photo.png", Mime: "image/png"}
-	if err := db.CreateResource(r); err != nil {
-		t.Fatalf("CreateResource: %v", err)
-	}
-
-	blob := []byte{0x89, 'P', 'N', 'G', 0, 1, 2, 3, 0xff}
-	if err := db.SaveResourceFile(id, blob); err != nil {
-		t.Fatalf("SaveResourceFile: %v", err)
-	}
-
-	path := db.GetResourceFile(id)
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read resource blob: %v", err)
-	}
-	if !bytes.Equal(got, blob) {
-		t.Errorf("blob round-trip mismatch: got %v, want %v", got, blob)
-	}
-
-	if err := db.DeleteResource(id); err != nil {
-		t.Fatalf("DeleteResource: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("blob file still exists after DeleteResource (stat err=%v)", err)
+	for _, tc := range []struct{ name, extension, suffix string }{
+		{"lite", "", ""},
+		{"official", "png", ".png"},
+		{"legacy-extensionless", "png", ""},
+		{"invalid-extension", "../../outside", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			id := "cccccccccccccccccccccccccccccccc"
+			r := &models.Resource{ID: id, Title: "photo.png", Mime: "image/png", FileExtension: tc.extension}
+			if err := db.CreateResource(r); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(db.ResourceDir(), id+tc.suffix)
+			if err := os.WriteFile(path, []byte("old content"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(db.GetResourceFile(id)); err != nil || string(got) != "old content" {
+				t.Fatalf("existing resource read = %q, %v", got, err)
+			}
+			if tc.name == "invalid-extension" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			blob := []byte{0x89, 'P', 'N', 'G', 0, 1, 2, 3, 0xff}
+			if err := db.SaveResourceFile(id, blob); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, blob) {
+				t.Fatalf("resource not updated in place: %v, %v", got, err)
+			}
+			if err := db.DeleteResource(id); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("blob file still exists after DeleteResource (stat err=%v)", err)
+			}
+		})
 	}
 }

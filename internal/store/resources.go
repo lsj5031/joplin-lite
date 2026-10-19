@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -175,6 +176,7 @@ func UpsertResourceTx(ex execer, r *models.Resource) error {
 // DeleteResource removes a resource and its file. The deletion is queued in
 // deleted_items so push removes both remote copies (metadata .md + blob).
 func (db *DB) DeleteResource(id string) error {
+	filePath := db.GetResourceFile(id)
 	err := db.writeTx(func(ex execer) error {
 		if err := recordDeletionTx(ex, id, models.TypeResource); err != nil {
 			return err
@@ -188,18 +190,26 @@ func (db *DB) DeleteResource(id string) error {
 		return err
 	}
 	// Remove file after the row committed.
-	filePath := filepath.Join(db.ResourceDir(), id)
 	os.Remove(filePath)
 	return nil
 }
 
 // SaveResourceFile saves a resource's binary content to disk.
 func (db *DB) SaveResourceFile(id string, data []byte) error {
-	filePath := filepath.Join(db.ResourceDir(), id)
+	filePath := db.GetResourceFile(id)
 	return os.WriteFile(filePath, data, 0o644)
 }
 
-// GetResourceFile returns the path to a resource's binary file.
+// GetResourceFile supports both Lite's extensionless files and official
+// Joplin's <id>.<extension> files. Existing extensionless files take precedence.
 func (db *DB) GetResourceFile(id string) string {
-	return filepath.Join(db.ResourceDir(), id)
+	path := filepath.Join(db.ResourceDir(), id)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		resource, err := db.GetResource(id)
+		if err == nil && resource != nil && resource.FileExtension != "" &&
+			!strings.ContainsAny(resource.FileExtension, `/\:`) {
+			return path + "." + resource.FileExtension
+		}
+	}
+	return path
 }

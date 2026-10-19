@@ -885,7 +885,7 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 						return
 					}
 					a.md.Theme = &markdown.Theme{Font: fontSans, FontSize: sizeBody, LineHeight: 1.9, CodeFont: fontMono}
-					markdown.View(c, a.body, &a.md)
+					markdown.View(c, a.body, a.md)
 				})
 			})
 		})

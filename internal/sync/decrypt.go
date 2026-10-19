@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/lsj5031/joplin-lite/internal/e2ee"
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -159,7 +158,7 @@ func saveDecryptedRaw(db *store.DB, id, plaintext string, updatedTime int64) err
 
 func decryptResourceBlob(db *store.DB, svc *e2ee.Service, resourceID string) error {
 	// Read the encrypted blob from disk
-	blobPath := filepath.Join(db.ResourceDir(), resourceID)
+	blobPath := db.GetResourceFile(resourceID)
 	data, err := os.ReadFile(blobPath)
 	if err != nil {
 		return fmt.Errorf("cannot read resource blob: %w", err)

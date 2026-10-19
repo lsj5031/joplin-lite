@@ -3,7 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"net"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1632,5 +1637,62 @@ func TestNativeSearchKeepsTheKeyboard(t *testing.T) {
 	}
 	if got.Body != "kernel report body" {
 		t.Fatalf("search typing changed the note: body = %q", got.Body)
+	}
+}
+
+func TestNativeResourcePreview(t *testing.T) {
+	registerFonts()
+	app, db := openNativeTestApp(t)
+	id := "cccccccccccccccccccccccccccccccc"
+	if err := db.CreateResource(&models.Resource{ID: id, Mime: "image/png", FileExtension: "png"}); err != nil {
+		t.Fatal(err)
+	}
+	// Use the official filename and an asymmetric picture wider than the page.
+	picture := image.NewRGBA(image.Rect(0, 0, 1600, 1000))
+	red, blue := color.RGBA{220, 40, 60, 255}, color.RGBA{30, 100, 220, 255}
+	draw.Draw(picture, image.Rect(0, 0, 600, 1000), &image.Uniform{red}, image.Point{}, draw.Src)
+	draw.Draw(picture, image.Rect(600, 0, 1600, 1000), &image.Uniform{blue}, image.Point{}, draw.Src)
+	f, err := os.Create(filepath.Join(db.ResourceDir(), id+".png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = png.Encode(f, picture)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "![Paper sample](:/" + id + ")"
+	note := addTestNote(t, app.svc, "", "Picture note", body)
+	app.reloadNotes()
+	app.showNote(note.ID)
+	tt := ui.NewTester(app.view, 1280, 800)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tt.Frame()
+		r, ok := tt.Find("Paper sample")
+		if ok && r.W > 400 && r.H > 200 {
+			frame := tt.Image()
+			left := color.RGBAModel.Convert(frame.At(int(r.X+r.W/4), int(r.Y+20)))
+			right := color.RGBAModel.Convert(frame.At(int(r.X+3*r.W/4), int(r.Y+20)))
+			if left == red && right == blue {
+				if r.W > 701 {
+					t.Fatalf("image overflowed the reading column: %#v", r)
+				}
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("resource image did not paint its original colors: rect=%#v, found=%v", r, ok)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if dir := os.Getenv("CAPTURE_DIR"); dir != "" {
+		capture(t, dir, "native-resource-preview", tt)
+	}
+	click(t, tt, "Edit")
+	if app.body != body {
+		t.Fatal("rendering rewrote the original Markdown")
 	}
 }

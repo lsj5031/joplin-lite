@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
+	"image"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+	"golang.org/x/image/draw"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
@@ -141,7 +146,7 @@ type nativeApp struct {
 	target    int
 	targetSet bool
 
-	md markdown.Options
+	md *markdown.Options
 }
 
 // targetLabel names the sync target for the status strip: the backend's own
@@ -163,6 +168,50 @@ func (a *nativeApp) targetLabel() string {
 
 func newNativeApp(db *store.DB) *nativeApp {
 	app := &nativeApp{svc: service.New(db), selectedNote: -1}
+	// Screenshot attachments can decode to hundreds of MB; load one at a time.
+	var imageMu sync.Mutex
+	app.md = &markdown.Options{LoadImage: func(ref string) (ui.ImageSource, error) {
+		imageMu.Lock()
+		defer imageMu.Unlock()
+		id, ok := strings.CutPrefix(ref, ":/")
+		if !ok || len(id) != 32 {
+			return nil, fmt.Errorf("not a Joplin resource reference")
+		}
+		if _, err := hex.DecodeString(id); err != nil {
+			return nil, err
+		}
+		resource, err := db.GetResource(id)
+		if err != nil {
+			return nil, err
+		}
+		if resource == nil || resource.EncryptionApplied != 0 || resource.EncryptionBlobEncrypted != 0 {
+			return nil, fmt.Errorf("resource is missing or encrypted")
+		}
+		data, err := os.ReadFile(db.GetResourceFile(id))
+		if err != nil {
+			return nil, err
+		}
+		if resource.Mime == "image/svg+xml" {
+			return ui.ParseSVG(data)
+		}
+		config, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		// The page is 700 DIPs wide. Keep 2x detail, but fit every supported
+		// Windows GPU's 8192px texture limit, including very tall screenshots.
+		scale := min(1.0, 1400.0/float64(config.Width), 8192.0/float64(config.Height))
+		if scale == 1 {
+			return ui.DecodeBitmap(data)
+		}
+		decoded, _, err := image.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		preview := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(config.Width)*scale)), max(1, int(float64(config.Height)*scale))))
+		draw.ApproxBiLinear.Scale(preview, preview.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
+		return ui.NewBitmap(preview), nil
+	}}
 	app.reloadNotebooks()
 	app.reloadTags()
 	app.loadSavedSearches()
@@ -501,6 +550,8 @@ func (a *nativeApp) showNote(id string) {
 	if err != nil || note == nil {
 		return
 	}
+	// Markdown caches decoded images; release the previous note's cache.
+	a.md = &markdown.Options{LoadImage: a.md.LoadImage}
 	a.note = note
 	a.selectedID = id
 	a.title, a.body = note.Title, note.Body
@@ -1457,7 +1508,7 @@ func openNativeWindow(be *backend) *mygo.Window {
 	app.applySettings = be.ApplySettings
 	app.target, app.targetSet = be.Settings().Target, true
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:     "Joplin Lite (native)",
+		Title:     "Joplin Lite",
 		Width:     1280,
 		Height:    800,
 		MinWidth:  900,
