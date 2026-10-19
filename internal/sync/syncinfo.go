@@ -70,6 +70,9 @@ func PullSyncInfo(backend SyncBackend, db *store.DB) error {
 	if info.AppMinVersion != "" && compareVersionStrings(info.AppMinVersion, AppMinVersion) > 0 {
 		return fmt.Errorf("%w: sync target requires app version %s (supported %s)", ErrSyncTargetUnsupported, info.AppMinVersion, AppMinVersion)
 	}
+	if info.E2EE.Value && info.ActiveMasterKeyID.Value == "" {
+		return fmt.Errorf("encrypted sync target has no active master key")
+	}
 
 	slog.Info("loaded sync info", "version", info.Version, "e2ee", info.E2EE.Value,
 		"master_keys", len(info.MasterKeys), "active_master_key", info.ActiveMasterKeyID.Value)
@@ -79,19 +82,17 @@ func PullSyncInfo(backend SyncBackend, db *store.DB) error {
 			continue
 		}
 		if err := db.UpsertMasterKey(&mk); err != nil {
-			slog.Error("cannot upsert master key from info.json", "id", mk.ID, "error", err)
-			continue
+			return fmt.Errorf("cannot store master key from info.json: %w", err)
 		}
 		slog.Info("stored master key from info.json", "id", mk.ID)
 	}
 
 	if info.ActiveMasterKeyID.Value != "" {
 		if err := db.SetActiveMasterKeyID(info.ActiveMasterKeyID.Value); err != nil {
-			slog.Warn("cannot store active master key id", "error", err)
+			return fmt.Errorf("cannot store active master key id: %w", err)
 		}
 	}
-
-	return nil
+	return db.SetSetting("sync.e2ee.enabled", strconv.FormatBool(info.E2EE.Value))
 }
 
 // PushSyncInfo writes info.json when local state (master keys, active master

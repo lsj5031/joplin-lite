@@ -85,6 +85,20 @@ defaults an omitted `sync.target` to S3 (target 8) and validation then asks
 for a bucket. With a configured target the shell runs the same initial sync
 + 10-minute/triggered loop as `serve`.
 
+To use an existing official Joplin profile, close official Joplin, back up the
+profile, and pass its directory with `-data-dir`. Lite opens `database.sqlite`
+directly and uses the adjacent `resources` directory; edits change that original
+database. New Lite profiles still use `gojoplin.sqlite`. A directory containing
+both filenames is rejected rather than silently choosing one. Lite adds its
+own local history/search tables to existing profiles. Keep `-no-sync` for
+local-only startup; this does not import official Joplin's sync configuration.
+
+Dropbox accepts an existing official `sync.7.auth` bearer token as well as
+Lite's JSON token set. A usable existing token does not require a new OAuth
+app; refreshing a token still requires its original app key. Encrypted targets
+refuse uploads and queued deletions until the active encryption key is unlocked,
+and unreadable encryption metadata stops sync instead of allowing plaintext.
+
 The API token comes from the config or from a token saved in **Settings**.
 Without one the shell mints an ephemeral token for the session; it is not
 persisted or logged until the dialog is saved. Closing the window shuts the

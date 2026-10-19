@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -157,10 +156,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 	// Fetch master keys from info.json (Joplin stores them there, not as .md
 	// items) and enforce the target format version.
 	if err := PullSyncInfo(e.backend, e.db); err != nil {
-		if errors.Is(err, ErrSyncTargetUnsupported) {
-			return fmt.Errorf("sync refused: %w", err)
-		}
-		slog.Warn("cannot pull sync info", "error", err)
+		return fmt.Errorf("sync refused: %w", err)
 	}
 
 	// Decrypt pulled items
@@ -177,6 +173,10 @@ func (e *Engine) Sync(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	if err := requireEncryptionKey(e.db, e.e2ee); err != nil {
+		return err
 	}
 
 	// Publish local master keys / e2ee state to info.json before pushing

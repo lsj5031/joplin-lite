@@ -180,8 +180,8 @@ func DropboxTokenPath(dataDir string) string {
 	return filepath.Join(dataDir, "dropbox_token.json")
 }
 
-// LoadDropboxToken reads the persisted token, falling back to a sync.7.auth
-// JSON bootstrap (Joplin's config key).
+// LoadDropboxToken reads the persisted token, falling back to sync.7.auth:
+// either Lite's JSON token set or official Joplin's existing bearer token.
 func LoadDropboxToken(dataDir, authJSON string) (*DropboxToken, error) {
 	if dataDir != "" {
 		if data, err := os.ReadFile(DropboxTokenPath(dataDir)); err == nil {
@@ -194,9 +194,12 @@ func LoadDropboxToken(dataDir, authJSON string) (*DropboxToken, error) {
 			}
 		}
 	}
-	if strings.TrimSpace(authJSON) != "" {
+	if auth := strings.TrimSpace(authJSON); auth != "" {
+		if !strings.ContainsAny(auth, "{}[]\" \t\r\n") {
+			return &DropboxToken{AccessToken: auth, TokenType: "bearer"}, nil
+		}
 		var t DropboxToken
-		if err := json.Unmarshal([]byte(authJSON), &t); err != nil {
+		if err := json.Unmarshal([]byte(auth), &t); err != nil {
 			return nil, fmt.Errorf("cannot parse sync.7.auth: %w", err)
 		}
 		if t.AccessToken != "" {

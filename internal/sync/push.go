@@ -11,9 +11,28 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
-// PushChanges uploads local changes to the sync target (Joplin Server or S3).
-// If e2eeSvc is non-nil and an active master key is set and loaded, unencrypted items are encrypted before push.
+// requireEncryptionKey refuses all pushes when encryption is required but its
+// active key is unavailable. Never silently fall back to plaintext.
+func requireEncryptionKey(db *store.DB, svc *e2ee.Service) error {
+	active, err := db.GetActiveMasterKeyID()
+	if err != nil {
+		return err
+	}
+	enabled, err := db.GetSetting("sync.e2ee.enabled")
+	if err != nil {
+		return err
+	}
+	if (enabled == "true" || active != "") && (active == "" || svc == nil || !svc.HasMasterKey(active)) {
+		return fmt.Errorf("sync refused: unlock the active encryption key before uploading")
+	}
+	return nil
+}
+
+// PushChanges uploads local changes, encrypting them when E2EE is configured.
 func PushChanges(backend SyncBackend, db *store.DB, e2eeSvc *e2ee.Service) error {
+	if err := requireEncryptionKey(db, e2eeSvc); err != nil {
+		return err
+	}
 	syncTarget := backend.SyncTarget()
 	activeMasterKeyID, _ := db.GetActiveMasterKeyID()
 	encryptBeforePush := e2eeSvc != nil && activeMasterKeyID != "" && e2eeSvc.HasMasterKey(activeMasterKeyID)

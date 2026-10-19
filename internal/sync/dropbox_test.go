@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lsj5031/joplin-lite/internal/config"
 )
 
 // fakeDropbox emulates the Dropbox API v2 endpoints the driver uses, plus the
@@ -193,6 +195,26 @@ func newTestDropbox(t *testing.T) (*DropboxBackend, *fakeDropbox, func()) {
 	b.apiBase = srv.URL
 	b.contentBase = srv.URL
 	return b, f, srv.Close
+}
+
+func TestDropboxBackend_ExistingTokenWithoutOAuthApp(t *testing.T) {
+	for _, auth := range []string{"synthetic-token", `{"access_token":"synthetic-token"}`} {
+		t.Run(auth, func(t *testing.T) {
+			b, err := NewDropboxBackend(&config.Config{DataDir: t.TempDir(), DropboxAuth: auth})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := newFakeDropbox()
+			f.put("/info.json", []byte(`{"version":3}`))
+			srv := httptest.NewServer(f.handler())
+			defer srv.Close()
+			b.apiBase, b.contentBase = srv.URL, srv.URL
+			got, err := b.Get(infoPath)
+			if err != nil || string(got) != `{"version":3}` || f.bearer != "synthetic-token" || f.refreshCalls != 0 {
+				t.Fatalf("existing token read failed: data=%q err=%v refreshes=%d", got, err, f.refreshCalls)
+			}
+		})
+	}
 }
 
 func TestDropboxBackend_RoundTrip(t *testing.T) {

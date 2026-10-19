@@ -75,7 +75,7 @@ func TestPullSyncInfo_VersionEnforcement(t *testing.T) {
 	}{
 		{
 			name:        "supported version",
-			info:        `{"version":3,"e2ee":{"value":true,"updatedTime":1},"masterKeys":[],"appMinVersion":"3.7.0"}`,
+			info:        `{"version":3,"e2ee":{"value":true,"updatedTime":1},"activeMasterKeyId":{"value":"0123456789abcdef0123456789abcdef"},"masterKeys":[],"appMinVersion":"3.7.0"}`,
 			wantRefusal: false,
 		},
 		{

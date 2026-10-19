@@ -130,6 +130,20 @@ func TestLoadFromJoplinJSON_LocalFolder(t *testing.T) {
 	}
 }
 
+func TestLoadFromJoplinJSON_ExistingDropboxToken(t *testing.T) {
+	cfg, err := loadFromJoplinJSON([]byte(`{"sync.target":7,"sync.7.auth":"synthetic-existing-token"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("an existing bearer token must not require a new OAuth app: %v", err)
+	}
+	cfg.DropboxAuth = ""
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("Dropbox without either auth or an OAuth app was accepted")
+	}
+}
+
 func TestLoadFromYAML_Observability(t *testing.T) {
 	yaml := `
 sync:

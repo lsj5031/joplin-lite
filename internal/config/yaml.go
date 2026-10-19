@@ -281,8 +281,8 @@ func validateConfig(cfg *Config) error {
 		}
 	}
 	if cfg.SyncTarget == 7 {
-		if cfg.DropboxAppKey == "" {
-			return fmt.Errorf("sync.7.appKey (Dropbox app key) is required for Dropbox sync")
+		if cfg.DropboxAppKey == "" && strings.TrimSpace(cfg.DropboxAuth) == "" {
+			return fmt.Errorf("Dropbox sync requires sync.7.appKey or an existing sync.7.auth token")
 		}
 	}
 	if cfg.SyncTarget == 9 {

@@ -83,6 +83,9 @@ func (b *DropboxBackend) Authenticate() error {
 	if b.token.RefreshToken == "" {
 		return fmt.Errorf("Dropbox access token expired and there is no refresh token — run 'dropbox-auth' again")
 	}
+	if b.oauth == nil || b.oauth.AppKey == "" {
+		return fmt.Errorf("refreshing this Dropbox token requires its original OAuth app key")
+	}
 	tok, err := b.oauth.Refresh(context.Background(), b.token.RefreshToken)
 	if err != nil {
 		return fmt.Errorf("cannot refresh Dropbox token: %w", err)

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,10 +147,75 @@ func TestEngineLocalFolderRehearsal(t *testing.T) {
 		t.Fatalf("write info.json: %v", err)
 	}
 	if err := engB.Sync(ctx); err != nil {
-		t.Fatalf("B sync (info.json): %v", err)
+		if !strings.Contains(err.Error(), "unlock the active encryption key") {
+			t.Fatalf("B sync (info.json): %v", err)
+		}
+	} else {
+		t.Fatal("sync accepted an encrypted target without an unlocked key")
 	}
 	active, err := dbB.GetActiveMasterKeyID()
 	if err != nil || active != "ffffffffffffffffffffffffffffffff" {
 		t.Fatalf("B active master key = %q (err=%v), want ffff...", active, err)
+	}
+}
+
+func TestEngineRefusesWritesWithoutEncryptionKey(t *testing.T) {
+	for _, scenario := range []string{"missing-password", "wrong-password", "missing-active-key", "invalid-info"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := infoTestDB(t)
+			remote := t.TempDir()
+			key := testMasterKey(t)
+			active := key.ID
+			if scenario == "missing-active-key" {
+				active = ""
+				if err := db.SetActiveMasterKeyID(key.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			info, err := json.Marshal(map[string]any{
+				"version": 3, "e2ee": map[string]any{"value": true},
+				"activeMasterKeyId": map[string]any{"value": active}, "masterKeys": []any{key},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "invalid-info" {
+				info = []byte("{")
+			}
+			if err := os.WriteFile(filepath.Join(remote, "info.json"), info, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			local := &models.Note{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Title: "Local", Body: "must never upload in plaintext"}
+			if err := db.CreateNote(local); err != nil {
+				t.Fatal(err)
+			}
+			remoteNote := &models.Note{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Title: "Keep remotely", Body: "preserved"}
+			remoteBody := models.SerializeNote(remoteNote)
+			remotePath := filepath.Join(remote, remoteNote.ID+".md")
+			if err := os.WriteFile(remotePath, []byte(remoteBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.AddDeletedItem(remoteNote.ID, models.TypeNote, 2); err != nil {
+				t.Fatal(err)
+			}
+			password := ""
+			if scenario == "wrong-password" {
+				password = "wrong-password"
+			} else if scenario == "missing-active-key" {
+				password = "test-password"
+			}
+			if err := NewEngine(NewLocalFolderBackend(remote), db, password).Sync(context.Background()); err == nil {
+				t.Fatal("sync did not refuse unsafe writes")
+			}
+			if got, err := os.ReadFile(remotePath); err != nil || string(got) != remoteBody {
+				t.Fatalf("remote note was removed or modified: %v", err)
+			}
+			if got, err := os.ReadFile(filepath.Join(remote, "info.json")); err != nil || string(got) != string(info) {
+				t.Fatalf("remote encryption state was modified: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(remote, local.ID+".md")); !os.IsNotExist(err) {
+				t.Fatalf("local plaintext was uploaded: %v", err)
+			}
+		})
 	}
 }
