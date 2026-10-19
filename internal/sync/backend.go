@@ -1,5 +1,13 @@
 package sync
 
+import "context"
+
+// syncSessionBackend scopes remote requests and temporary inventory to one pass.
+// The returned cleanup runs after lock refresh and lock release have stopped.
+type syncSessionBackend interface {
+	BeginSync(context.Context) func()
+}
+
 // SyncBackend abstracts the remote sync target (Joplin Server HTTP API or S3).
 // The engine uses Get/Put/Delete with Joplin Server-style paths; S3 backend
 // translates these to S3 operations.

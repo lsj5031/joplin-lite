@@ -124,11 +124,12 @@ type nativeApp struct {
 	histPos   int
 	restoring bool
 
-	// be is the in-process backend; nil in headless tests. syncWatch keeps a
-	// poll alive while a pass runs so the workspace can refresh when it ends.
-	be        *backend
-	syncWatch bool
-	syncPoll  *time.Timer
+	// be is the in-process backend; nil in headless tests. Polling stays alive
+	// while configured, including between automatic passes.
+	be           *backend
+	syncWatch    bool
+	syncPoll     *time.Timer
+	syncRevision uint64
 
 	// narrow is whether the window is below DESIGN.md's breakpoint, where the
 	// rail becomes a slide-over and the list and editor swap as single views.
@@ -1100,7 +1101,15 @@ func syncNoticeFor(st syncSnapshot) syncNotice {
 	case !st.Enabled:
 		return syncNotice{Line: "Local only", Hint: "Notes stay on this computer."}
 	case st.Running || st.Pending:
-		return syncNotice{Line: "Syncing…"}
+		line := "Sync queued…"
+		if st.Phase != "" {
+			line = st.Phase + "…"
+		}
+		hint := "Not synced yet"
+		if !st.Last.IsZero() {
+			hint = "last synced " + st.Last.Format("15:04")
+		}
+		return syncNotice{Line: line, Hint: hint}
 	case st.Err == "":
 		if st.Last.IsZero() {
 			return syncNotice{Line: "Not synced yet"}
@@ -1139,16 +1148,6 @@ func syncNoticeFor(st syncSnapshot) syncNotice {
 	return syncNotice{Line: "Sync failed", Hint: hint, Err: true}
 }
 
-// watchSync starts polling if an initial background sync is already running
-// when the first frame is built.
-func (a *nativeApp) watchSync() {
-	st := a.syncState()
-	if st.Enabled && (st.Running || st.Pending) {
-		a.syncWatch = true
-		a.scheduleSyncPoll()
-	}
-}
-
 func (a *nativeApp) scheduleSyncPoll() {
 	if a.syncPoll == nil {
 		a.syncPoll = time.AfterFunc(time.Second, a.pollSync)
@@ -1165,18 +1164,19 @@ func (a *nativeApp) pollSync() {
 	}
 }
 
-// tickSync keeps the poll alive during a pass and refreshes once when it ends.
+// tickSync observes even passes that start and finish between two frames.
 func (a *nativeApp) tickSync() {
-	if !a.syncWatch {
-		return
-	}
 	st := a.syncState()
-	if st.Running || st.Pending {
+	if st.Enabled {
 		a.scheduleSyncPoll()
-		return
 	}
-	a.syncWatch = false
-	a.refreshAfterSync()
+	finished := st.Revision != a.syncRevision
+	a.syncRevision = st.Revision
+	active := st.Running || st.Pending
+	if finished || (a.syncWatch && !active) {
+		a.refreshAfterSync()
+	}
+	a.syncWatch = active
 }
 
 // syncNow flushes local edits, queues a sync, and starts watching for its end.
@@ -1520,6 +1520,9 @@ func openNativeWindow(be *backend) *mygo.Window {
 		app.flush()
 		if app.saveTimer != nil {
 			app.saveTimer.Stop()
+		}
+		if app.syncPoll != nil {
+			app.syncPoll.Stop()
 		}
 	})
 	if *smoke {

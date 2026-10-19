@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -429,6 +431,156 @@ func TestDropboxBackend_DeltaAndChildren(t *testing.T) {
 	}
 }
 
+func TestDropboxEngineInventoryIsCompleteAndFreshEachPass(t *testing.T) {
+	b, f, done := newTestDropbox(t)
+	defer done()
+	f.listLimit = 1
+	var rootListings atomic.Int64
+	var failPage atomic.Bool
+	handler := f.handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/2/files/list_folder/continue" && failPage.Swap(false) {
+			http.Error(w, "injected incomplete inventory", http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/2/files/list_folder" {
+			body := newBody(r)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var arg struct{ Path string }
+			_ = json.Unmarshal(body, &arg)
+			if arg.Path == "" {
+				rootListings.Add(1)
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	b.apiBase, b.contentBase = srv.URL, srv.URL
+	db := testDB(t)
+	engine := NewEngine(NewTracedBackend(b, "dropbox"), db, "")
+	first := &models.Note{ID: strings.Repeat("a", 32), Title: "First", Body: "retain the complete inventory", CreatedTime: 1000, UpdatedTime: 1000}
+	second := &models.Note{ID: strings.Repeat("b", 32), Title: "Second", Body: "fresh next pass", CreatedTime: 2000, UpdatedTime: 2000}
+	f.put("/"+first.ID+".md", []byte(models.SerializeNote(first)))
+	if err := engine.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.GetNote(first.ID); err != nil || got == nil || got.Body != first.Body {
+		t.Fatalf("first pull = %+v, %v", got, err)
+	}
+	if got := rootListings.Load(); got != 1 {
+		t.Errorf("full inventories in first pass = %d, want 1", got)
+	}
+	f.mu.Lock()
+	delete(f.files, "/"+first.ID+".md")
+	delete(f.times, "/"+first.ID+".md")
+	f.mu.Unlock()
+	f.put("/"+second.ID+".md", []byte(models.SerializeNote(second)))
+	if err := engine.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.GetNote(first.ID); err != nil || got != nil {
+		t.Fatalf("remotely deleted note remains: %+v, %v", got, err)
+	}
+	if got, err := db.GetNote(second.ID); err != nil || got == nil || got.Body != second.Body {
+		t.Fatalf("second pull = %+v, %v", got, err)
+	}
+	if got := rootListings.Load(); got != 2 {
+		t.Errorf("full inventories in two passes = %d, want 2", got)
+	}
+	// An incomplete listing must neither prune existing notes nor persist its
+	// partial inventory/cursor into the retry.
+	beforeCursor, err := db.GetSyncCursor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	delete(f.files, "/"+second.ID+".md")
+	delete(f.times, "/"+second.ID+".md")
+	f.mu.Unlock()
+	failPage.Store(true)
+	if err := engine.Sync(context.Background()); err == nil {
+		t.Fatal("partial listing succeeded")
+	}
+	if got, err := db.GetNote(second.ID); err != nil || got == nil || got.Body != second.Body {
+		t.Fatalf("incomplete inventory lost the existing note: %+v, %v", got, err)
+	}
+	if cursor, err := db.GetSyncCursor(); err != nil || cursor != beforeCursor {
+		t.Fatalf("failed listing advanced cursor: %q, %v", cursor, err)
+	}
+	f.put("/"+first.ID+".md", []byte(models.SerializeNote(first)))
+	if err := engine.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.GetNote(first.ID); err != nil || got == nil || got.Body != first.Body {
+		t.Fatalf("retry missed fresh inventory: %+v, %v", got, err)
+	}
+	if got, err := db.GetNote(second.ID); err != nil || got != nil {
+		t.Fatalf("retry missed remote deletion: %+v, %v", got, err)
+	}
+}
+
+func TestDropboxEngineCancellationStopsSlowRequest(t *testing.T) {
+	b, f, done := newTestDropbox(t)
+	defer done()
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var held atomic.Bool
+	handler := f.handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/2/files/list_folder" {
+			body := newBody(r)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var arg struct{ Path string }
+			_ = json.Unmarshal(body, &arg)
+			if arg.Path == "" && held.CompareAndSwap(false, true) {
+				entered <- struct{}{}
+				select {
+				case <-r.Context().Done():
+					return
+				case <-release:
+				}
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	defer func() {
+		close(release)
+		srv.Close()
+	}()
+	b.apiBase, b.contentBase = srv.URL, srv.URL
+	db := testDB(t)
+	engine := NewEngine(NewTracedBackend(b, "dropbox"), db, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- engine.Sync(ctx) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sync did not reach remote listing")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled sync = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Error("sync did not cancel its in-flight Dropbox request")
+		// Let the baseline drain so its DB/server can close cleanly.
+		srv.CloseClientConnections()
+		<-result
+	}
+	note := &models.Note{ID: strings.Repeat("c", 32), Title: "Recovered", Body: "retry after cancellation", CreatedTime: 3000, UpdatedTime: 3000}
+	f.put("/"+note.ID+".md", []byte(models.SerializeNote(note)))
+	if err := engine.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.GetNote(note.ID); err != nil || got == nil || got.Body != note.Body {
+		t.Fatalf("retry after cancellation = %+v, %v", got, err)
+	}
+}
+
 func TestDropboxBackend_Locks(t *testing.T) {
 	b, f, done := newTestDropbox(t)
 	defer done()
@@ -456,8 +608,19 @@ func TestDropboxBackend_Locks(t *testing.T) {
 		t.Fatalf("lock file not uploaded: %v", keysOf(f.files))
 	}
 
-	if err := b.RefreshLock(lock); err != nil {
+	// The production tracing wrapper must preserve the refresh capability.
+	old := time.Now().Add(-time.Minute)
+	f.mu.Lock()
+	f.times["/locks/1_3_joplin-lite.json"] = old
+	f.mu.Unlock()
+	if err := NewTracedBackend(b, "dropbox").(LockRefresher).RefreshLock(lock); err != nil {
 		t.Fatalf("RefreshLock: %v", err)
+	}
+	f.mu.Lock()
+	refreshed := f.times["/locks/1_3_joplin-lite.json"]
+	f.mu.Unlock()
+	if !refreshed.After(old) {
+		t.Fatal("traced refresh did not update the remote lock")
 	}
 	if err := b.ReleaseLock(lock); err != nil {
 		t.Fatalf("ReleaseLock: %v", err)

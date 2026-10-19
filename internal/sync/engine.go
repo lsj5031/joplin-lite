@@ -19,6 +19,9 @@ type Engine struct {
 	masterPassword string
 	triggerCh      chan struct{}
 
+	// OnProgress runs serially on the sync goroutine. Set it before starting.
+	OnProgress func(string)
+
 	// syncMu is a try-lock: a trigger that arrives while a sync is running
 	// must not start a second overlapping pass over the same target and DB.
 	syncMu sync.Mutex
@@ -99,12 +102,24 @@ func startLockRefresh(r LockRefresher, lock interface{}) func() {
 // Sync performs a full sync cycle. Overlapping calls are refused (not queued):
 // the buffered trigger already coalesces requests, and two passes racing on
 // one target is how duplicate pushes and lock churn happen.
-func (e *Engine) Sync(ctx context.Context) error {
+func (e *Engine) Sync(ctx context.Context) (err error) {
 	if !e.syncMu.TryLock() {
 		slog.Info("sync already running; ignoring overlapping trigger")
 		return nil
 	}
 	defer e.syncMu.Unlock()
+	defer func() {
+		if err == nil {
+			slog.Info("sync completed")
+		}
+	}()
+	if remote, ok := e.backend.(syncSessionBackend); ok {
+		defer remote.BeginSync(ctx)()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	e.progress("Checking remote")
 
 	// Authenticate if needed
 	if !e.backend.IsAuthenticated() {
@@ -149,6 +164,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 	}
 
 	// Reconcile: fetch any items the delta missed (e.g. master keys)
+	e.progress("Checking library")
 	if err := PullMissingItems(e.backend, e.db); err != nil {
 		return fmt.Errorf("reconciliation failed: %w", err)
 	}
@@ -161,6 +177,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 
 	// Decrypt pulled items
 	if e.masterPassword != "" {
+		e.progress("Decrypting")
 		slog.Info("decrypting pulled items")
 		if err := DecryptPulledItems(e.db, e.e2ee, e.masterPassword); err != nil {
 			return fmt.Errorf("decryption failed: %w", err)
@@ -180,6 +197,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 
 	// Publish local master keys / e2ee state to info.json before pushing
 	// items encrypted with those keys, so other clients can decrypt them.
+	e.progress("Uploading")
 	if err := PushSyncInfo(e.backend, e.db); err != nil {
 		return fmt.Errorf("push sync info failed: %w", err)
 	}
@@ -190,6 +208,12 @@ func (e *Engine) Sync(ctx context.Context) error {
 		return fmt.Errorf("push failed: %w", err)
 	}
 
-	slog.Info("sync completed")
+	e.progress("Finishing")
 	return nil
+}
+
+func (e *Engine) progress(phase string) {
+	if e.OnProgress != nil {
+		e.OnProgress(phase)
+	}
 }

@@ -5,7 +5,63 @@ Reviewed 2026-10-20 (UTC+13), against published revision
 Measurements are from the native Windows app on Mercury with the existing
 encrypted Dropbox library. This is one profile/network, not a general benchmark.
 
-## What the logs show
+## Follow-up implementation and Mac validation
+
+The follow-up to this baseline now scopes Dropbox requests and inventory to
+one engine pass. Delta and reconciliation reuse one **complete** listing;
+it is discarded after success, failure or cancellation. Reconciliation and
+cursor-boundary replay remain enabled. This is not persisted incremental sync.
+
+Dropbox requests receive the pass's cancellation context. Lock release gets
+a separate three-second cleanup budget, inside the native shell's five-second
+shutdown wait. The tracing wrapper now forwards lock refresh as well as the
+pass lifecycle. The engine logs completion after deferred cleanup, rather
+than before it. Inventory logs include entries, pages and duration; pass logs
+count storage HTTP attempts, including lock traffic but excluding OAuth.
+
+Native status shows the active phase and previous successful time. Failures
+no longer advance that time, and automatic passes wake/refresh the workspace,
+including passes that finish between UI polls. Local-only mode stays idle.
+
+Controlled before/after verification on Mars (macOS 27.0.1 arm64, Go 1.27.1)
+used the same public engine, real SQLite and loopback Dropbox HTTP fixture:
+1,001 notes, one folder, 20 resource records and 20 blobs, with 15 ms delay
+per root-list page and nine timed quiet passes per build.
+
+| Quiet-pass measurement | Baseline | Follow-up |
+| --- | ---: | ---: |
+| Median elapsed | 124.214 ms | 61.809 ms |
+| Full root inventories per pass | 2 | 1 |
+| Root listing pages per pass | 6 | 3 |
+| Total storage HTTP attempts per pass | 13 | 10 |
+
+That is a **50.24% reduction in this controlled fixture**, not a measured
+speedup on real Dropbox. Note/blob downloads did not decrease: both builds
+downloaded one boundary note, two `info.json` copies and zero attachment blobs
+per quiet pass. Library/cursor/raw-item/blob digests remained unchanged.
+An incomplete second page preserved state and retry recovered; cancelling a
+held second page returned promptly, cleaned its lock and allowed a fresh pass
+to discover a newly added old-timestamp note through reconciliation.
+
+Mac validation also exercised the actual ad-hoc-signed `.app`: local API
+startup, exact edit persistence, normal exit and reopening the same disposable
+vault, with integrity checks and an inspected native screenshot after restart.
+Editing in this packaged test used the app's API; widget typing/navigation
+were separately covered through the real native view with `ui.Tester`.
+The local CLI rehearsal passed plaintext and encrypted note/resource round
+trips. Its stale locked-vault success expectation was replaced with checks
+for the specific fail-closed error and an unchanged encrypted target.
+
+The original defect probes fail on baseline and pass afterward. Root/shell
+tests and sync/native race checks were also run. Live Mercury timing on the
+new code, remote token expiry, packaged Windows onboarding and broad hardware
+keyboard/accessibility testing remain unverified by this follow-up. No real
+Dropbox files were modified during the Mac verification.
+
+The historical observations and release assessment below describe the
+pre-fix revision and explain the decisions; they are not current defect claims.
+
+## What the baseline logs show
 
 The native log is `<data-dir>/desktop.log`, rotated to `desktop.log.1` on
 startup when it exceeds 1 MiB. These measurements use sanitized timestamps;
@@ -78,7 +134,7 @@ A permanently stuck `Syncing` indicator was not reproduced.
 release. Timings above therefore exclude that cleanup, and do not prove the
 footer's busy state ended at exactly the same timestamp.
 
-## Recommended work, in order
+## Recommendations recorded at baseline
 
 - Carry cancellation through remote requests and verify close during a slow
   pass without closing SQLite beneath an active worker.
@@ -121,8 +177,8 @@ Before distributing an alpha binary:
   in source, not a universal default. A token reused successfully on Mercury
   does not prove expiry/reauthorization works for new users.
 - Reconcile release documentation with the current native UI and observed
-  Dropbox results; the root README still describes the old mock web prototype
-  and lists Dropbox interop as an outstanding gate.
+  Dropbox results. The baseline README described the old mock web prototype;
+  the follow-up replaces it with native screenshots and current setup/limits.
 - State the long sync/checking time, shutdown warning and plaintext local
   password storage when saving native Settings. Mercury's encrypted bootstrap
   avoids that Settings path; it is not the generic packaged credential store.

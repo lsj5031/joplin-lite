@@ -47,6 +47,20 @@ func (t *tracedBackend) SyncTarget() int {
 	return t.inner.SyncTarget()
 }
 
+func (t *tracedBackend) BeginSync(ctx context.Context) func() {
+	if remote, ok := t.inner.(syncSessionBackend); ok {
+		return remote.BeginSync(ctx)
+	}
+	return func() {}
+}
+
+func (t *tracedBackend) RefreshLock(lock interface{}) error {
+	if remote, ok := t.inner.(LockRefresher); ok {
+		return remote.RefreshLock(lock)
+	}
+	return nil
+}
+
 func (t *tracedBackend) Get(path string) ([]byte, error) {
 	ctx := context.Background()
 	ctx, span := t.tracer.Start(ctx, "storage.get",

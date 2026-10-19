@@ -30,7 +30,6 @@ func boolF(b bool) float32 {
 func (a *nativeApp) view(c *ui.Context) {
 	if a.invalidate == nil {
 		a.invalidate = c.Services().Invalidate
-		a.watchSync()
 	}
 	// DESIGN.md's palette and type scale, applied to every widget.
 	c.SetTheme(designTheme())

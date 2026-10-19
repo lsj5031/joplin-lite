@@ -711,8 +711,12 @@ func TestSyncStatusTransitions(t *testing.T) {
 	if snap := st.snapshot(true); snap.Pending || !snap.Running {
 		t.Fatalf("running snapshot = %#v", snap)
 	}
+	st.progress("Uploading")
+	if snap := st.snapshot(true); snap.Phase != "Uploading" {
+		t.Fatalf("progress snapshot = %#v", snap)
+	}
 	st.finish(errors.New("offline"))
-	if snap := st.snapshot(true); snap.Running || snap.Pending || snap.Err != "offline" || snap.Last.IsZero() {
+	if snap := st.snapshot(true); snap.Running || snap.Pending || snap.Err != "offline" || !snap.Last.IsZero() || snap.Phase != "" {
 		t.Fatalf("failed snapshot = %#v", snap)
 	}
 	st.request()
@@ -721,11 +725,12 @@ func TestSyncStatusTransitions(t *testing.T) {
 	if snap := st.snapshot(true); snap.Err != "" || snap.Last.IsZero() {
 		t.Fatalf("successful snapshot = %#v", snap)
 	}
+	last := st.snapshot(true).Last
 
 	// A lock failure is classified, and a retry records when it will run.
 	st.finish(fmt.Errorf("sync refused: %w", jsync.ErrExclusiveLock))
-	if snap := st.snapshot(true); snap.Kind != syncFailureLock {
-		t.Fatalf("lock failure kind = %q", snap.Kind)
+	if snap := st.snapshot(true); snap.Kind != syncFailureLock || !snap.Last.Equal(last) {
+		t.Fatalf("lock failure snapshot = %#v", snap)
 	}
 	when := time.Now().Add(time.Minute)
 	st.retryIn(when)
@@ -1456,7 +1461,20 @@ func TestSyncNoticeStates(t *testing.T) {
 		{
 			name: "running",
 			snap: syncSnapshot{Enabled: true, Running: true},
-			line: "Syncing…",
+			line: "Sync queued…",
+			hint: "Not synced yet",
+		},
+		{
+			name: "pending after success",
+			snap: syncSnapshot{Enabled: true, Pending: true, Last: last},
+			line: "Sync queued…",
+			hint: "last synced 15:04",
+		},
+		{
+			name: "uploading after success",
+			snap: syncSnapshot{Enabled: true, Running: true, Phase: "Uploading", Last: last},
+			line: "Uploading…",
+			hint: "last synced 15:04",
 		},
 		{
 			name: "never synced",
@@ -1589,13 +1607,55 @@ func TestNativeFooterShowsPausedStates(t *testing.T) {
 
 	st.start()
 	tt.Frame()
-	if !tt.HasText("Syncing…") {
+	if !tt.HasText("Sync queued…") {
 		t.Fatalf("running state not shown; texts = %v", tt.Texts())
+	}
+	for _, phase := range []string{"Checking remote", "Checking library", "Decrypting", "Uploading", "Finishing"} {
+		st.progress(phase)
+		tt.Frame()
+		if !tt.HasText(phase + "…") {
+			t.Fatalf("phase %q not shown; texts = %v", phase, tt.Texts())
+		}
 	}
 	st.finish(nil)
 	tt.Frame()
 	if !tt.HasText("Synced " + time.Now().Format("15:04")) {
 		t.Fatalf("success state not shown; texts = %v", tt.Texts())
+	}
+}
+
+// Automatic passes can finish between frames, without a manual Sync now.
+func TestNativeAutomaticSyncRefresh(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	st := &syncStatus{}
+	app.be = &backend{status: st, cfg: &config.Config{SyncTarget: 2}}
+	wake := make(chan struct{}, 1)
+	app.invalidate = func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	tt := ui.NewTester(app.view, 1200, 800)
+	t.Cleanup(func() {
+		if app.syncPoll != nil {
+			app.syncPoll.Stop()
+		}
+	})
+	svc := service.New(db)
+	for _, result := range []error{nil, errors.New("push refused")} {
+		st.start()
+		addTestNote(t, svc, "", fmt.Sprintf("Pulled note %v", result), "Pulled from another device")
+		st.finish(result)
+		select {
+		case <-wake:
+		case <-time.After(2 * time.Second):
+			t.Fatal("configured idle sync did not request a new frame")
+		}
+		tt.Frame()
+		if !tt.HasText(fmt.Sprintf("Pulled note %v", result)) {
+			t.Fatalf("automatic pass did not refresh notes; texts = %v", tt.Texts())
+		}
 	}
 }
 

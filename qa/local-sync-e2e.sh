@@ -253,8 +253,17 @@ read_back 41844 "e2e-c-token" "$note_c" "$E2EE_BODY" "$res_c"
 stop_serve
 echo "leg 2 PASS: encrypted note and resource round-tripped and decrypted"
 
-# Without the master password nothing readable may land in the local store.
-sync_vault "$RUN/vault-locked.yaml" "$RUN/vault-locked-sync.log" "the locked vault"
+# A locked vault may pull envelopes, but must fail closed before any upload.
+# Preserve the target as an independent check; transient locks are excluded.
+cp -R "$TARGET_B" "$RUN/target-before-locked"
+if "$BIN" sync --config "$RUN/vault-locked.yaml" >"$RUN/vault-locked-sync.log" 2>&1; then
+  fail "the locked vault unexpectedly reported a successful sync"
+fi
+grep -q "unlock the active encryption key before uploading" "$RUN/vault-locked-sync.log" ||
+  fail "the locked vault failed for an unexpected reason; see $RUN/vault-locked-sync.log"
+diff -qr -x locks "$RUN/target-before-locked" "$TARGET_B" ||
+  fail "the locked vault changed the encrypted target"
+# Nothing readable may land in the locked local store either.
 start_serve "$RUN/vault-locked.yaml" 41845 "e2e-d-token" "$RUN/vault-locked-serve.log" ||
   fail "the locked vault's API did not come up; see $RUN/vault-locked-serve.log"
 locked="$(api 41845 "e2e-d-token" GET "/notes/$note_c?fields=body" 2>/dev/null || true)"

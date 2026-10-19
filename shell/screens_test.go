@@ -187,6 +187,40 @@ func (a *nativeApp) syncNow() {
 
 See the [migration notes](docs/native-ui-migration.md) for the full table.`
 
+// TestCaptureReadme uses short, synthetic everyday notes for public screenshots.
+func TestCaptureReadme(t *testing.T) {
+	dir := captureDir(t)
+	registerFonts()
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	for _, title := range []string{"Everyday", "Reading", "Ideas"} {
+		if err := svc.CreateNotebook(&models.Folder{Title: title}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var selected *models.Note
+	for _, entry := range []struct{ title, body string }{
+		{"Books for autumn", "A few pages before the day begins.\n\n- A book of essays\n- Something to read twice"},
+		{"A small kitchen garden", "Basil by the window. Rosemary by the door."},
+		{"Weekly notes", "Keep the useful things. Leave a little room for next week."},
+		{"Favourite walks", "The long way home, along the water."},
+		{"A slower Saturday", "## Leave the afternoon open\n\nA walk by the water, a small notebook, and no particular hurry.\n\n### Take along\n\n- [x] A thermos of coffee\n- [ ] The book from the bedside table\n- [ ] Something to write with\n\n> Make room for the things you notice."},
+	} {
+		selected = addTestNote(t, svc, "", entry.title, entry.body)
+	}
+	app.reloadNotebooks()
+	app.reloadNotes()
+	app.showNote(selected.ID)
+	tt := ui.NewTester(app.view, 1280, 900)
+	capture(t, dir, "native-workspace", tt)
+	click(t, tt, "Edit")
+	capture(t, dir, "native-writing", tt)
+	click(t, tt, "Preview")
+	app.narrowEditor = true
+	tt.SetSize(900, 700)
+	capture(t, dir, "native-narrow", tt)
+}
+
 // TestCaptureScreens renders every screen state and writes it to CAPTURE_DIR.
 func TestCaptureScreens(t *testing.T) {
 	dir := captureDir(t)
@@ -330,7 +364,7 @@ func TestCaptureScreens(t *testing.T) {
 	// 23-26. The sync states on the status strip.
 	app.narrowEditor = false
 	tt.SetSize(1280, 800)
-	st := &syncStatus{}
+	st := &syncStatus{last: time.Date(2026, 10, 19, 15, 4, 0, 0, time.Local)}
 	app.be = &backend{status: st, cfg: &config.Config{SyncTarget: 7}}
 	st.finish(fmt.Errorf("sync refused: %w", jsync.ErrExclusiveLock))
 	st.retryIn(time.Now().Add(time.Minute))
@@ -345,5 +379,13 @@ func TestCaptureScreens(t *testing.T) {
 	st.finish(fmt.Errorf("push: invalid credentials"))
 	tt.Frame()
 	capture(t, dir, "25-sync-failed", tt)
+	st.start()
+	for i, phase := range []string{"Checking remote", "Checking library", "Decrypting", "Uploading", "Finishing"} {
+		st.progress(phase)
+		capture(t, dir, fmt.Sprintf("%02d-sync-phase", 26+i), tt)
+	}
+	st.progress("Checking library")
+	tt.SetSize(900, 640)
+	capture(t, dir, "31-narrow-sync-phase", tt)
 	app.be = nil
 }

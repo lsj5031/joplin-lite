@@ -1,99 +1,110 @@
-# joplin-lite
+<img src="web/public/android-chrome-192x192.png" alt="Joplin Lite paper-fold icon" width="72" />
 
-A small Go desktop client that is a **real Joplin peer** — E2EE-capable, multi-target
-sync, and a Web-Clipper-compatible server — in a single cgo-free binary that starts in
-under a second. It shares one library with Joplin desktop and mobile through the sync
-target and reads/writes Joplin's item format losslessly.
+# Joplin Lite
 
-> Work in progress. The plan lives in [INTENT.md](INTENT.md); the visual system in
-> [DESIGN.md](DESIGN.md).
+A quiet, native desktop client for your Joplin notes. Paper-inspired colors,
+Markdown preview, and a compact workspace built in Go with
+[MyGO](https://github.com/egoist/mygo). One app process, with no Electron,
+WebView2, or Node runtime in the desktop app.
 
-## UI prototype (M4a)
+**Alpha software.** Windows is being dogfooded with an existing encrypted
+Dropbox library; its owner has confirmed that official Joplin on their phone
+receives Lite's uploads. macOS has a native app bundle and local test coverage.
+This is an independent client, not an official Joplin release or a claim of
+complete feature parity. Back up your library before trying it.
 
-Three-pane workspace — notebooks rail, note list, markdown editor — under a full-width
-top bar and status strip, whose signature is the sync line: a Beck-grammar route diagram
-of the library's network (joplin-lite → Dropbox → Joplin desktop, with the clipper stub
-and the mobile branch).
+![Native workspace with Markdown preview](docs/screenshots/native-workspace.png)
 
-![joplin-lite workspace — desktop](docs/screenshots/workspace-desktop.png)
+## A small workspace for everyday notes
 
-Below 1024px the shell collapses to single views and the status strip stacks, so the
-sync line stays full width.
+- Preview existing notes by default; switch to Write with **Cmd/Ctrl+E**.
+  New notes open in Write, with autosave.
+- Browse notebooks and tags, search your library, save searches, and sort notes.
+- Move notes, manage tags, toggle todos, or select several notes for bulk actions.
+- Follow note history with Back/Forward and preserve conflicting versions.
+- Sync with Joplin's item format and existing E2EE keys; serve the Clipper/Data
+  API from the same process.
 
-![joplin-lite workspace — narrow](docs/screenshots/workspace-narrow.png)
+![Writing a note in the native editor](docs/screenshots/native-writing.png)
 
-Sync states are addressable for captures (`/?state=conflict`, `/?state=locked` — the same
-states as the settings popover preview). A conflict marks the target station with a
-disruption cross; a lock held by another client turns the line amber and refuses the sync.
+The native workspace collapses into separate views in a narrow window.
 
-![Conflict state — disruption cross on the sync line](docs/screenshots/state-conflict.png)
+![Native workspace in a narrow window](docs/screenshots/native-narrow.png)
 
-![Target locked state — sync refused](docs/screenshots/state-locked.png)
+Screenshots use synthetic notes rendered by the current native UI; they contain
+no personal library content. They illustrate the app, not a live-sync proof.
 
-The prototype runs on synthetic mock data (labeled as such in the status strip). The
-footprint figures in the strip are measured: 16.4 MB for the default binary (Dropbox /
-Joplin Server; rebuild with `-tags s3` for the S3 target, 24.6 MB) and 74–133 ms startup
-(windows/amd64, 2026-10-17, `go build -trimpath -ldflags="-s -w"`) — not placeholders.
+## Try it locally first
 
-## Build & test
-
-Go 1.26+, cgo-free (modernc SQLite):
-
-```sh
-CGO_ENABLED=0 go build ./...
-CGO_ENABLED=0 go test ./...
-```
-
-Web UI (TanStack Start + React + TS, built as a **static SPA**):
+Build from source with Go 1.27.1 (the desktop build pins its toolchain).
+Windows build commands use Git Bash; macOS uses a regular shell. No frontend
+build or MyGO CLI is required.
 
 ```sh
-cd web
-npm install
-npm run dev      # dev server on :3000
-npm run build    # static artifact in web/dist/client (index.html + assets)
-```
-
-`npm run build` emits a directory of static files with an `index.html` fallback for
-client-side routes — there is no Node/Nitro server in production. During development
-the UI talks to the local clipper API (`VITE_GOJOPLIN_URL`, `VITE_GOJOPLIN_TOKEN`).
-
-### Desktop app
-
-The desktop app in [`shell/`](shell/README.md) is native: it draws the workspace
-with MyGO `ui` and starts the clipper API in the same process. It embeds no
-browser and no frontend bundle:
-
-```sh
+git clone https://github.com/lsj5031/joplin-lite.git
+cd joplin-lite
 bash shell/build.sh
-./tmp/gojoplin-desktop.exe -config tmp/try-config.yaml -no-sync
+cp config.yaml.example tmp/local.yaml
+./tmp/gojoplin-desktop.exe -config tmp/local.yaml -data-dir tmp/try-vault -no-sync
 ```
 
-Go 1.27+ (pinned via the toolchain) is the only extra requirement; the MyGO CLI
-is not needed and WebView2 is never started. Closing the window stops the server
-and closes SQLite.
+The `.exe` filename is also used for the macOS build. This command opens a new
+local vault under `tmp/try-vault` and does not contact a sync target. If the API
+port is occupied, add `-addr 127.0.0.1:41984` or another unused loopback port.
 
-Packaging: Windows is a portable zip (`bash shell/package-windows.sh`, icon and
-version block included) and macOS an `.app` bundle (`bash shell/bundle.sh`).
-There is no installer, by decision.
+**Do not remove `-no-sync` until you have configured and reviewed the target.**
+The example YAML defaults to Dropbox; an omitted YAML target defaults to S3.
+Neither is a safe substitute for explicitly choosing local-only startup.
 
-The web build is still available as an optional browser preview over the same
-vault, served from disk rather than embedded:
+Package the desktop build:
 
-```sh
-cd web && npm run build
-cd .. && go build -o tmp/gojoplin.exe .
-./tmp/gojoplin.exe serve --config tmp/try-config.yaml --no-sync --web-dir web/dist/client
-# open http://127.0.0.1:41185 (API stays on the configured port)
-```
+| Platform | Command | Output |
+| --- | --- | --- |
+| Windows amd64 | `bash shell/package-windows.sh` | `tmp/Joplin-Lite-0.1.0-windows-amd64.zip` |
+| macOS | `bash shell/bundle.sh` | `tmp/Joplin Lite.app` |
 
-For a safe end-to-end E2EE and sync rehearsal against Joplin desktop's File
-system target, see [docs/local-sync-test.md](docs/local-sync-test.md); the
-remote targets have their own gates in
-[docs/joplin-server-test.md](docs/joplin-server-test.md) and
-[docs/s3-test.md](docs/s3-test.md). The migration record and the measured
-numbers are in [docs/native-ui-migration.md](docs/native-ui-migration.md).
+The Windows package is portable, with no installer. The macOS script uses
+ad-hoc signing; it does not produce a notarized distribution. Building a
+package does not publish a release. See [desktop documentation](shell/README.md)
+for flags, packaging details and shortcuts.
 
-For initial Dropbox dogfooding, add deletion protection alongside the existing
+## Using an existing Joplin library
+
+The most isolated way to start is a new Lite vault connected to your sync
+target. Directly opening an official desktop profile is also supported, but
+changes that database in place:
+
+1. Close official Joplin and back up its entire profile, including resources.
+2. Pass the profile directory with `-data-dir`, initially with `-no-sync`.
+3. Check notes and attachments before enabling any remote writes.
+
+Lite recognizes `database.sqlite` and the adjacent `resources` directory.
+It rejects a directory containing both that file and `gojoplin.sqlite`, and
+adds local history/search tables when opening an official profile. Do not run
+both desktop apps against the same SQLite database at once.
+
+The default new-vault directory is `~/.local/share/gojoplin` (also under the
+Windows user profile). Configuration is loaded from an explicit `-config`,
+the Go Joplin YAML configuration, or official Joplin settings. Opening a
+profile is not a complete migration of its credentials or operating-system
+secure storage.
+
+## Sync and encryption
+
+| Target | Support and current evidence |
+| --- | --- |
+| File system, target 2 | Local plaintext/E2EE round-trip rehearsal |
+| Dropbox, target 7 | Guarded native Windows dogfood run, independent encrypted upload verification, owner-confirmed phone receipt |
+| Joplin Server, target 9 | Plaintext/E2EE Docker integration rehearsal |
+| S3, target 8 | Optional `-tags s3` build; Docker integration rehearsal |
+
+These are different levels of evidence. They do not establish all conflict,
+attachment, token-expiry or deletion scenarios on every platform. OneDrive
+is not implemented. Dropbox and S3 configuration is currently file-based;
+the native Settings dialog edits local-folder/Joplin Server settings and
+retains configured Dropbox/S3 targets.
+
+For initial Dropbox use, enable **remote deletion protection** alongside your
 authentication configuration:
 
 ```yaml
@@ -103,33 +114,76 @@ sync:
     block_deletes: true
 ```
 
-The equivalent JSON setting is `"sync.7.blockDeletes": true`. This blocks remote
-note and attachment deletions, reports an error, and keeps them queued. Uploads,
-edits, and sync-lock cleanup still work. Deletions remain blocked until you
-explicitly remove this protection; it is not a read-only mode.
+The JSON equivalent is `"sync.7.blockDeletes": true`. This is opt-in: it blocks
+Lite's remote note/attachment deletions and leaves them queued with an error.
+Uploads, edits, downloads, incoming deletions, and sync-lock cleanup still
+work. It is not a read-only mode or a backup.
 
-For measured native Dropbox sync timings, current inefficiencies, verified
-interop evidence and alpha release prerequisites, see
-[Dropbox sync review](docs/dropbox-sync-review.md).
+Dropbox can reuse a usable official `sync.7.auth` token. New authorization
+uses your own Dropbox App-folder OAuth app through the CLI's `dropbox-auth`
+command; a different OAuth app does not automatically share the official
+app's folder. Refreshing a token requires its original app credentials.
+See [the example config](config.yaml.example),
+[the authorization command](cmd/dropbox_auth.go), and
+[desktop configuration](shell/README.md) before connecting a real library.
 
-## Status
+Encrypted uploads require an unlocked active key. Supply the master password
+through `GOJOPLIN_MASTER_PASSWORD` rather than committing it to config. Native
+Settings masks passwords visually, but saving them stores them **unencrypted
+in the local database**. The private secure bootstrap used on the owner's
+Windows machine is not part of the portable package.
 
-- **M0** (headless, cgo-free, lossless baseline) — done: golden-corpus format gate
-  green, raw-passthrough serialization, sync engine rehearsed against a local folder
-  backend.
-- **M1** (E2EE) / **M2** (Dropbox sync) / **M3** (clipper) — code complete and tested
-  against fakes and local rehearsals; the real-target gates (Joplin desktop decrypts,
-  Dropbox round-trip, extension clip) are still ahead.
-- **M4** — the `service/` typed seam (notes, notebooks, tags, search, conflicts, settings)
-  is in, and `shell/` is a native MyGO desktop app over it: notebooks, notes, tags,
-  search, conflicts, sync state and a native settings dialog, with the clipper/Data API
-  in the same process and no browser engine. Windows ships as a portable zip and macOS
-  as an `.app` bundle. The remote round trips pass against real targets in Docker —
-  Joplin Server (plaintext and E2EE) via `qa/joplin-server-e2e.sh`, S3 via `qa/s3-e2e.sh`;
-  remaining for the gate: extension pairing, Dropbox, and a signed macOS bundle run. See
-  [INTENT.md](INTENT.md).
+## Current limits
+
+- Dropbox still performs a full inventory per pass. Routine checks can be
+  slow on large libraries; this is not yet persisted incremental Dropbox sync.
+  See the [timing review and improvement record](docs/dropbox-sync-review.md).
+- The API and native workspace are covered by tests, but actual Web Clipper
+  extension pairing, assistive technology, and broad real-device testing
+  remain release-validation work.
+- Fresh-account onboarding, credential renewal, signed distribution and
+  rollback need further testing before a stable release.
+- There is no automatic updater or installer. Keep a profile backup and
+  retain a known-good build when updating.
+
+## Develop and test
+
+The backend uses modernc SQLite and builds without cgo. The native shell is a
+separate Go module pointing at the backend in this repository.
+
+```sh
+CGO_ENABLED=0 go test ./...
+(cd shell && CGO_ENABLED=0 go test ./...)
+bash qa/local-sync-e2e.sh
+```
+
+For race checks, use `go test -race ./internal/sync` with the platform's race
+detector requirements available. Native rendering captures can be reproduced
+with `CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureScreens ./` from
+`shell/`.
+
+The optional React browser UI remains separate from the native app:
+
+```sh
+cd web
+npm ci
+npm run build
+cd ..
+go build -o tmp/gojoplin .
+./tmp/gojoplin serve --config tmp/local.yaml --no-sync --web-dir web/dist/client
+```
+
+The browser preview listens on `http://127.0.0.1:41185` by default; the API
+uses the configured port. See [local sync](docs/local-sync-test.md),
+[E2EE rehearsal](docs/e2ee-sync-rehearsal.md),
+[Joplin Server](docs/joplin-server-test.md), and [S3](docs/s3-test.md) for
+reproducible integration procedures. Historical footprint measurements are
+in [native UI migration](docs/native-ui-migration.md); they are not a matched
+benchmark against the current official Electron release.
 
 ## License
 
-AGPL-3.0-or-later, same as the upstream fork
-([jescarri/go-joplin](reference/go-joplin)) and Joplin itself.
+AGPL-3.0-or-later. Forked from
+[jescarri/go-joplin](https://github.com/jescarri/go-joplin).
+See [LICENSE](LICENSE) and [NOTICE](NOTICE). The app bundles third-party fonts
+with their license files; retain those notices when redistributing.

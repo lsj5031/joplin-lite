@@ -78,23 +78,27 @@ const (
 // syncStatus is the current/last sync state, read by the native window from
 // the UI thread while syncLoop writes it from its own goroutine.
 type syncStatus struct {
-	mu      sync.Mutex
-	running bool
-	pending bool
-	last    time.Time
-	err     string
-	kind    syncFailure
-	retry   time.Time
+	mu       sync.Mutex
+	running  bool
+	pending  bool
+	phase    string
+	revision uint64
+	last     time.Time
+	err      string
+	kind     syncFailure
+	retry    time.Time
 }
 
 // syncSnapshot is a consistent copy of the sync state.
 type syncSnapshot struct {
-	Enabled bool
-	Running bool
-	Pending bool
-	Last    time.Time
-	Err     string
-	Kind    syncFailure
+	Enabled  bool
+	Running  bool
+	Pending  bool
+	Phase    string
+	Revision uint64
+	Last     time.Time
+	Err      string
+	Kind     syncFailure
 	// Retry is when a failed pass will be tried again on its own; zero when
 	// the next attempt waits for the timer or the user.
 	Retry time.Time
@@ -105,6 +109,7 @@ type syncSnapshot struct {
 func (s *syncStatus) reset() {
 	s.mu.Lock()
 	s.running, s.pending, s.last, s.err = false, false, time.Time{}, ""
+	s.phase = ""
 	s.kind, s.retry = syncFailureNone, time.Time{}
 	s.mu.Unlock()
 }
@@ -118,18 +123,27 @@ func (s *syncStatus) request() {
 func (s *syncStatus) start() {
 	s.mu.Lock()
 	s.pending, s.running = false, true
+	s.phase = ""
 	s.retry = time.Time{}
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) progress(phase string) {
+	s.mu.Lock()
+	s.phase = phase
 	s.mu.Unlock()
 }
 
 func (s *syncStatus) finish(err error) {
 	s.mu.Lock()
-	s.running, s.pending, s.last = false, false, time.Now()
+	s.running, s.pending, s.phase = false, false, ""
+	s.revision++
 	s.kind, s.retry = syncFailureFor(err), time.Time{}
 	if err != nil {
 		s.err = err.Error()
 	} else {
 		s.err = ""
+		s.last = time.Now()
 	}
 	s.mu.Unlock()
 }
@@ -145,13 +159,15 @@ func (s *syncStatus) snapshot(enabled bool) syncSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return syncSnapshot{
-		Enabled: enabled,
-		Running: s.running,
-		Pending: s.pending,
-		Last:    s.last,
-		Err:     s.err,
-		Kind:    s.kind,
-		Retry:   s.retry,
+		Enabled:  enabled,
+		Running:  s.running,
+		Pending:  s.pending,
+		Phase:    s.phase,
+		Revision: s.revision,
+		Last:     s.last,
+		Err:      s.err,
+		Kind:     s.kind,
+		Retry:    s.retry,
 	}
 }
 
@@ -316,6 +332,7 @@ func (b *backend) startSyncLocked(remote jsync.SyncBackend) error {
 	}
 	ctx, cancel := context.WithCancel(b.cncl)
 	engine := jsync.NewEngine(remote, b.db, b.cfg.MasterPassword)
+	engine.OnProgress = b.status.progress
 	done := make(chan struct{})
 	b.engine, b.syncCancel, b.syncDone = engine, cancel, done
 	b.status.reset()

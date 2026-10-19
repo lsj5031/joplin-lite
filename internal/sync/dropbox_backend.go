@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
@@ -37,6 +39,11 @@ type DropboxBackend struct {
 	http         *http.Client
 	locks        *fileLockManager
 	blockDeletes bool
+	ctx          context.Context
+	inSync       bool
+	rootListed   bool
+	rootEntries  []dropboxEntry
+	requests     atomic.Int64
 }
 
 // NewDropboxBackend creates the Dropbox driver from config. Credentials come
@@ -66,6 +73,7 @@ func newDropboxBackend(oauth *DropboxOAuth, token *DropboxToken, dataDir string)
 		apiBase:     "https://api.dropboxapi.com",
 		contentBase: "https://content.dropboxapi.com",
 		http:        &http.Client{Timeout: 120 * time.Second},
+		ctx:         context.Background(),
 	}
 	b.locks = newFileLockManager(b, LockClientTypeCLI, "joplin-lite")
 	return b
@@ -73,6 +81,20 @@ func newDropboxBackend(oauth *DropboxOAuth, token *DropboxToken, dataDir string)
 
 // SyncTarget returns 7 (Dropbox).
 func (b *DropboxBackend) SyncTarget() int { return 7 }
+
+// BeginSync shares one complete inventory between delta and reconciliation.
+// It is discarded on every exit, including failed or cancelled passes.
+func (b *DropboxBackend) BeginSync(ctx context.Context) func() {
+	b.ctx, b.inSync = ctx, true
+	b.rootEntries, b.rootListed = nil, false
+	b.requests.Store(0)
+	started := time.Now()
+	return func() {
+		slog.Info("Dropbox pass finished", "storage_requests", b.requests.Load(), "duration", time.Since(started))
+		b.ctx, b.inSync = context.Background(), false
+		b.rootEntries, b.rootListed = nil, false
+	}
+}
 
 // Authenticate refreshes the access token if it is expired.
 func (b *DropboxBackend) Authenticate() error {
@@ -88,7 +110,7 @@ func (b *DropboxBackend) Authenticate() error {
 	if b.oauth == nil || b.oauth.AppKey == "" {
 		return fmt.Errorf("refreshing this Dropbox token requires its original OAuth app key")
 	}
-	tok, err := b.oauth.Refresh(context.Background(), b.token.RefreshToken)
+	tok, err := b.oauth.Refresh(b.ctx, b.token.RefreshToken)
 	if err != nil {
 		return fmt.Errorf("cannot refresh Dropbox token: %w", err)
 	}
@@ -119,6 +141,14 @@ func (b *DropboxBackend) ReleaseLock(lock interface{}) error {
 	if lock == nil {
 		return nil
 	}
+	// Leave time for the worker to exit inside the shell's five-second wait.
+	previous := b.ctx
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(previous), 3*time.Second)
+	b.ctx = ctx
+	defer func() {
+		cancel()
+		b.ctx = previous
+	}()
 	return b.locks.Release()
 }
 
@@ -220,6 +250,11 @@ type listFolderResponse struct {
 
 // listAll lists the whole app folder recursively (all pages).
 func (b *DropboxBackend) listAll(path string) ([]dropboxEntry, error) {
+	if path == "" && b.inSync && b.rootListed {
+		return b.rootEntries, nil
+	}
+	started := time.Now()
+	pages := 0
 	var out []dropboxEntry
 	arg := map[string]any{"path": path, "recursive": true, "limit": 500}
 	endpoint := "/2/files/list_folder"
@@ -228,8 +263,15 @@ func (b *DropboxBackend) listAll(path string) ([]dropboxEntry, error) {
 		if err := b.apiJSON(endpoint, arg, &resp); err != nil {
 			return nil, err
 		}
+		pages++
 		out = append(out, resp.Entries...)
 		if !resp.HasMore {
+			if path == "" {
+				slog.Info("Dropbox inventory listed", "entries", len(out), "pages", pages, "duration", time.Since(started))
+				if b.inSync {
+					b.rootEntries, b.rootListed = out, true
+				}
+			}
 			return out, nil
 		}
 		arg = map[string]any{"cursor": resp.Cursor}
@@ -400,12 +442,13 @@ func (b *DropboxBackend) deletePath(path string) error {
 // do runs an authenticated request, refreshing the token once on 401.
 func (b *DropboxBackend) do(setup func(*http.Request), endpoint string) ([]byte, int, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequest(http.MethodPost, "", nil)
+		req, err := http.NewRequestWithContext(b.ctx, http.MethodPost, "", nil)
 		if err != nil {
 			return nil, 0, err
 		}
 		setup(req)
 		req.Header.Set("Authorization", "Bearer "+b.token.AccessToken)
+		b.requests.Add(1)
 		resp, err := b.http.Do(req)
 		if err != nil {
 			return nil, 0, err
