@@ -488,7 +488,7 @@ func (s *Service) DecryptString(cipherText string) (string, error) {
 	}
 }
 
-// DecryptFile decrypts a JED01 cipher text containing raw binary data (method 9).
+// DecryptFile decrypts a JED01 resource (legacy SJCL methods 5/7 or FileV1 method 9).
 func (s *Service) DecryptFile(cipherText string) ([]byte, error) {
 	ctx := context.Background()
 	tr := otel.Tracer(e2eeTracerName)
@@ -510,7 +510,7 @@ func (s *Service) DecryptFile(cipherText string) ([]byte, error) {
 		return nil, err
 	}
 
-	if method != MethodFileV1 {
+	if method != MethodFileV1 && method != MethodSJCL1a && method != MethodSJCL1b {
 		err := fmt.Errorf("e2ee: unsupported file encryption method %d", method)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -519,7 +519,17 @@ func (s *Service) DecryptFile(cipherText string) ([]byte, error) {
 
 	var result []byte
 	for _, chunk := range chunks {
-		decrypted, err := decryptChunk(masterKey, chunk, 3)
+		var decrypted []byte
+		var err error
+		if method == MethodFileV1 {
+			decrypted, err = decryptChunk(masterKey, chunk, 3)
+		} else {
+			decrypted, err = sjclDecrypt(string(masterKey), string(chunk))
+			if err == nil {
+				// Joplin base64-encodes each file chunk separately before escape/SJCL.
+				decrypted, err = base64.StdEncoding.DecodeString(unescapePercentXX(string(decrypted)))
+			}
+		}
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())

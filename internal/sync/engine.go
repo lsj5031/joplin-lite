@@ -150,7 +150,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 
 	// Reconcile: fetch any items the delta missed (e.g. master keys)
 	if err := PullMissingItems(e.backend, e.db); err != nil {
-		slog.Warn("reconciliation failed", "error", err)
+		return fmt.Errorf("reconciliation failed: %w", err)
 	}
 
 	// Fetch master keys from info.json (Joplin stores them there, not as .md
@@ -163,8 +163,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 	if e.masterPassword != "" {
 		slog.Info("decrypting pulled items")
 		if err := DecryptPulledItems(e.db, e.e2ee, e.masterPassword); err != nil {
-			slog.Error("decryption pass failed", "error", err)
-			// Continue with push even if decryption fails
+			return fmt.Errorf("decryption failed: %w", err)
 		}
 	}
 

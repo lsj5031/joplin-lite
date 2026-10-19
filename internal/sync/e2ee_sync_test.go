@@ -61,6 +61,60 @@ func buildTestKeyV1Packet(t *testing.T, password string) string {
 	return string(b)
 }
 
+func TestResourcePullPreservesAbsentBlobTimestamp(t *testing.T) {
+	for _, encrypted := range []bool{false, true} {
+		for _, field := range []string{"absent", "zero"} {
+			t.Run(strconv.FormatBool(encrypted)+"/"+field, func(t *testing.T) {
+				db := testDB(t)
+				const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+				if err := db.UpsertResource(&models.Resource{ID: id, Title: "Before", UpdatedTime: 1000, BlobUpdatedTime: 1234}); err != nil {
+					t.Fatal(err)
+				}
+				remote := &models.Resource{ID: id, Title: "After", UpdatedTime: 2000}
+				content := models.SerializeResource(remote)
+				want := int64(0)
+				if field == "absent" {
+					content = strings.ReplaceAll(content, "blob_updated_time: 0\n", "")
+					want = 1234
+				}
+				svc := e2ee.NewService()
+				if encrypted {
+					key := testMasterKey(t)
+					if err := db.UpsertMasterKey(key); err != nil {
+						t.Fatal(err)
+					}
+					if err := svc.LoadMasterKey(key.ID, key.Content, "test-password", key.EncryptionMethod); err != nil {
+						t.Fatal(err)
+					}
+					cipherText, err := svc.EncryptString(key.ID, content)
+					if err != nil {
+						t.Fatal(err)
+					}
+					meta := envelopeMeta(models.ResourceFields(remote), cipherText, key.ID)
+					delete(meta, "blob_updated_time")
+					content = models.SerializeEncryptedEnvelope(meta)
+				}
+				backend := &mockBackend{responses: map[string][]byte{
+					"/api/items/root:/:/delta":                []byte(`{"items":[{"item_name":"` + id + `.md","type":1}],"cursor":"after"}`),
+					"/api/items/root:/" + id + ".md:/content": []byte(content),
+				}}
+				if err := PullChanges(backend, db); err != nil {
+					t.Fatal(err)
+				}
+				if encrypted {
+					if err := DecryptPulledItems(db, svc, "test-password"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				got, err := db.GetResource(id)
+				if err != nil || got == nil || got.Title != "After" || got.BlobUpdatedTime != want {
+					t.Fatalf("pulled resource = %+v, err %v; want title After, blob time %d", got, err, want)
+				}
+			})
+		}
+	}
+}
+
 // TestE2EE_ResourcePushPullRoundTrip runs the M2 encrypted-resource leg
 // through the local-folder rehearsal: a resource pushed encrypted (metadata
 // envelope + FileV1 blob) reaches the other client as plaintext again — the

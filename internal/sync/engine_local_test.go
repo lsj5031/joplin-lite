@@ -159,8 +159,8 @@ func TestEngineLocalFolderRehearsal(t *testing.T) {
 	}
 }
 
-func TestEngineRefusesWritesWithoutEncryptionKey(t *testing.T) {
-	for _, scenario := range []string{"missing-password", "wrong-password", "missing-active-key", "invalid-info"} {
+func TestEngineRefusesUnsafeWrites(t *testing.T) {
+	for _, scenario := range []string{"missing-password", "wrong-password", "missing-active-key", "invalid-info", "bad-note", "bad-resource"} {
 		t.Run(scenario, func(t *testing.T) {
 			db := infoTestDB(t)
 			remote := t.TempDir()
@@ -198,10 +198,29 @@ func TestEngineRefusesWritesWithoutEncryptionKey(t *testing.T) {
 			if err := db.AddDeletedItem(remoteNote.ID, models.TypeNote, 2); err != nil {
 				t.Fatal(err)
 			}
+			const brokenID = "cccccccccccccccccccccccccccccccc"
+			if scenario == "bad-note" {
+				broken := &models.Note{ID: brokenID, EncryptionApplied: 1, EncryptionCipherText: "JED01broken"}
+				if err := os.WriteFile(filepath.Join(remote, brokenID+".md"), []byte(models.SerializeNote(broken)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "bad-resource" {
+				broken := &models.Resource{ID: brokenID, EncryptionBlobEncrypted: 1}
+				if err := os.WriteFile(filepath.Join(remote, brokenID+".md"), []byte(models.SerializeResource(broken)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Join(remote, ".resource"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(remote, ".resource", brokenID), []byte("JED01broken"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			password := ""
 			if scenario == "wrong-password" {
 				password = "wrong-password"
-			} else if scenario == "missing-active-key" {
+			} else if scenario == "missing-active-key" || strings.HasPrefix(scenario, "bad-") {
 				password = "test-password"
 			}
 			if err := NewEngine(NewLocalFolderBackend(remote), db, password).Sync(context.Background()); err == nil {

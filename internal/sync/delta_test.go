@@ -326,13 +326,41 @@ type mockBackend struct {
 	responses map[string][]byte
 }
 
-func (m *mockBackend) Authenticate() error                    { return nil }
-func (m *mockBackend) IsAuthenticated() bool                  { return true }
-func (m *mockBackend) AcquireLock() (interface{}, error)      { return nil, nil }
-func (m *mockBackend) ReleaseLock(lock interface{}) error     { return nil }
-func (m *mockBackend) Put(path string, content []byte) error  { return nil }
-func (m *mockBackend) Delete(path string) error               { return nil }
-func (m *mockBackend) SyncTarget() int                        { return 9 }
+func TestPullChanges_RetainsCursorAfterFailedItem(t *testing.T) {
+	for _, failure := range []string{"fetch", "apply"} {
+		t.Run(failure, func(t *testing.T) {
+			db := testDB(t)
+			if err := db.SetSyncCursor("before"); err != nil {
+				t.Fatal(err)
+			}
+			const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			backend := &mockBackend{responses: map[string][]byte{
+				"/api/items/root:/:/delta?cursor=before": []byte(fmt.Sprintf(
+					`{"items":[{"id":"change","item_name":"%s.md","type":1}],"cursor":"after","has_more":false}`, id)),
+			}}
+			if failure == "apply" {
+				backend.responses["/api/items/root:/"+id+".md:/content"] = []byte(models.SerializeNote(&models.Note{ID: id, Body: "preserve retry"}))
+				if _, err := db.Exec(`CREATE TRIGGER fail_note BEFORE INSERT ON notes BEGIN SELECT RAISE(ABORT, 'test write failure'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := PullChanges(backend, db); err == nil {
+				t.Fatal("partial pull reported success")
+			}
+			if cursor, err := db.GetSyncCursor(); err != nil || cursor != "before" {
+				t.Fatalf("failed item skipped on retry: cursor %q, err %v", cursor, err)
+			}
+		})
+	}
+}
+
+func (m *mockBackend) Authenticate() error                   { return nil }
+func (m *mockBackend) IsAuthenticated() bool                 { return true }
+func (m *mockBackend) AcquireLock() (interface{}, error)     { return nil, nil }
+func (m *mockBackend) ReleaseLock(lock interface{}) error    { return nil }
+func (m *mockBackend) Put(path string, content []byte) error { return nil }
+func (m *mockBackend) Delete(path string) error              { return nil }
+func (m *mockBackend) SyncTarget() int                       { return 9 }
 func (m *mockBackend) Get(path string) ([]byte, error) {
 	if data, ok := m.responses[path]; ok {
 		return data, nil

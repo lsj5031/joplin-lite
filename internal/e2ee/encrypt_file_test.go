@@ -4,9 +4,54 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestDecryptFile_LegacySJCL(t *testing.T) {
+	const keyID = "0123456789abcdef0123456789abcdef"
+	s := NewService()
+	s.masterKeys[keyID] = []byte(strings.Repeat("00", 256))
+	// Independent Node crypto AES-CCM fixtures, following Joplin's legacy
+	// base64 -> escape -> SJCL format. Each chunk has its own base64 padding.
+	for _, tc := range []struct {
+		name    string
+		method  int
+		packets []string
+		wantErr bool
+	}{
+		{"method5", 5, []string{
+			`{"iv":"AQECAwQFBgcICQoLDA0ODw==","v":1,"iter":101,"ks":128,"ts":64,"mode":"ccm","cipher":"aes","salt":"AQIDBAUGBwg=","ct":"b2oWw2lbIHDLK1VuNEwu4BrgCK4="}`,
+			`{"iv":"AgECAwQFBgcICQoLDA0ODw==","v":1,"iter":101,"ks":128,"ts":64,"mode":"ccm","cipher":"aes","salt":"AQIDBAUGBwg=","ct":"HAJbWgRjYoCvQVWVfYg="}`,
+		}, false},
+		{"method7", 7, []string{
+			`{"iv":"AQECAwQFBgcICQoLDA0ODw==","v":1,"iter":101,"ks":256,"ts":64,"mode":"ccm","cipher":"aes","salt":"AQIDBAUGBwg=","ct":"J98bEKcFGr5aXi4mdV5rtobkn4w="}`,
+			`{"iv":"AgECAwQFBgcICQoLDA0ODw==","v":1,"iter":101,"ks":256,"ts":64,"mode":"ccm","cipher":"aes","salt":"AQIDBAUGBwg=","ct":"x33UmZJMfE4s0jqyCMo="}`,
+		}, false},
+		{"authenticated invalid base64", 5, []string{
+			`{"iv":"AQECAwQFBgcICQoLDA0ODw==","v":1,"iter":101,"ks":128,"ts":64,"mode":"ccm","cipher":"aes","salt":"AQIDBAUGBwg=","ct":"D5JovG0u47Xf"}`,
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var envelope strings.Builder
+			fmt.Fprintf(&envelope, "JED01%06x%02x%s", 34, tc.method, keyID)
+			for _, packet := range tc.packets {
+				fmt.Fprintf(&envelope, "%06x%s", len(packet), packet)
+			}
+			got, err := s.DecryptFile(envelope.String())
+			if tc.wantErr {
+				if err == nil || got != nil {
+					t.Fatalf("invalid file payload accepted: %x, %v", got, err)
+				}
+				return
+			}
+			if err != nil || !bytes.Equal(got, []byte{0, 255, 17, 0, 128, 33}) {
+				t.Fatalf("legacy file decryption: got %x, err %v", got, err)
+			}
+		})
+	}
+}
 
 // newFileTestService loads a deterministic 256-byte master key (stored as its
 // 512-char hex string, like Joplin) and returns the service plus its key ID.

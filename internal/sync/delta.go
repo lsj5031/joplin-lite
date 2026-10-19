@@ -91,8 +91,7 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 
 			for i, item := range batch {
 				if fetchErrs[i] != nil {
-					slog.Error("failed to fetch delta item", "item_name", item.ItemName, "error", fetchErrs[i])
-					continue
+					return fmt.Errorf("cannot fetch delta item %s: %w", item.ItemName, fetchErrs[i])
 				}
 				if item.Type == 3 {
 					typeCounts["delete"]++
@@ -100,8 +99,7 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 					typeCounts["resource_blob"]++
 				}
 				if err := applyDeltaItem(backend, db, syncTarget, item, prefetched[i]); err != nil {
-					slog.Error("failed to apply delta item", "item_name", item.ItemName, "error", err)
-					continue
+					return fmt.Errorf("cannot apply delta item %s: %w", item.ItemName, err)
 				}
 			}
 		}
@@ -153,7 +151,7 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 	}
 
 	// Parse as Joplin text format
-	itemType, _ := models.Deserialize(string(content))
+	itemType, fields := models.Deserialize(string(content))
 
 	slog.Debug("applying delta item", "name", item.ItemName, "parsed_type", itemType)
 
@@ -292,6 +290,9 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 			return err
 		}
 		if existing != nil {
+			if _, present := fields["blob_updated_time"]; !present {
+				resource.BlobUpdatedTime = existing.BlobUpdatedTime
+			}
 			si, err := db.GetSyncItem(resource.ID, syncTarget)
 			if err != nil {
 				return err

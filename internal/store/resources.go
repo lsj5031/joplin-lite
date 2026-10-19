@@ -154,17 +154,25 @@ func (db *DB) CreateResource(r *models.Resource) error {
 	return db.recordItemChange(models.TypeResource, r.ID, 1)
 }
 
-// UpsertResource inserts or replaces a resource (used during sync).
+// UpsertResource updates known fields without replacing profile-only columns such as OCR.
 func (db *DB) UpsertResource(r *models.Resource) error {
 	return UpsertResourceTx(db, r)
 }
 
 func UpsertResourceTx(ex execer, r *models.Resource) error {
-	_, err := ex.Exec(`INSERT OR REPLACE INTO resources (id, title, mime, filename, created_time, updated_time,
+	_, err := ex.Exec(`INSERT INTO resources (id, title, mime, filename, created_time, updated_time,
 		user_created_time, user_updated_time, file_extension, encryption_cipher_text,
 		encryption_applied, encryption_blob_encrypted, size, is_shared, share_id,
 		master_key_id, user_data, blob_updated_time)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+		title=excluded.title, mime=excluded.mime, filename=excluded.filename,
+		created_time=excluded.created_time, updated_time=excluded.updated_time,
+		user_created_time=excluded.user_created_time, user_updated_time=excluded.user_updated_time,
+		file_extension=excluded.file_extension, encryption_cipher_text=excluded.encryption_cipher_text,
+		encryption_applied=excluded.encryption_applied, encryption_blob_encrypted=excluded.encryption_blob_encrypted,
+		size=excluded.size, is_shared=excluded.is_shared, share_id=excluded.share_id,
+		master_key_id=excluded.master_key_id, user_data=excluded.user_data, blob_updated_time=excluded.blob_updated_time`,
 		r.ID, r.Title, r.Mime, r.Filename, r.CreatedTime, r.UpdatedTime,
 		r.UserCreatedTime, r.UserUpdatedTime, r.FileExtension, r.EncryptionCipherText,
 		r.EncryptionApplied, r.EncryptionBlobEncrypted, r.Size, r.IsShared, r.ShareID,

@@ -152,3 +152,38 @@ func TestOpen_RefusesAmbiguousProfile(t *testing.T) {
 		t.Fatal("opened one of two profiles without reporting the ambiguity")
 	}
 }
+
+func TestResourceUpdatePreservesProfileColumns(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, query := range []string{
+		`ALTER TABLE resources ADD COLUMN ocr_text TEXT DEFAULT ''`,
+		`ALTER TABLE resources ADD COLUMN ocr_status INTEGER DEFAULT 0`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resource := &models.Resource{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Title: "Before", BlobUpdatedTime: 1234}
+	if err := db.UpsertResource(resource); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE resources SET ocr_text = 'Original OCR text', ocr_status = 2 WHERE id = ?`, resource.ID); err != nil {
+		t.Fatal(err)
+	}
+	resource.Title = "After sync"
+	if err := db.ApplyPulledItem(resource, 7, []byte(models.SerializeResource(resource))); err != nil {
+		t.Fatal(err)
+	}
+	var title, text string
+	var status int
+	if err := db.QueryRow(`SELECT title, ocr_text, ocr_status FROM resources WHERE id = ?`, resource.ID).Scan(&title, &text, &status); err != nil {
+		t.Fatal(err)
+	}
+	if title != "After sync" || text != "Original OCR text" || status != 2 {
+		t.Fatalf("resource sync lost profile data: title %q, OCR %q, status %d", title, text, status)
+	}
+}

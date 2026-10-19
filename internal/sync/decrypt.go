@@ -52,8 +52,7 @@ func DecryptPulledItems(db *store.DB, svc *e2ee.Service, masterPassword string) 
 
 	for _, item := range items {
 		if err := decryptItem(db, svc, item); err != nil {
-			slog.Error("failed to decrypt item", "id", item.ID, "type", item.ItemType, "error", err)
-			continue
+			return fmt.Errorf("cannot decrypt item %s: %w", item.ID, err)
 		}
 	}
 
@@ -65,8 +64,7 @@ func DecryptPulledItems(db *store.DB, svc *e2ee.Service, masterPassword string) 
 
 	for _, er := range encResources {
 		if err := decryptResourceBlob(db, svc, er.ID); err != nil {
-			slog.Error("failed to decrypt resource blob", "id", er.ID, "error", err)
-			continue
+			return fmt.Errorf("cannot decrypt resource blob %s: %w", er.ID, err)
 		}
 	}
 
@@ -131,6 +129,16 @@ func decryptItem(db *store.DB, svc *e2ee.Service, item store.EncryptedItem) erro
 		resource.ID = item.ID
 		resource.EncryptionCipherText = ""
 		resource.EncryptionApplied = 0
+		_, fields := models.Deserialize(plaintext)
+		if _, present := fields["blob_updated_time"]; !present {
+			existing, err := db.GetResource(item.ID)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				resource.BlobUpdatedTime = existing.BlobUpdatedTime
+			}
+		}
 		// encryption_blob_encrypted stays as decrypted from the plaintext: it
 		// marks the blob at the target as FileV1-encrypted and drives the blob
 		// decryption pass below.
