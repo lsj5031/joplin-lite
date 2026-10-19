@@ -58,6 +58,18 @@ FIXES = {
                "missing info.json so a fresh Joplin Server target can push its first one without letting "
                "item/blob fetches overwrite local data; qa/joplin-server-e2e.sh now runs plaintext and "
                "E2EE round trips and checks the server-side envelope.",
+    "SH-02": "The embedded SPA left the desktop shell in the native-ui migration: the workspace is a "
+             "native window and the web build is served by `gojoplin serve --web-dir` through "
+             "internal/webui. The handler's tests moved with it (TestInjectsRuntimeConfig, "
+             "TestSPAFallbackAndAssets), so SH-02/03/13 are re-pointed at internal/webui.",
+    "SH-03": "Same move: runtime config injection is internal/webui's job now, covered by "
+             "TestInjectsRuntimeConfig and TestEscapesScriptBreakout.",
+    "SH-13": "Same move: SPA fallback, asset caching and write rejection are covered by "
+             "TestSPAFallbackAndAssets and TestRejectsWrites in internal/webui.",
+    "SYNC-24": "internal/s3/client.go: isNotFound only matched the modeled NotFound type, so a missing "
+               "key (AWS, MinIO and RustFS all answer NoSuchKey) aborted the first sync to a fresh "
+               "bucket; it now matches the NoSuchKey/NotFound codes and a bare 404, while NoSuchBucket "
+               "stays a configuration error. qa/s3-e2e.sh runs the whole path against RustFS in Docker.",
     "SH-04": "Added shell/backend_test.go: the in-process API is started and probed headlessly (no webview).",
     "SH-05": "Same test: a 48-hex ephemeral token is minted when none is configured, is not persisted, and a "
              "configured token is reused verbatim.",
@@ -77,7 +89,6 @@ FIXES = {
 }
 
 BLOCKED = {
-    "SYNC-24": "Real S3 backend needs -tags s3 and AWS credentials; the default stub compiles into the binary.",
     "CLI-13": "dropbox-auth needs an interactive OAuth redirect against Dropbox; the loopback flow is unit "
               "tested (TestDropboxOAuth_LoopbackFlow).",
 }

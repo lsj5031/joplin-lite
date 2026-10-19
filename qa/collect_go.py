@@ -114,9 +114,11 @@ MAPPING = {
     "SVC-05": ("root", ["TestNotebookNoteTagViews"]),
 
     # ---- shell (embedded webdist serving + in-process backend) ----
-    "SH-02": ("shell", ["TestFrontendInjectsRuntimeConfig", "TestFrontendSPAFallbackAndAssets"]),
-    "SH-03": ("shell", ["TestFrontendInjectsRuntimeConfig", "TestFrontendEscapesScriptBreakout"]),
-    "SH-13": ("shell", ["TestFrontendSPAFallbackAndAssets", "TestFrontendRejectsWrites"]),
+    # The SPA handler left the desktop shell for internal/webui (served by
+    # `gojoplin serve --web-dir`), and its tests moved with it.
+    "SH-02": ("root", ["TestInjectsRuntimeConfig", "TestSPAFallbackAndAssets"]),
+    "SH-03": ("root", ["TestInjectsRuntimeConfig", "TestEscapesScriptBreakout"]),
+    "SH-13": ("root", ["TestSPAFallbackAndAssets", "TestRejectsWrites"]),
     "SH-04": ("shell", ["TestDesktopBackendLifecycle"]),
     "SH-05": ("shell", ["TestDesktopBackendLifecycle", "TestDesktopBackendConfiguredTokenKeepsStable"]),
     "SH-08": ("shell", ["TestDesktopBackendLifecycle"]),
@@ -171,6 +173,10 @@ MANUAL = {
                "pushes a notebook and note, a fresh vault B pulls the same title/body, and the E2EE leg "
                "seeds a master key, checks the server-side item is an encrypted envelope with no "
                "plaintext, decrypts it in vault B, and keeps it unreadable without the password",
+    "SYNC-24": "qa/s3-e2e.sh against RustFS (S3-compatible) in Docker: the default build refuses the "
+               "target with the stub's message, and the `-tags s3` binary round-trips a note plaintext "
+               "and E2EE (the bucket holds only envelopes, a vault with the master password decrypts, "
+               "one without it never reads the body)",
 }
 
 

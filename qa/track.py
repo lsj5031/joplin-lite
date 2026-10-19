@@ -8,6 +8,7 @@ Usage:
   python3 qa/track.py set QA-012 pass --evidence "API-4" --note "..."
   python3 qa/track.py set QA-012 fail --severity high --error "what broke"
   python3 qa/track.py fix QA-012 --fix "what changed"
+  python3 qa/track.py edit QA-012 --expected "the rewritten expectation"
   python3 qa/track.py note QA-012 "..."
   python3 qa/track.py log "phase 2 started"
   python3 qa/track.py summary
@@ -131,6 +132,16 @@ def main():
         row["status"] = "fixed"
         row["updated"] = now()
         activity("fixed", row, f"fix: {row['fix'][:160]}")
+    elif cmd == "edit":
+        for name, col in (("--expected", "expected"), ("--user-story", "user_story"),
+                          ("--feature", "feature")):
+            value = opt(args, name)
+            if value:
+                row[col] = value
+        row["updated"] = now()
+        activity("edit", row, "rewrote " + ", ".join(
+            c for n, c in (("--expected", "expected"), ("--user-story", "user_story"),
+                           ("--feature", "feature")) if opt(args, n)))
     elif cmd == "set":
         if len(args) < 2:
             raise SystemExit("set needs <id> <status>")

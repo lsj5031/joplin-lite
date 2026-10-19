@@ -1,6 +1,6 @@
 # joplin-lite — feature QA report
 
-_Generated 2026-10-18; Joplin Server gate closed 2026-10-19. Human-readable companion to the canonical spreadsheet
+_Generated 2026-10-18; the Joplin Server and S3 gates closed 2026-10-19. Human-readable companion to the canonical spreadsheet
 `qa/features.csv` (200 user stories) and the live dashboard at
 <http://127.0.0.1:8099/dashboard.html>._
 
@@ -33,31 +33,33 @@ Progress is streamed to `qa/activity.jsonl` and rendered live on the dashboard.
 |-------|--------:|-----:|--------:|-----:|
 | Workspace UI (`ui`) | 62 | **62** | 0 | 0 |
 | Data API (`api`) | 53 | **53** | 0 | 0 |
-| Sync engine (`sync`) | 24 | **23** | 1 | 0 |
+| Sync engine (`sync`) | 24 | **24** | 0 | 0 |
 | Storage & format (`store`) | 13 | **13** | 0 | 0 |
 | Service seam (`service`) | 5 | 5 | 0 | 0 |
 | CLI & config (`cli`) | 22 | 21 | 1 | 0 |
 | Desktop shell (`shell`) | 16 | **16** | 0 | 0 |
 | Observability & extras (`cli`) | 5 | 5 | 0 | 0 |
-| **Total** | **200** | **198** | **2** | **0** |
+| **Total** | **200** | **199** | **1** | **0** |
 
-* **198 verified passes** — 190 carry an automated test or suite; the seven
+* **199 verified passes** — 190 carry an automated test or suite; the seven
   desktop-shell stories (`SH-01`, `SH-06`, `SH-07`, `SH-09`, `SH-10`, `SH-11`,
   `SH-12`) were verified on a real macOS session against the built binary, and
-  `SYNC-23` was verified against a real Joplin Server 3.x in Docker; all record
-  their evidence (`qa/collect_go.py` → `MANUAL`).
-* **2 blocked** — not failures: `SYNC-24` needs a live S3 bucket, and `CLI-13`
-  needs an interactive Dropbox OAuth redirect. Each has an explicit reason in
-  the spreadsheet and §5.
+  `SYNC-23`/`SYNC-24` against real remote targets in Docker (Joplin Server 3.x
+  and RustFS); all record their evidence (`qa/collect_go.py` → `MANUAL`).
+* **1 blocked** — not a failure: `CLI-13` needs an interactive Dropbox OAuth
+  redirect. Its reason is in the spreadsheet and §5.
 * **0 failing** stories remain after the fixes in §4.
 
 Raw evidence: `qa/results-ui.json`, `qa/results-api.json`, `qa/results-go.json`,
 `qa/results-cli.json`, merged into `qa/results-all.json`. The Joplin Server pass
-is reproducible with `qa/joplin-server-e2e.sh` against a Docker server.
+is reproducible with `qa/joplin-server-e2e.sh` and the S3 pass with
+`qa/s3-e2e.sh`, both against a throwaway Docker backend.
 
-`go test ./...` passes across all modules (plus `shell/`, a separate module),
-`go vet` is clean, and the previously flaky local-folder rehearsal now passes
-**40/40** runs (§4.12).
+`go test ./...` passes across all modules, with and without `-tags s3`, and
+`go vet` is clean in both; so does the `shell/` module (a separate module) after
+the back/forward binding fix in §4.29 — its `TestNativeHistoryAndMove` failed
+deterministically before that fix and matches no story in the spreadsheet. The
+previously flaky local-folder rehearsal now passes **40/40** runs (§4.12).
 
 ### Coverage closed in this pass
 
@@ -225,6 +227,38 @@ directories under `qa/run/`.
     seeds vault A with `tools/e2eeseed`, inspects the server-side envelope, and
     checks a third passwordless vault. Both legs pass against Joplin Server
     3.x in Docker (SQLite).
+27. **The first S3 sync to a new bucket always failed** — `SYNC-24` _(high)_.
+    `s3.Client.isNotFound` matched only the modeled `types.NotFound`, but every
+    store answers a missing `GET` with the `NoSuchKey` code — which the SDK
+    hands back as a plain API error — so reading a fresh bucket's absent
+    `info.json` aborted the pass, the same failure mode as `SYNC-23` on the
+    server target. It now matches the `NoSuchKey`/`NotFound` codes and a bare
+    404, while `NoSuchBucket` stays fatal so a mistyped bucket cannot look like
+    a successful empty sync. Pinned by
+    `internal/s3/client_test.go`.
+28. **Three shell stories were scored against tests the native-ui migration
+    deleted** — `SH-02`, `SH-03`, `SH-13` _(medium)_. When the SPA left the
+    desktop shell for `internal/webui`, its handler tests moved and were
+    renamed, and `qa/collect_go.py` still pointed at the old names in the
+    `shell` module: a regenerated run reported them as `fail` (missing), which
+    is how the stale mapping surfaced. Re-pointed at the real tests
+    (`TestInjectsRuntimeConfig`, `TestSPAFallbackAndAssets`,
+    `TestEscapesScriptBreakout`, `TestRejectsWrites`), and `SH-02`'s expected
+    behaviour reworded: the workspace is a native window, and the web build is
+    served by `gojoplin serve --web-dir`.
+29. **Back and forward never fired from the note editor on macOS** — the
+    desktop shell _(medium)_. `TestNativeHistoryAndMove` failed at its last
+    step (`after Alt+Left = Alpha, want beta`); the buttons worked, so only the
+    key was wrong. MyGO's editor owns `Alt` + arrow on macOS — `editor.wants`
+    returns true for it there, because `Option+←`/`→` moves the caret by words
+    in every native text field — and the body editor is `AutoFocus`ed when a
+    note is selected, so the window-level shortcut never saw the key while a
+    note was open. The binding is now platform-correct in `shell/native.go`:
+    `Cmd+[` / `Cmd+]` on macOS (the browser convention, advertised in the
+    Back/Forward tooltips) and `Alt+Left`/`Alt+Right` elsewhere, which stay
+    live on macOS too wherever no text input has the keyboard. The test now
+    presses the platform's key and, on macOS, also asserts that `Alt+Left` in
+    the open note remains the editor's word movement.
 
 ---
 
@@ -232,7 +266,6 @@ directories under `qa/run/`.
 
 | Stories | Why blocked |
 |---------|-------------|
-| `SYNC-24` | Real S3 needs `-tags s3` + AWS credentials; the default stub is what compiles in. |
 | `CLI-13` | `dropbox-auth` needs an interactive OAuth redirect; the loopback flow is unit-tested (`TestDropboxOAuth_LoopbackFlow`). |
 
 ---
@@ -276,6 +309,11 @@ locally and are not checked in; re-record them with
 ## 8. Notes & limitations
 
 * Tests run against disposable backends, never the user's vault.
+* The desktop shell's memory gate is platform-specific: the documented
+  windows/amd64 92–101 MB does not transfer to macOS, where a bare MyGO window
+  with no data measured 101 MiB RSS and the workspace 120–130 MiB (headless
+  backend: 21 MiB). Measured and attributed in `docs/native-ui-migration.md`;
+  the QA stories above assert behaviour, not footprint.
 * The desktop binary was rebuilt (`bash shell/build.sh`), so the fixes are now
   embedded in `tmp/gojoplin-desktop.exe`; an already-running instance keeps the
   old build until relaunched.

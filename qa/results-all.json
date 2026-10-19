@@ -1136,25 +1136,28 @@
       "status": "pass",
       "severity": "-",
       "layer": "shell",
-      "evidence": "TestFrontendInjectsRuntimeConfig, TestFrontendSPAFallbackAndAssets",
+      "evidence": "TestInjectsRuntimeConfig, TestSPAFallbackAndAssets",
       "error": "",
-      "notes": ""
+      "notes": "",
+      "fix": "The embedded SPA left the desktop shell in the native-ui migration: the workspace is a native window and the web build is served by `gojoplin serve --web-dir` through internal/webui. The handler's tests moved with it (TestInjectsRuntimeConfig, TestSPAFallbackAndAssets), so SH-02/03/13 are re-pointed at internal/webui."
     },
     "SH-03": {
       "status": "pass",
       "severity": "-",
       "layer": "shell",
-      "evidence": "TestFrontendInjectsRuntimeConfig, TestFrontendEscapesScriptBreakout",
+      "evidence": "TestInjectsRuntimeConfig, TestEscapesScriptBreakout",
       "error": "",
-      "notes": ""
+      "notes": "",
+      "fix": "Same move: runtime config injection is internal/webui's job now, covered by TestInjectsRuntimeConfig and TestEscapesScriptBreakout."
     },
     "SH-13": {
       "status": "pass",
       "severity": "-",
       "layer": "shell",
-      "evidence": "TestFrontendSPAFallbackAndAssets, TestFrontendRejectsWrites",
+      "evidence": "TestSPAFallbackAndAssets, TestRejectsWrites",
       "error": "",
-      "notes": ""
+      "notes": "",
+      "fix": "Same move: SPA fallback, asset caching and write rejection are covered by TestSPAFallbackAndAssets and TestRejectsWrites in internal/webui."
     },
     "SH-04": {
       "status": "pass",
@@ -1369,6 +1372,15 @@
       "notes": "",
       "fix": "internal/sync/client.go: Get reports a typed ErrNotFound, and syncinfo treats it as a missing info.json so a fresh Joplin Server target can push its first one without letting item/blob fetches overwrite local data; qa/joplin-server-e2e.sh now runs plaintext and E2EE round trips and checks the server-side envelope."
     },
+    "SYNC-24": {
+      "status": "pass",
+      "severity": "-",
+      "layer": "sync",
+      "evidence": "qa/s3-e2e.sh against RustFS (S3-compatible) in Docker: the default build refuses the target with the stub's message, and the `-tags s3` binary round-trips a note plaintext and E2EE (the bucket holds only envelopes, a vault with the master password decrypts, one without it never reads the body)",
+      "error": "",
+      "notes": "",
+      "fix": "internal/s3/client.go: isNotFound only matched the modeled NotFound type, so a missing key (AWS, MinIO and RustFS all answer NoSuchKey) aborted the first sync to a fresh bucket; it now matches the NoSuchKey/NotFound codes and a bare 404, while NoSuchBucket stays a configuration error. qa/s3-e2e.sh runs the whole path against RustFS in Docker."
+    },
     "CLI-01": {
       "status": "pass",
       "severity": "-",
@@ -1497,13 +1509,6 @@
       "error": "",
       "notes": "",
       "fix": "config.yaml.example rewritten: tracing/metrics/rag disabled and annotated NOT YET IMPLEMENTED, and the unbuilt '13 MCP tools' claim removed, so copying it cannot enable a silent no-op."
-    },
-    "SYNC-24": {
-      "status": "blocked",
-      "severity": "medium",
-      "layer": "",
-      "evidence": "",
-      "error": "Real S3 backend needs -tags s3 and AWS credentials; the default stub compiles into the binary."
     },
     "CLI-13": {
       "status": "blocked",

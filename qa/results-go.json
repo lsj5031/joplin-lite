@@ -323,7 +323,7 @@
     "SH-02": {
       "name": "SH-02",
       "ok": true,
-      "evidence": "TestFrontendInjectsRuntimeConfig, TestFrontendSPAFallbackAndAssets",
+      "evidence": "TestInjectsRuntimeConfig, TestSPAFallbackAndAssets",
       "layer": "shell",
       "status": "pass",
       "notes": ""
@@ -331,7 +331,7 @@
     "SH-03": {
       "name": "SH-03",
       "ok": true,
-      "evidence": "TestFrontendInjectsRuntimeConfig, TestFrontendEscapesScriptBreakout",
+      "evidence": "TestInjectsRuntimeConfig, TestEscapesScriptBreakout",
       "layer": "shell",
       "status": "pass",
       "notes": ""
@@ -339,7 +339,7 @@
     "SH-13": {
       "name": "SH-13",
       "ok": true,
-      "evidence": "TestFrontendSPAFallbackAndAssets, TestFrontendRejectsWrites",
+      "evidence": "TestSPAFallbackAndAssets, TestRejectsWrites",
       "layer": "shell",
       "status": "pass",
       "notes": ""
@@ -549,6 +549,15 @@
       "status": "pass",
       "severity": "-",
       "evidence": "qa/joplin-server-e2e.sh against a real Joplin Server 3.x (Docker, SQLite): vault A pushes a notebook and note, a fresh vault B pulls the same title/body, and the E2EE leg seeds a master key, checks the server-side item is an encrypted envelope with no plaintext, decrypts it in vault B, and keeps it unreadable without the password",
+      "layer": "sync",
+      "notes": ""
+    },
+    "SYNC-24": {
+      "name": "SYNC-24",
+      "ok": true,
+      "status": "pass",
+      "severity": "-",
+      "evidence": "qa/s3-e2e.sh against RustFS (S3-compatible) in Docker: the default build refuses the target with the stub's message, and the `-tags s3` binary round-trips a note plaintext and E2EE (the bucket holds only envelopes, a vault with the master password decrypts, one without it never reads the body)",
       "layer": "sync",
       "notes": ""
     }
