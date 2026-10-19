@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
+	awshttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Client wraps the AWS S3 client for Joplin-compatible object storage.
@@ -162,7 +165,7 @@ func (c *Client) PutObject(ctx context.Context, key string, body []byte) error {
 func (c *Client) DeleteObject(ctx context.Context, key string) error {
 	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:   aws.String(key),
+		Key:    aws.String(key),
 	})
 	return err
 }
@@ -198,9 +201,25 @@ func (c *Client) HeadObject(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+// isNotFound reports whether err means the object is not there. Stores disagree
+// on the shape: AWS and RustFS answer a missing GET with the NoSuchKey code
+// (which the SDK hands back as a plain API error, not the modeled type) and a
+// missing HEAD with NotFound. A missing bucket is a configuration error — it
+// must never read as "empty target", or a typo in the bucket name would sync
+// nothing and look like success.
 func isNotFound(err error) bool {
-	var nsk *types.NotFound
-	return errors.As(err, &nsk)
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NoSuchKey", "NotFound":
+			return true
+		case "NoSuchBucket":
+			return false
+		}
+	}
+	// Some stores answer 404 without a code the SDK can read.
+	var respErr *awshttp.ResponseError
+	return errors.As(err, &respErr) && respErr.HTTPStatusCode() == http.StatusNotFound
 }
 
 func getEnvFirst(names ...string) string {

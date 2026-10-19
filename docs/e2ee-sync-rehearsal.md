@@ -100,7 +100,8 @@ Pull side:
 
 - Joplin desktop reading our output (the real interop gate; see the local
   sync test).
-- Remote targets: Dropbox and S3 still need their own real-target rehearsals.
-  The Joplin Server path has `qa/joplin-server-e2e.sh` (plaintext and E2EE).
+- Remote targets: Dropbox still needs its own real-target rehearsal. The
+  Joplin Server path has `qa/joplin-server-e2e.sh` and S3 has `qa/s3-e2e.sh`,
+  both plaintext and E2EE against a throwaway Docker backend.
 - Conflict resolution under E2EE — the conflict path is covered by
   `internal/sync/conflicts_test.go` and the local sync test.

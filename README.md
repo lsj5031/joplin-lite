@@ -87,9 +87,11 @@ cd .. && go build -o tmp/gojoplin.exe .
 ```
 
 For a safe end-to-end E2EE and sync rehearsal against Joplin desktop's File
-system target, see [docs/local-sync-test.md](docs/local-sync-test.md). The
-migration record and the measured numbers are in
-[docs/native-ui-migration.md](docs/native-ui-migration.md).
+system target, see [docs/local-sync-test.md](docs/local-sync-test.md); the
+remote targets have their own gates in
+[docs/joplin-server-test.md](docs/joplin-server-test.md) and
+[docs/s3-test.md](docs/s3-test.md). The migration record and the measured
+numbers are in [docs/native-ui-migration.md](docs/native-ui-migration.md).
 
 ## Status
 
@@ -103,9 +105,10 @@ migration record and the measured numbers are in
   is in, and `shell/` is a native MyGO desktop app over it: notebooks, notes, tags,
   search, conflicts, sync state and a native settings dialog, with the clipper/Data API
   in the same process and no browser engine. Windows ships as a portable zip and macOS
-  as an `.app` bundle. The Joplin Server round trip (plaintext and E2EE) passes against
-  a real server via `qa/joplin-server-e2e.sh`; remaining for the gate: extension pairing,
-  Dropbox/S3, and a signed macOS bundle run. See [INTENT.md](INTENT.md).
+  as an `.app` bundle. The remote round trips pass against real targets in Docker —
+  Joplin Server (plaintext and E2EE) via `qa/joplin-server-e2e.sh`, S3 via `qa/s3-e2e.sh`;
+  remaining for the gate: extension pairing, Dropbox, and a signed macOS bundle run. See
+  [INTENT.md](INTENT.md).
 
 ## License
 
