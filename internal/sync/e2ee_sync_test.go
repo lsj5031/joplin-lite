@@ -436,3 +436,98 @@ func TestE2EE_ResourceBlobStaysDecryptedOnRedelivery(t *testing.T) {
 		t.Fatalf("B resource after sync #2 = %+v, want a plaintext resource", res)
 	}
 }
+
+func TestE2EE_InterruptedResourcePullPreservesOfficialFile(t *testing.T) {
+	key := testMasterKey(t)
+	svc := e2ee.NewService()
+	if err := svc.LoadMasterKey(key.ID, key.Content, "test-password", key.EncryptionMethod); err != nil {
+		t.Fatal(err)
+	}
+	for _, blobFirst := range []bool{true, false} {
+		t.Run("blob-first="+strconv.FormatBool(blobFirst), func(t *testing.T) {
+			profile := t.TempDir()
+			db, err := store.Open(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Close() })
+			resource := &models.Resource{
+				ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Title: "original.png",
+				FileExtension: "png", Mime: "image/png", UpdatedTime: 1000,
+			}
+			plain := []byte("original attachment \x00\x01\xff")
+			if err := db.UpsertResource(resource); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.UpsertSyncItem(resource.ID, models.TypeResource, 9); err != nil {
+				t.Fatal(err)
+			}
+			officialPath := filepath.Join(db.ResourceDir(), resource.ID+".png")
+			if err := os.WriteFile(officialPath, plain, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.UpsertMasterKey(key); err != nil {
+				t.Fatal(err)
+			}
+			resource.EncryptionBlobEncrypted = 1 // target bytes are encrypted; cached bytes are not
+			cipherMeta, err := svc.EncryptString(key.ID, models.SerializeResource(resource))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cipherBlob, err := svc.EncryptFile(key.ID, plain)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := []DeltaItem{
+				{ItemName: ".resource/" + resource.ID, Type: 1},
+				{ItemName: resource.ID + ".md", Type: 1},
+			}
+			if !blobFirst {
+				items[0], items[1] = items[1], items[0]
+			}
+			page, err := json.Marshal(DeltaResponse{Items: append(append([]DeltaItem(nil), items...), DeltaItem{ItemName: "missing.md", Type: 1}), Cursor: "after"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend := &mockBackend{responses: map[string][]byte{
+				"/api/items/root:/:/delta": page,
+				"/api/items/root:/" + resource.ID + ".md:/content": []byte(models.SerializeEncryptedEnvelope(
+					envelopeMeta(models.ResourceFields(resource), cipherMeta, key.ID))),
+				"/api/items/root:/.resource%2F" + resource.ID + ":/content": []byte(cipherBlob),
+			}}
+			if err := PullChanges(backend, db); err == nil {
+				t.Fatal("injected later download failure was ignored")
+			}
+			if cursor, err := db.GetSyncCursor(); err != nil || cursor != "" {
+				t.Fatalf("interrupted cursor = %q, err %v", cursor, err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := store.Open(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db = reopened
+			items[0], items[1] = items[1], items[0]
+			page, err = json.Marshal(DeltaResponse{Items: items, Cursor: "after"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend.responses["/api/items/root:/:/delta"] = page
+			if err := PullChanges(backend, db); err != nil {
+				t.Fatal(err)
+			}
+			if err := DecryptPulledItems(db, svc, "test-password"); err != nil {
+				t.Fatal(err)
+			}
+			if active := db.GetResourceFile(resource.ID); active != officialPath {
+				t.Errorf("cache path changed after replay: %s, want %s", active, officialPath)
+			}
+			got, err := os.ReadFile(officialPath)
+			if err != nil || !bytes.Equal(got, plain) {
+				t.Fatalf("official attachment not restored to plaintext: %q, err %v", got, err)
+			}
+		})
+	}
+}

@@ -290,6 +290,11 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 			return err
 		}
 		if existing != nil {
+			if resource.EncryptionApplied == 1 {
+				// Keep the cache path stable if an interrupted pull is replayed
+				// before decryption restores the hidden filename extension.
+				resource.FileExtension = existing.FileExtension
+			}
 			if _, present := fields["blob_updated_time"]; !present {
 				resource.BlobUpdatedTime = existing.BlobUpdatedTime
 			}
