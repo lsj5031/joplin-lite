@@ -108,6 +108,10 @@ note and attachment deletions, reports an error, and keeps them queued. Uploads,
 edits, and sync-lock cleanup still work. Deletions remain blocked until you
 explicitly remove this protection; it is not a read-only mode.
 
+For measured native Dropbox sync timings, current inefficiencies, verified
+interop evidence and alpha release prerequisites, see
+[Dropbox sync review](docs/dropbox-sync-review.md).
+
 ## Status
 
 - **M0** (headless, cgo-free, lossless baseline) — done: golden-corpus format gate
