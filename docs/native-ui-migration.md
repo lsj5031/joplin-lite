@@ -202,7 +202,9 @@ it (see the Phase 1 result below).
 - Back/Forward walk the visited notes; a target hidden by the current search
   or notebook drops those filters to show it;
 - shortcuts: Cmd/Ctrl+N new, Cmd/Ctrl+F search, Cmd/Ctrl+S save now,
-  Cmd/Ctrl+E preview, Alt+Left/Right back and forward.
+  Cmd/Ctrl+E preview, and back/forward: Alt+Left/Right, or **Cmd+[ / Cmd+]**
+  on macOS, where MyGO keeps Alt and an arrow for the focused editor, as every
+  native text field does (word-by-word caret movement).
 
 It still talks to `service/` directly, so the clipper server and the webview
 shell are untouched. Measured on the same snapshot, while no webview process
@@ -226,8 +228,9 @@ Verification: `go test ./...` and `cd shell && go test ./...` pass.
 debounce, toggles preview, creates a note with Ctrl+N, searches the store,
 toggles Todo and deletes through the confirmation dialog.
 `TestNativeHistoryAndMove` clicks between notes, walks Back/Forward by button
-and Alt+Left/Right, and moves a note out of the open notebook through the
-Move menu. `TestNativeNotebookManagement` creates a child through the modal,
+and by the platform's key (Cmd+[ / Cmd+] on macOS, Alt+Left/Right elsewhere,
+plus a macOS assertion that Alt+Left in the open note stays the editor's word
+movement), and moves a note out of the open notebook through the Move menu. `TestNativeNotebookManagement` creates a child through the modal,
 renames it, verifies deleting it removes its notes, and checks that a parent
 with children is refused; `TestNativeTagFilterAndToggle` assigns a tag, filters
 the list by it, and removes it again; `TestNativeTagManagement` creates,
@@ -307,11 +310,105 @@ Windows packaging is done and portable by decision (icon, version block,
 portable zip; no installer). Still open: a signed bundle run on macOS (the
 bundle already ships the icon, `LICENSE` and `NOTICE`).
 
+## Phase 3 re-measurement on macOS (2026-10-19)
+
+The numbers above are windows/amd64. The same code was measured on macOS
+27.0.1/arm64 (Go 1.27, `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"`)
+with two throwaway vaults seeded through the clipper API — 5 notes, and 1000
+notes (~1.5 KB bodies, 3.0 MB of SQLite) — a 1280×800 window opened with
+`-smoke -smoke-after Ns`, `ps -o rss` sampled every 0.5 s and `vmmap -summary`
+for the platform's own footprint. Three runs per row unless noted, and a
+throwaway minimal MyGO window (one text, a button, an input and a text area,
+same size, no data) as the framework floor.
+
+| Measurement (macOS 27.0.1, arm64) | Value |
+|---|---:|
+| Processes (with children) | 1 (none) |
+| First frame + capture + shutdown, minus the smoke delay (10 runs) | 0.116–0.141 s after the process's first log line |
+| Backend listening | ≤1 ms after the process's first log line |
+| Binary | 18,354,370 bytes (17.50 MiB); windows/amd64 is 18.60 MiB |
+| Steady RSS, 5-note vault | 119.8–120.5 MiB |
+| Steady RSS, 1000-note vault | 129.8–131.0 MiB |
+| Steady RSS, headless `serve` on the same vault (no window) | 21.4 MiB |
+| Steady RSS, minimal MyGO window (control) | 100.7–101.0 MiB |
+| macOS physical footprint (dirty-only) | 59–133 MB across runs; it swings with GC, so RSS is the stable metric |
+| Idle CPU, window open, 1000-note vault | 0.99% of one core over 11 s |
+| Go heap live (`GODEBUG=gctrace=1`) | 8 MB warm, 23 MB by 25 s against a 27 MB goal; 7 collections in 25 s |
+
+What the numbers say:
+
+- **The window is the cost, not the workspace.** A minimal MyGO window with no
+  data measures 101 MiB here; the workspace sits 19–30 MiB above it, and a
+  headless `serve` of the very same vault is 21 MiB. 200× the notes adds ~10 MiB
+  (120 → 130): paging the list keeps the library's cost bounded.
+- **The floor is the platform stack.** The control's `vmmap` regions are the
+  workspace's — ~32 MB of resident shared `__AUTH_CONST` plus ~17.5 MB of
+  `__DATA_CONST` (Cocoa/CoreGraphics/Metal), a 15 MB `IOSurface` (the single
+  2×-scaled 1280×800 backing store) and ~11 MB of graphics-side malloc. RSS
+  counts those shared pages; the footprint metric, which counts dirty ones,
+  read 59 MB in one run and 133 MB in another of the same build.
+- **Startup is not the problem.** The window is up, captured and shut down
+  inside 0.15 s of the process's first log line, and the backend is listening
+  within 1 ms of it.
+- **The <100 MB gate does not transfer to macOS.** On Windows the window
+  included measured 92–101 MB; on macOS the *empty* window floor alone is
+  ~101 MiB RSS. The gate therefore needs a metric and a platform: on macOS the
+  honest statement is one process, ~120 MiB RSS (~60 MB footprint) with a
+  1000-note vault.
+- **The earlier "trim the editor's shaping caches" guess is bounded.** The
+  control already contains a text area, so its shaping and font caches are
+  inside that 101 MiB floor; trimming ours is worth single-digit MB at best.
+  The remaining app-attributable memory is the Go heap (≤27 MB) and one
+  backing surface.
+
+Nothing here changes the Phase 3 gate as written ("no WebView2 process appears
+at runtime"), which the macOS run satisfies too; it does mean the Phase 0
+memory gate should be restated per platform before it is judged again.
+
+## Design pass (2026-10-19)
+
+The workspace draws `DESIGN.md` from one place, `shell/design.go`: the palette
+(paper/navy chrome, violet selection, the service colors), the type scale,
+the 245/360/1fr grid metrics, the motion budget, the `designTheme` the
+widgets read, and the sync line. `shell/workspace.go` lays out the chrome and
+the three panes against those tokens, so no screen picks its own color or size.
+
+`TestCaptureScreens` renders every state through the real view into
+`CAPTURE_DIR` — workspace, preview, notebook and tag filters, conflicts, search
+with and without results, bulk selection, each menu and dialog, the empty
+editor and empty vault, the narrow list/drawer/editor, and the five sync
+states — 25 PNGs at 1280×800 and 900×640. `capture` mounts a surface, runs its
+entrance out, and renders the settled frame, so a screenshot never catches a
+panel at opacity 0.
+
+`TestCaptureDemo` drives the same view through a 26-second tour — preview,
+search, writing a note, the tag menu, settings, the narrow drawer, the footer's
+states — and writes 783 frames at 30 fps; `qa/video/native-workspace.mp4` is
+the H.264 cut of them. The tour found the one behavioral bug of the pass: a
+search query that narrowed the list moved the keyboard into the note the
+reload had just opened, so every character after the first was typed into that
+note's body and autosaved. The search field now clears the pending body focus,
+and `TestNativeSearchKeepsTheKeyboard` types a query one frame at a time to
+pin the behavior.
+
+Auditing those frames fixed what the tests could not see: the search query was
+drawn in ink on navy (the field now sets its text and selection colors), chosen
+list rows were a solid accent fill with unreadable text (the list is built
+under `listTheme`, violet 10% with ink text, as DESIGN.md's chosen row), the
+last tag row was clipped by the status strip (the tag section sizes from the
+row metric), row grips showed at rest and read as stray squares (they come
+with hover), deletion confirmations made **Cancel** the violet default (the
+safe choice is first, the action last and in signal red), dialog primaries
+were violet rather than route blue (they use `primaryAction`), and the empty
+editor named its state twice.
+
 ## Decision
 
 Phases 1–3 meet their gates: the daily note loop works without the web UI,
 settings and sync no longer require editing YAML, and the desktop binary runs
-with zero WebView2 processes. The native workspace is the product shell; the
-web build remains an optional browser preview. Remaining work is the signed
-macOS bundle run and the real-target loops (extension pairing, Dropbox/S3,
-Joplin Server).
+with zero WebView2 processes on Windows and zero framework processes on macOS.
+The native workspace is the product shell; the web build remains an optional
+browser preview. Remaining work is the signed macOS bundle run and the
+real-target loops (extension pairing, Dropbox — the Joplin Server and S3
+targets have their own Docker round trips), plus restating the memory gate per
+platform as the re-measurement above recommends.

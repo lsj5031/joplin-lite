@@ -139,15 +139,37 @@ settings; it never leaves the device. Dropbox and S3 targets still come from
 the config file and are kept (shown read-only) by the dialog.
 
 Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+F search, Cmd/Ctrl+S save now,
-Cmd/Ctrl+E edit/preview, Alt+Left/Right back and forward. Edits are flushed
+Cmd/Ctrl+E edit/preview, and back/forward: Alt+Left/Right, or Cmd+[ / Cmd+]
+on macOS, where the focused editor keeps Alt and an arrow for word movement.
+Edits are flushed
 when switching notes, leaving the editor and closing the window.
 
-Measured as one process at **92–101 MB** working set depending on window
-visibility and GC timing (94,668 KB on the final sample) with no
-`msedgewebview2.exe` child, versus 7 processes and ~453 MB for the former
-webview shell. `go test ./...` in this directory includes headless
+Measured as one process at **92–101 MB** working set on windows/amd64
+depending on window visibility and GC timing (94,668 KB on the final sample)
+with no `msedgewebview2.exe` child, versus 7 processes and ~453 MB for the
+former webview shell. The same build on macOS 27/arm64 (17.50 MiB binary) is
+one process at **120 MiB RSS with a 5-note vault and 130 MiB with 1000 notes**
+(~60 MB of the platform's dirty-page footprint), of which a bare MyGO window
+with no data already costs 101 MiB and the headless backend alone 21 MiB —
+see the macOS re-measurement in `docs/native-ui-migration.md`. `go test ./...` in this directory includes headless
 `ui.NewTester` tests that type, autosave, preview, search, move, delete and
 save settings through the real view.
+
+`CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureScreens ./` renders every
+screen — panes, filters, menus, dialogs, the narrow drawer and the five sync
+states — through the same view and writes 25 PNGs for design review against
+`DESIGN.md`; it is skipped without `CAPTURE_DIR`.
+
+`CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureDemo ./` drives the same
+view through a short product tour — preview, search, writing a note, the tag
+menu, settings, the narrow drawer and the footer's sync states — and writes a
+PNG per frame at 30 fps (about 26 s). Cut the clip from them with:
+
+```sh
+ffmpeg -y -framerate 30 -i ../tmp/ui-audit/demo/%04d.png \
+  -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart \
+  ../qa/video/native-workspace.mp4
+```
 
 ## Browser preview (optional)
 

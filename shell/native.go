@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -122,7 +123,40 @@ type nativeApp struct {
 	syncWatch bool
 	syncPoll  *time.Timer
 
+	// narrow is whether the window is below DESIGN.md's breakpoint, where the
+	// rail becomes a slide-over and the list and editor swap as single views.
+	// narrowEditor is which of the two shows; railOpen is the slide-over.
+	narrow       bool
+	narrowEditor bool
+	railOpen     bool
+
+	// surfaces carries the entrance state of the menus and dialogs, so a panel
+	// animates in once per open and never at rest.
+	surfaces surfaceMotions
+
+	// target is the sync target the status strip's line runs to, set from the
+	// settings once they are known.
+	target    int
+	targetSet bool
+
 	md markdown.Options
+}
+
+// targetLabel names the sync target for the status strip: the backend's own
+// configuration while one is running (a target change rebuilds the backend),
+// else the settings the dialog loaded, else nothing.
+func (a *nativeApp) targetLabel() string {
+	if a.be != nil && a.be.cfg != nil {
+		target := a.be.cfg.SyncTarget
+		if a.be.cfg.NoSync {
+			target = targetOff
+		}
+		return targetLabel(target)
+	}
+	if a.targetSet {
+		return targetLabel(a.target)
+	}
+	return targetLabel(targetOff)
 }
 
 func newNativeApp(db *store.DB) *nativeApp {
@@ -265,48 +299,22 @@ func (a *nativeApp) tagDialogs(c *ui.Context, t *ui.Theme) {
 				if ui.Button(c, "Cancel").Clicked() {
 					a.tagOpen = false
 				}
-				if ui.PrimaryButton(c, action).Clicked() {
+				if primaryAction(c, action).Clicked() {
 					a.submitTag()
 				}
 			})
 		})
 	}
 	if a.confirmDeleteTag {
-		if ui.AlertDialog(c, &a.confirmDeleteTag, "Delete tag?",
+		if confirmDialog(c, dangerTheme, &a.confirmDeleteTag, "Delete tag?",
 			"This removes the tag from every note on this device and queues the deletion for sync.",
-			"Delete tag", "Cancel") == 0 {
+			"Delete tag") == 1 {
 			a.deleteTag()
 		}
 	}
 }
 
 // tagActionsMenu is the Rename/Delete menu for the selected tag.
-func (a *nativeApp) tagActionsMenu(c *ui.Context, t *ui.Theme) {
-	items := []struct {
-		label string
-		run   func()
-	}{
-		{"Rename tag…", a.openRenameTag},
-		{"Delete tag…", func() {
-			a.tagActions = false
-			a.confirmDeleteTag = true
-		}},
-	}
-	ui.Column(c).Width(170).Padding(4).Gap(2).Children(func() {
-		for _, item := range items {
-			entry := ui.Row(c.Key("tag-action:"+item.label)).Padding(6, 10).Radius(5)
-			if entry.Hovered() {
-				entry.Background(t.Accent).TextColor(t.AccentText)
-			}
-			if entry.Clicked() {
-				a.tagActions = false
-				item.run()
-			}
-			entry.Children(func() { ui.Text(c, item.label) })
-		}
-	})
-}
-
 func (a *nativeApp) reloadNoteTags() {
 	if a.note == nil {
 		a.noteTags = nil
@@ -536,6 +544,42 @@ func (a *nativeApp) noteInRows(id string) bool {
 		}
 	}
 	return false
+} // historyShortcuts walks the note history with the keyboard. MyGO keeps Alt
+// and an arrow for a focused editor on macOS, where that is word-by-word
+// caret movement in every native text field, so there the reported binding is
+// the browser convention Cmd+[ / Cmd+]; Alt+Left/Right still work wherever no
+// text input has the keyboard.
+func (a *nativeApp) historyShortcuts(c *ui.Context) {
+	if runtime.GOOS == "darwin" {
+		if c.Shortcut(ui.Cmd, ui.KeyBracketLeft) {
+			a.goHistory(-1)
+		}
+		if c.Shortcut(ui.Cmd, ui.KeyBracketRight) {
+			a.goHistory(1)
+		}
+	}
+	if c.Shortcut(ui.Alt, ui.KeyLeft) {
+		a.goHistory(-1)
+	}
+	if c.Shortcut(ui.Alt, ui.KeyRight) {
+		a.goHistory(1)
+	}
+}
+
+// historyHint is the shortcut Back and Forward advertise in their tooltips:
+// the key that works from the note editor, which owns Alt and an arrow on
+// macOS.
+func historyHint(forward bool) string {
+	if runtime.GOOS == "darwin" {
+		if forward {
+			return "Forward (Cmd+])"
+		}
+		return "Back (Cmd+[)"
+	}
+	if forward {
+		return "Forward (Alt+Right)"
+	}
+	return "Back (Alt+Left)"
 }
 
 // goHistory moves delta steps through the visited notes. When the target is
@@ -818,7 +862,7 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 				if ui.Button(c, "Cancel").Clicked() {
 					a.notebookOpen = false
 				}
-				if ui.PrimaryButton(c, action).Clicked() {
+				if primaryAction(c, action).Clicked() {
 					a.submitNotebook()
 				}
 			})
@@ -833,9 +877,9 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 		if nb := a.notebookByID(a.selectedNotebook); nb != nil {
 			name, count = "“"+nb.Title+"”", nb.NoteCount
 		}
-		if ui.AlertDialog(c, &a.confirmDeleteNotebook, "Delete "+name+"?",
+		if confirmDialog(c, dangerTheme, &a.confirmDeleteNotebook, "Delete "+name+"?",
 			fmt.Sprintf("This deletes the notebook and %d note(s) on this device, and queues the deletions for sync.", count),
-			"Delete notebook", "Cancel") == 0 {
+			"Delete notebook") == 1 {
 			a.deleteNotebook()
 		}
 	}
@@ -1104,6 +1148,7 @@ func (a *nativeApp) openSettings() {
 	}
 	a.settingsErr = ""
 	a.settingsPick = 0
+	a.target, a.targetSet = a.settings.Target, true
 	_, targets := a.settingsTargets()
 	for i, target := range targets {
 		if target == a.settings.Target {
@@ -1220,7 +1265,7 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 			if ui.Button(c, "Cancel").Clicked() {
 				a.settingsOpen = false
 			}
-			if ui.PrimaryButton(c, "Save").Clicked() {
+			if primaryAction(c, "Save").Clicked() {
 				a.submitSettings()
 			}
 		})
@@ -1240,558 +1285,15 @@ func (a *nativeApp) statusText() string {
 	}
 }
 
-func (a *nativeApp) view(c *ui.Context) {
-	if a.invalidate == nil {
-		a.invalidate = c.Services().Invalidate
-		a.watchSync()
-	}
-	t := c.Theme()
-
-	if c.Shortcut(ui.Cmd, ui.KeyN) {
-		a.newNote()
-	}
-	if c.Shortcut(ui.Cmd, ui.KeyF) {
-		a.focusSearch = true
-	}
-	if c.Shortcut(ui.Cmd, ui.KeyS) {
-		a.flush()
-	}
-	if c.Shortcut(ui.Cmd, ui.KeyE) {
-		a.toggleEdit()
-	}
-	if c.Shortcut(ui.Alt, ui.KeyLeft) {
-		a.goHistory(-1)
-	}
-	if c.Shortcut(ui.Alt, ui.KeyRight) {
-		a.goHistory(1)
-	}
-	a.tick()
-	a.tickSync()
-
-	a.notebookDialogs(c, t)
-	a.tagDialogs(c, t)
-	a.settingsDialog(c, t)
-	a.savedSearchDialog(c, t)
-
-	if a.resolveConflict {
-		if ui.AlertDialog(c, &a.resolveConflict, "Keep this version?",
-			"Copies this conflict's title and body to the original note, then deletes the conflict.",
-			"Keep this version", "Cancel") == 0 {
-			a.keepConflictVersion()
-		}
-	}
-
-	if a.confirmDelete {
-		if ui.AlertDialog(c, &a.confirmDelete, "Delete note?",
-			"The note is removed from this device and the deletion is queued for the next sync.",
-			"Delete", "Cancel") == 0 {
-			a.deleteNote()
-		}
-	}
-
-	if a.confirmBulkDelete {
-		n := a.selection.Len()
-		if ui.AlertDialog(c, &a.confirmBulkDelete, "Delete notes?",
-			fmt.Sprintf("The %d selected notes are removed from this device and the deletions are queued for the next sync.", n),
-			"Delete notes", "Cancel") == 0 {
-			a.deleteSelected()
-		}
-	}
-
-	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-		a.notebooksPane(c, t)
-		a.notesPane(c, t)
-		a.editorPane(c, t)
-	})
-}
-
-func (a *nativeApp) notebooksPane(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Width(220).Shrink(0).Gap(2).Background(t.Surface).Children(func() {
-		ui.Row(c).Padding(10, 14).Gap(2).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Notebooks").Bold().Grow(1)
-			ui.Textf(c, "%d", len(a.notebooks)).FontSize(11).TextColor(t.TextMuted)
-			if ui.Button(c, "+").Label("New notebook").Tooltip("New notebook").Clicked() {
-				a.openNewNotebook()
-			}
-			if a.notebookByID(a.selectedNotebook) != nil {
-				actions := ui.Button(c, "…").Label("Notebook actions").Tooltip("Rename or delete this notebook")
-				if actions.Clicked() {
-					a.notebookActions = !a.notebookActions
-				}
-				ui.Popover(c, actions, &a.notebookActions, func() { a.notebookMenu(c, t) })
-			}
-		})
-		sidebar := ui.Sidebar(c, &a.selectedNotebook, func() {
-			ui.SidebarItem(c.Key("all"), "all", nil, "All notes")
-			ui.SidebarItem(c.Key("conflicts"), conflictsRail, nil, "Conflicts")
-			var walk func(nodes []*models.Folder)
-			walk = func(nodes []*models.Folder) {
-				for _, nb := range nodes {
-					label := strings.Repeat("  ", a.notebookDepth[nb.ID]) + nb.Title
-					item := ui.SidebarItem(c.Key(nb.ID), nb.ID, nil, label)
-					// Dragging a note (or the whole selection) onto a notebook
-					// moves it there.
-					if _, over := ui.DragOver[[]string](item); over {
-						item.Background(t.Accent.Alpha(0.18))
-					}
-					if ids, ok := ui.Drop[[]string](item); ok {
-						// The note list is built after the sidebar, so moving here
-						// updates it in this same frame.
-						a.moveNotes(ids, nb.ID)
-					}
-					item.Children(func() {
-						ui.Textf(c, "%d", nb.NoteCount).FontSize(10).TextColor(t.TextMuted)
-					})
-					walk(nb.Children)
-				}
-			}
-			walk(a.notebookTree)
-		}).Grow(1).Label("Notebooks")
-		sidebar.OnChange(func() {
-			a.selectedTag = ""
-			a.selectedID = ""
-			a.reloadNotes()
-		})
-
-		if len(a.tags) > 0 {
-			ui.Divider(c)
-			ui.Row(c).Padding(8, 14).Gap(2).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Tags").Bold().FontSize(12).Grow(1)
-				if ui.Button(c, "+").Label("New tag").Tooltip("New tag").Clicked() {
-					a.openNewTag()
-				}
-				if a.selectedTag != "" {
-					tagActions := ui.Button(c, "…").Label("Tag actions").Tooltip("Rename or delete this tag")
-					if tagActions.Clicked() {
-						a.tagActions = !a.tagActions
-					}
-					ui.Popover(c, tagActions, &a.tagActions, func() { a.tagActionsMenu(c, t) })
-				}
-				if a.selectedTag != "" {
-					if ui.Button(c, "×").Label("Clear tag").Tooltip("Clear the tag filter").Clicked() {
-						a.selectedTag = ""
-						a.selectedID = ""
-						a.reloadNotes()
-					}
-				}
-			})
-			height := 28*len(a.tags) + 8
-			if height < 36 {
-				height = 36
-			}
-			if height > 170 {
-				height = 170
-			}
-			tagSidebar := ui.Sidebar(c, &a.selectedTag, func() {
-				for _, tag := range a.tags {
-					ui.SidebarItem(c.Key("tag:"+tag.ID), tag.ID, nil, tag.Title)
-				}
-			}).Height(float32(height)).Label("Tags")
-			tagSidebar.OnChange(func() {
-				a.selectedNotebook = ""
-				a.selectedID = ""
-				a.reloadNotes()
-			})
-		} else {
-			ui.Divider(c)
-			ui.Row(c).Padding(8, 14).Gap(2).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Tags").Bold().FontSize(12).Grow(1)
-				if ui.Button(c, "+").Label("New tag").Tooltip("New tag").Clicked() {
-					a.openNewTag()
-				}
-			})
-		}
-
-		ui.Divider(c)
-		ui.Column(c).Padding(10, 14).Gap(6).Children(func() {
-			st := a.syncState()
-			notice := a.syncNotice()
-			text := ui.Text(c, notice.Line).FontSize(10).TextColor(t.TextMuted)
-			if notice.Err {
-				text.TextColor(t.Danger)
-			}
-			if notice.Hint != "" {
-				ui.Text(c, notice.Hint).FontSize(9).TextColor(t.TextMuted)
-			}
-			ui.Row(c).Gap(6).Children(func() {
-				if !st.Enabled {
-					// Sync now has nothing to do on a vault without a target, so
-					// the first button leads to the dialog that sets one up.
-					if ui.Button(c, "Set up sync").Tooltip("Choose a sync target").Clicked() {
-						a.openSettings()
-					}
-				} else if ui.Button(c, "Sync now").Disabled(st.Running || st.Pending).Clicked() {
-					a.syncNow()
-				}
-				if ui.Button(c, "Settings").Tooltip("Sync target, master password and clipper token").Clicked() {
-					a.openSettings()
-				}
-			})
-		})
-	})
-}
-
-func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Width(330).Shrink(0).Children(func() {
-		ui.Row(c).Padding(10, 14).Gap(4).AlignItems(ui.Center).Children(func() {
-			if ui.Button(c, "<").Label("Back").Disabled(!a.canBack()).Tooltip("Back (Alt+Left)").Clicked() {
-				a.goHistory(-1)
-			}
-			if ui.Button(c, ">").Label("Forward").Disabled(!a.canForward()).Tooltip("Forward (Alt+Right)").Clicked() {
-				a.goHistory(1)
-			}
-			title := "All notes"
-			switch {
-			case a.selectedNotebook == conflictsRail:
-				title = "Conflicts"
-			case a.selectedTag != "":
-				if tag := a.tagByID(a.selectedTag); tag != nil {
-					title = "#" + tag.Title
-				}
-			case a.selectedNotebook != "":
-				if nb := a.notebookByID(a.selectedNotebook); nb != nil {
-					title = nb.Title
-				}
-			}
-			ui.Text(c, title).Bold().Grow(1)
-			ui.Textf(c, "%d", len(a.notes)).FontSize(11).TextColor(t.TextMuted)
-			sortButton := ui.Button(c, "Sort").Label("Sort notes").Tooltip("Sort the note list")
-			if sortButton.Clicked() {
-				a.sortOpen = !a.sortOpen
-			}
-			ui.Popover(c, sortButton, &a.sortOpen, func() { a.sortMenu(c, t) })
-			if ui.Button(c, "+").Tooltip("New note (Cmd/Ctrl+N)").Clicked() {
-				a.newNote()
-			}
-		})
-		ui.Row(c).Padding(0, 14, 8, 14).Gap(6).AlignItems(ui.Center).Children(func() {
-			search := ui.TextInput(c.Key("search"), &a.query).
-				Placeholder("Search notes").
-				Label("Search notes").
-				Grow(1)
-			if a.focusSearch {
-				search.AutoFocus()
-				a.focusSearch = false
-			}
-			if search.Changed() {
-				a.reloadNotes()
-			}
-			if a.query != "" {
-				if ui.Button(c, "×").Tooltip("Clear search").Clicked() {
-					a.query = ""
-					a.reloadNotes()
-				}
-			}
-			saved := ui.Button(c, "Saved").Label("Saved searches").Tooltip("Saved searches")
-			if saved.Clicked() {
-				a.savedMenuOpen = !a.savedMenuOpen
-			}
-			ui.Popover(c, saved, &a.savedMenuOpen, func() { a.savedSearchMenu(c, t) })
-		})
-		if n := a.selection.Len(); n > 0 {
-			ui.Row(c).Padding(4, 14).Gap(4).AlignItems(ui.Center).Children(func() {
-				ui.Textf(c, "%d selected", n).FontSize(11).Grow(1)
-				move := ui.Button(c, "Move…").Label("Move selected notes").Tooltip("Move the selected notes")
-				if move.Clicked() {
-					a.bulkMoveOpen = !a.bulkMoveOpen
-				}
-				ui.Popover(c, move, &a.bulkMoveOpen, func() { a.bulkMoveMenu(c, t) })
-				if ui.Button(c, "Delete…").Label("Delete selected notes").Tooltip("Delete the selected notes").Clicked() {
-					a.confirmBulkDelete = true
-				}
-				if ui.Button(c, "Clear").Label("Clear selection").Clicked() {
-					a.selection.Clear()
-				}
-			})
-		}
-		ui.Divider(c)
-
-		a.list.Selected = &a.selectedNote
-		a.list.Selection = &a.selection
-		a.list.Key = func(i int) any { return a.notes[i].ID }
-		a.list.Label = func(i int) string { return noteRowTitle(a.notes[i]) }
-		// Dragging a chosen row drags the whole choice; an unchosen row drags
-		// only itself. The drag starts on the row's grip: making the whole row
-		// a drag source would take the press from the list, and a click would
-		// stop choosing a row.
-		dragIDs := a.selectedIDs()
-		list := ui.List(c, &a.list, len(a.notes), func(i int) {
-			n := a.notes[i]
-			title := noteRowTitle(n)
-			row := ui.Row(c).Padding(8, 14).Gap(6).AlignItems(ui.Center)
-			row.Children(func() {
-				grip := ui.Text(c, "::").FontSize(12).TextColor(t.TextMuted).
-					Label("Drag note " + title).
-					Tooltip("Drag to a notebook")
-				if a.selection.Has(n.ID) && len(dragIDs) > 0 {
-					grip.Drag(dragIDs)
-				} else {
-					grip.Drag([]string{n.ID})
-				}
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, title).FontSize(13)
-					if n.Excerpt != "" {
-						ui.Text(c, excerpt(n.Excerpt)).FontSize(11).TextColor(t.TextMuted)
-					}
-					ui.Text(c, time.UnixMilli(n.UpdatedTime).Format("02 Jan 15:04")).
-						FontSize(10).TextColor(t.TextMuted)
-				})
-			})
-		}).Grow(1)
-		if list.Changed() {
-			a.loadNote()
-		}
-		if a.hasMore {
-			ui.Row(c).Padding(6, 14).Children(func() {
-				if ui.Button(c, "Load more").Clicked() {
-					a.loadMore()
-				}
-			})
-		}
-	})
-}
-
-func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-		ui.Row(c).Padding(10, 20).Gap(8).AlignItems(ui.Center).Children(func() {
-			if a.note == nil {
-				ui.Text(c, "No note selected").Bold().FontSize(15).Grow(1)
-				return
-			}
-			title := ui.TextInput(c.Key("title:"+a.note.ID), &a.title).
-				Placeholder("Untitled").
-				Label("Note title").
-				FontSize(15).
-				Grow(1)
-			if title.Changed() {
-				a.markDirty()
-			}
-			if ui.Checkbox(c, &a.todo, "Todo").Changed() {
-				a.setTodo(a.todo)
-			}
-			if a.note.IsConflict != 0 {
-				if ui.Button(c, "Resolve conflict").Tooltip("Keep this version and delete the conflict").Clicked() {
-					a.resolveConflict = true
-				}
-			}
-			tagButton := ui.Button(c, "Tags").Label("Note tags").Tooltip("Tags on this note")
-			if tagButton.Clicked() {
-				a.tagMenuOpen = !a.tagMenuOpen
-			}
-			ui.Popover(c, tagButton, &a.tagMenuOpen, func() { a.tagMenu(c, t) })
-			move := ui.Button(c, "Move")
-			if move.Clicked() {
-				a.moveOpen = !a.moveOpen
-			}
-			ui.Popover(c, move, &a.moveOpen, func() { a.moveMenu(c, t) })
-			if ui.Button(c, a.modeLabel()).Tooltip("Edit/Preview (Cmd/Ctrl+E)").Clicked() {
-				a.toggleEdit()
-			}
-			if ui.Button(c, "Delete…").Tooltip("Delete note").Clicked() {
-				a.confirmDelete = true
-			}
-		})
-		ui.Divider(c)
-
-		if a.note == nil {
-			a.emptyEditor(c, t)
-		} else if a.editing {
-			editor := ui.TextArea(c.Key("body:"+a.note.ID), &a.body).
-				Placeholder("Write in Markdown…").
-				Label("Note body").
-				Font("monospace").
-				FillWidth().
-				Grow(1)
-			if a.focusBody {
-				editor.AutoFocus()
-				a.focusBody = false
-			}
-			if editor.Changed() {
-				a.markDirty()
-			}
-		} else {
-			ui.Scroll(c).Grow(1).Padding(10, 20).Children(func() {
-				if a.body == "" {
-					ui.Text(c, "This note is empty.").TextColor(t.TextMuted)
-					return
-				}
-				markdown.View(c, a.body, &a.md)
-			})
-		}
-
-		ui.Divider(c)
-		ui.Row(c).Padding(6, 20).Gap(8).AlignItems(ui.Center).Children(func() {
-			status := a.statusText()
-			if status == "" && a.note != nil {
-				status = a.titleOfCurrent()
-			}
-			text := ui.Text(c, status).FontSize(11).TextColor(t.TextMuted).Grow(1)
-			if a.saveErr != "" {
-				text.TextColor(t.Danger)
-			}
-		})
-	})
-}
-
 // tagMenu toggles the tags of the open note. The menu stays open so several
 // tags can be added in one go.
-func (a *nativeApp) tagMenu(c *ui.Context, t *ui.Theme) {
-	height := 30 + 26*len(a.tags)
-	if height < 54 {
-		height = 54
-	}
-	if height > 300 {
-		height = 300
-	}
-	ui.Scroll(c).Width(220).Height(float32(height)).Children(func() {
-		ui.Column(c).Width(220).Padding(6).Gap(2).Children(func() {
-			ui.Text(c, "Tags on this note").FontSize(11).TextColor(t.TextMuted)
-			if len(a.tags) == 0 {
-				ui.Text(c, "No tags yet").TextColor(t.TextMuted)
-				return
-			}
-			for _, tag := range a.tags {
-				on := a.hasNoteTag(tag.ID)
-				entry := ui.Row(c.Key("note-tag:"+tag.ID)).Label("Tag: "+tag.Title).
-					Padding(6, 10).Radius(5).AlignItems(ui.Center)
-				if on {
-					entry.Background(t.Accent.Alpha(0.16))
-				}
-				if entry.Hovered() {
-					entry.Background(t.Accent).TextColor(t.AccentText)
-				}
-				if entry.Clicked() {
-					a.toggleTag(tag.ID)
-				}
-				entry.Children(func() {
-					ui.Text(c, tag.Title).Grow(1)
-					if on {
-						ui.Text(c, "✓")
-					}
-				})
-			}
-		})
-	})
-}
-
 // notebookMenu is the Rename/Delete menu for the selected notebook.
-func (a *nativeApp) notebookMenu(c *ui.Context, t *ui.Theme) {
-	items := []struct {
-		label string
-		run   func()
-	}{
-		{"Rename notebook…", a.openRenameNotebook},
-		{"Delete notebook…", func() {
-			a.notebookActions = false
-			a.confirmDeleteNotebook = true
-		}},
-	}
-	ui.Column(c).Width(190).Padding(4).Gap(2).Children(func() {
-		for _, item := range items {
-			entry := ui.Row(c.Key("notebook:"+item.label)).Padding(6, 10).Radius(5)
-			if entry.Hovered() {
-				entry.Background(t.Accent).TextColor(t.AccentText)
-			}
-			if entry.Clicked() {
-				a.notebookActions = false
-				item.run()
-			}
-			entry.Children(func() { ui.Text(c, item.label) })
-		}
-	})
-}
-
 // sortMenu sets the note-list order. The default is updated_time descending,
 // as before; the choice is per-window state, not a saved setting.
-func (a *nativeApp) sortMenu(c *ui.Context, t *ui.Theme) {
-	options := []struct {
-		label string
-		value string
-	}{
-		{"Updated (newest)", ""},
-		{"Updated (oldest)", string(store.SortUpdatedAsc)},
-		{"Created (newest)", string(store.SortCreatedDesc)},
-		{"Created (oldest)", string(store.SortCreatedAsc)},
-		{"Title A-Z", string(store.SortTitleAsc)},
-		{"Title Z-A", string(store.SortTitleDesc)},
-	}
-	ui.Column(c).Width(190).Padding(4).Gap(2).Children(func() {
-		for _, opt := range options {
-			entry := ui.Row(c.Key("sort:"+opt.value)).Label("Sort by "+opt.label).
-				Padding(6, 10).Radius(5).Gap(6).AlignItems(ui.Center)
-			if entry.Hovered() {
-				entry.Background(t.Accent).TextColor(t.AccentText)
-			}
-			if entry.Clicked() {
-				a.sortOpen = false
-				if a.sort != opt.value {
-					a.sort = opt.value
-					a.reloadNotes()
-				}
-			}
-			entry.Children(func() {
-				ui.Text(c, opt.label).Grow(1)
-				if a.sort == opt.value {
-					ui.Text(c, "✓")
-				}
-			})
-		}
-	})
-}
-
 // notebookPicker is the scrollable "move to notebook" menu shared by the open
 // note and the multi-row selection.
-func (a *nativeApp) notebookPicker(c *ui.Context, t *ui.Theme, heading, current string, onPick func(string)) {
-	height := 28 + 30*len(a.notebooks)
-	if height > 320 {
-		height = 320
-	}
-	ui.Scroll(c).Width(240).Height(float32(height)).Children(func() {
-		ui.Column(c).Width(240).Padding(6).Gap(2).Children(func() {
-			ui.Text(c, heading).FontSize(11).TextColor(t.TextMuted)
-			if len(a.notebooks) == 0 {
-				ui.Text(c, "No notebooks").TextColor(t.TextMuted)
-				return
-			}
-			for _, nb := range a.notebooks {
-				entry := ui.Row(c.Key("move:"+nb.ID)).Padding(6, 10).Radius(5).
-					Gap(6).AlignItems(ui.Center)
-				if entry.Hovered() {
-					entry.Background(t.Accent).TextColor(t.AccentText)
-				}
-				if entry.Clicked() {
-					onPick(nb.ID)
-				}
-				entry.Children(func() {
-					ui.Text(c, "Move to "+strings.Repeat("  ", a.notebookDepth[nb.ID])+nb.Title).Grow(1)
-					if current != "" && current == nb.ID {
-						ui.Text(c, "✓")
-					}
-				})
-			}
-		})
-	})
-}
-
 // moveMenu lists the notebooks the open note can move to.
-func (a *nativeApp) moveMenu(c *ui.Context, t *ui.Theme) {
-	current := ""
-	if a.note != nil {
-		current = a.note.ParentID
-	}
-	a.notebookPicker(c, t, "Move to notebook", current, func(id string) {
-		a.moveOpen = false
-		a.moveTo(id)
-	})
-}
-
 // bulkMoveMenu moves every selected note to one notebook.
-func (a *nativeApp) bulkMoveMenu(c *ui.Context, t *ui.Theme) {
-	a.notebookPicker(c, t, "Move selected notes", "", func(id string) {
-		a.moveSelected(id)
-	})
-}
-
 // selectedIDs returns the chosen notes in list order. The choice may name
 // rows that a reload has since dropped, so only visible rows are returned.
 func (a *nativeApp) selectedIDs() []string {
@@ -1865,15 +1367,6 @@ func (a *nativeApp) deleteSelected() {
 	a.reloadNotes()
 }
 
-func (a *nativeApp) emptyEditor(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Grow(1).AlignItems(ui.Center).Justify(ui.Center).Gap(8).Children(func() {
-		ui.Text(c, "No note selected").FontSize(15).TextColor(t.TextMuted)
-		if ui.PrimaryButton(c, "New note").Clicked() {
-			a.newNote()
-		}
-	})
-}
-
 func (a *nativeApp) modeLabel() string {
 	if a.editing {
 		return "Preview"
@@ -1918,6 +1411,7 @@ func openNativeWindow(be *backend) *mygo.Window {
 	app.be = be
 	app.loadSettings = be.Settings
 	app.applySettings = be.ApplySettings
+	app.target, app.targetSet = be.Settings().Target, true
 	win := mygo.NewWindow(mygo.WindowOptions{
 		Title:     "Joplin Lite (native)",
 		Width:     1280,

@@ -132,7 +132,7 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 			if ui.Button(c, "Cancel").Clicked() {
 				a.savedOpen = false
 			}
-			if ui.PrimaryButton(c, "Save").Clicked() {
+			if primaryAction(c, "Save").Clicked() {
 				a.submitSavedSearch()
 			}
 		})

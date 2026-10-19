@@ -28,6 +28,9 @@ var (
 func main() {
 	flag.Parse()
 
+	// DESIGN.md's families, before the first window asks for them.
+	registerFonts()
+
 	mygo.App.SetName("Joplin Lite")
 	if !mygo.App.RequestSingleInstanceLock() {
 		return

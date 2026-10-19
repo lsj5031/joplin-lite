@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -270,14 +271,31 @@ func TestNativeHistoryAndMove(t *testing.T) {
 		t.Fatalf("after Forward = %#v, want alpha", app.note)
 	}
 
-	// Alt+Left/Right are the keyboard equivalents.
-	tt.Key(ui.Alt, ui.KeyLeft)
-	if app.note == nil || app.note.ID != beta.ID {
-		t.Fatalf("after Alt+Left = %#v, want beta", app.note)
+	// The keyboard equivalents. The note editor owns Alt and an arrow on
+	// macOS, where that moves the caret by words in every native text field,
+	// so the binding from inside a note is Cmd+[ / Cmd+] there, as in a
+	// browser; Alt+Left/Right stay the binding elsewhere.
+	backMods, backKey := ui.Alt, ui.KeyLeft
+	forwardMods, forwardKey := ui.Alt, ui.KeyRight
+	if runtime.GOOS == "darwin" {
+		backMods, backKey = ui.Cmd, ui.KeyBracketLeft
+		forwardMods, forwardKey = ui.Cmd, ui.KeyBracketRight
 	}
-	tt.Key(ui.Alt, ui.KeyRight)
+	tt.Key(backMods, backKey)
+	if app.note == nil || app.note.ID != beta.ID {
+		t.Fatalf("after %s = %#v, want beta", historyHint(false), app.note)
+	}
+	tt.Key(forwardMods, forwardKey)
 	if app.note == nil || app.note.ID != alpha.ID {
-		t.Fatalf("after Alt+Right = %#v, want alpha", app.note)
+		t.Fatalf("after %s = %#v, want alpha", historyHint(true), app.note)
+	}
+	if runtime.GOOS == "darwin" {
+		// Pins the decision above: with the note open, Alt and an arrow must
+		// stay the editor's word movement, not a navigation.
+		tt.Key(ui.Alt, ui.KeyLeft)
+		if app.note == nil || app.note.ID != alpha.ID {
+			t.Fatalf("Alt+Left moved the history while a note was open; the editor owns it on macOS")
+		}
 	}
 
 	// Moving Alpha out of Work leaves Beta as the selected row.
@@ -1554,5 +1572,46 @@ func TestNativeFooterShowsPausedStates(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("Synced " + time.Now().Format("15:04")) {
 		t.Fatalf("success state not shown; texts = %v", tt.Texts())
+	}
+}
+
+// TestNativeSearchKeepsTheKeyboard types a query one frame per character. The
+// narrowed search drops the open note and opens the first match; the query
+// must still reach the field, and the note that opens must keep its body.
+func TestNativeSearchKeepsTheKeyboard(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	alpha := addTestNote(t, svc, "", "Alpha", "kernel report body")
+	beta := addTestNote(t, svc, "", "Beta", "nothing to do with it")
+	app.reloadNotes()
+	app.showNote(beta.ID)
+
+	tt := ui.NewTester(app.view, 1200, 800)
+	if err := tt.Click("Search notes"); err != nil {
+		t.Fatalf("click search: %v", err)
+	}
+	for _, r := range "report" {
+		tt.Type(string(r))
+		tt.Frame()
+	}
+	// Let a stray edit reach the disk if one was scheduled.
+	time.Sleep(600 * time.Millisecond)
+	tt.Frame()
+
+	if app.query != "report" {
+		t.Fatalf("query = %q, want report", app.query)
+	}
+	if app.note == nil || app.note.ID != alpha.ID {
+		t.Fatalf("open note = %#v, want the first match Alpha", app.note)
+	}
+	if app.body != "kernel report body" {
+		t.Fatalf("the search query leaked into the note: body = %q", app.body)
+	}
+	got, err := svc.GetNote(alpha.ID)
+	if err != nil {
+		t.Fatalf("GetNote: %v", err)
+	}
+	if got.Body != "kernel report body" {
+		t.Fatalf("search typing changed the note: body = %q", got.Body)
 	}
 }
