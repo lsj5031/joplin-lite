@@ -58,13 +58,24 @@ func (db *DB) Close() error {
 	return db.DB.Close()
 }
 
-// Open opens (or creates) a Joplin-compatible SQLite database in the given directory.
+// Open opens an existing Lite or official Joplin profile, or creates a Lite database.
 func Open(dataDir string) (*DB, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create data directory: %w", err)
 	}
 
 	dbPath := filepath.Join(dataDir, "gojoplin.sqlite")
+	officialPath := filepath.Join(dataDir, "database.sqlite")
+	if _, err := os.Stat(officialPath); err == nil {
+		if _, err := os.Stat(dbPath); err == nil {
+			return nil, fmt.Errorf("both gojoplin.sqlite and database.sqlite exist in %q; choose a directory containing only the intended database", dataDir)
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("cannot inspect Lite database: %w", err)
+		}
+		dbPath = officialPath
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("cannot inspect Joplin database: %w", err)
+	}
 	// cgo-free driver (modernc.org/sqlite): per-connection pragmas must be passed
 	// in the driver's _pragma= DSN form; the mattn-style _journal_mode params are ignored.
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")

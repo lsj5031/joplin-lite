@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,9 +30,13 @@ func TestOpen_RealJoplinProfileLookalike(t *testing.T) {
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
+	profilePath := filepath.Join(dir, "database.sqlite")
+	if err := os.Rename(filepath.Join(dir, "gojoplin.sqlite"), profilePath); err != nil {
+		t.Fatal(err)
+	}
 
 	// 2. Reshape it into a Joplin-profile lookalike with raw SQL.
-	raw, err := sql.Open("sqlite", filepath.Join(dir, "gojoplin.sqlite"))
+	raw, err := sql.Open("sqlite", profilePath)
 	if err != nil {
 		t.Fatalf("raw open: %v", err)
 	}
@@ -64,6 +69,24 @@ func TestOpen_RealJoplinProfileLookalike(t *testing.T) {
 	}
 	defer db.Close()
 
+	var openedPath string
+	if err := db.QueryRow(`SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&openedPath); err != nil {
+		t.Fatal(err)
+	}
+	openedInfo, err := os.Stat(openedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileInfo, err := os.Stat(profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(openedInfo, profileInfo) {
+		t.Fatalf("opened database = %q; want original %q", openedPath, profilePath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gojoplin.sqlite")); !os.IsNotExist(err) {
+		t.Fatalf("created a separate database instead of using the profile: %v", err)
+	}
 	if v := db.schemaVersion(); v != 54 {
 		t.Fatalf("schemaVersion = %d, want 54 (from the version table)", v)
 	}
@@ -108,5 +131,24 @@ func TestOpen_RealJoplinProfileLookalike(t *testing.T) {
 	}
 	if n, err := db.CountRevisions(); err != nil || n != 1 {
 		t.Fatalf("CountRevisions = %d, %v; want 1", n, err)
+	}
+}
+
+func TestOpen_RefusesAmbiguousProfile(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "database.sqlite"), []byte("official profile"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(dir)
+	if err == nil {
+		db.Close()
+		t.Fatal("opened one of two profiles without reporting the ambiguity")
 	}
 }
