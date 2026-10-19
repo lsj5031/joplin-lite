@@ -93,6 +93,21 @@ remote targets have their own gates in
 [docs/s3-test.md](docs/s3-test.md). The migration record and the measured
 numbers are in [docs/native-ui-migration.md](docs/native-ui-migration.md).
 
+For initial Dropbox dogfooding, add deletion protection alongside the existing
+authentication configuration:
+
+```yaml
+sync:
+  target: 7
+  dropbox:
+    block_deletes: true
+```
+
+The equivalent JSON setting is `"sync.7.blockDeletes": true`. This blocks remote
+note and attachment deletions, reports an error, and keeps them queued. Uploads,
+edits, and sync-lock cleanup still work. Deletions remain blocked until you
+explicitly remove this protection; it is not a read-only mode.
+
 ## Status
 
 - **M0** (headless, cgo-free, lossless baseline) — done: golden-corpus format gate

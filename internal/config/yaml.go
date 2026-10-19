@@ -32,8 +32,9 @@ type yamlSync struct {
 // yamlDropbox is the user's own Dropbox OAuth app (sync target 7). The app
 // secret is a secret — use ${GOJOPLIN_DROPBOX_APP_SECRET}.
 type yamlDropbox struct {
-	AppKey    string `yaml:"app_key"`
-	AppSecret string `yaml:"app_secret"`
+	AppKey       string `yaml:"app_key"`
+	AppSecret    string `yaml:"app_secret"`
+	BlockDeletes bool   `yaml:"block_deletes"`
 }
 
 type yamlS3 struct {
@@ -140,6 +141,7 @@ func loadFromYAML(data []byte) (*Config, error) {
 	// Dropbox (target 7)
 	cfg.DropboxAppKey = ExpandEnv(y.Sync.Dropbox.AppKey)
 	cfg.DropboxAppSecret = ExpandEnv(y.Sync.Dropbox.AppSecret)
+	cfg.DropboxBlockDeletes = y.Sync.Dropbox.BlockDeletes
 
 	// API: expand ${VAR} so secrets come from env
 	cfg.APIToken = ExpandEnv(y.API.Token)

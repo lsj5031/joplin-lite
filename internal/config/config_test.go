@@ -131,9 +131,16 @@ func TestLoadFromJoplinJSON_LocalFolder(t *testing.T) {
 }
 
 func TestLoadFromJoplinJSON_ExistingDropboxToken(t *testing.T) {
-	cfg, err := loadFromJoplinJSON([]byte(`{"sync.target":7,"sync.7.auth":"synthetic-existing-token"}`))
+	cfg, err := loadFromJoplinJSON([]byte(`{"sync.target":7,"sync.7.auth":"synthetic-existing-token","sync.7.blockDeletes":true}`))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !cfg.DropboxBlockDeletes {
+		t.Fatal("remote deletion protection was not loaded")
+	}
+	yamlCfg, err := loadFromYAML([]byte("sync:\n  target: 7\n  dropbox:\n    block_deletes: true\n"))
+	if err != nil || !yamlCfg.DropboxBlockDeletes {
+		t.Fatalf("YAML deletion protection not loaded: %v", err)
 	}
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("an existing bearer token must not require a new OAuth app: %v", err)

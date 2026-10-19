@@ -29,13 +29,14 @@ import (
 // reconcile pass (PullMissingItems), same as LocalFolderBackend. Locks use
 // the shared flat-file protocol (locks/<type>_<clientType>_<clientId>.json).
 type DropboxBackend struct {
-	oauth       *DropboxOAuth
-	token       *DropboxToken
-	dataDir     string // token store location
-	apiBase     string // default https://api.dropboxapi.com
-	contentBase string // default https://content.dropboxapi.com
-	http        *http.Client
-	locks       *fileLockManager
+	oauth        *DropboxOAuth
+	token        *DropboxToken
+	dataDir      string // token store location
+	apiBase      string // default https://api.dropboxapi.com
+	contentBase  string // default https://content.dropboxapi.com
+	http         *http.Client
+	locks        *fileLockManager
+	blockDeletes bool
 }
 
 // NewDropboxBackend creates the Dropbox driver from config. Credentials come
@@ -51,6 +52,7 @@ func NewDropboxBackend(cfg *config.Config) (*DropboxBackend, error) {
 	}
 	oauth := NewDropboxOAuth(cfg.DropboxAppKey, cfg.DropboxAppSecret)
 	b := newDropboxBackend(oauth, token, cfg.DataDir)
+	b.blockDeletes = cfg.DropboxBlockDeletes
 	return b, nil
 }
 
@@ -155,6 +157,9 @@ func (b *DropboxBackend) Put(path string, content []byte) error {
 
 // Delete implements SyncBackend.
 func (b *DropboxBackend) Delete(path string) error {
+	if b.blockDeletes {
+		return fmt.Errorf("remote deletion blocked: sync.dropbox.block_deletes is enabled; deletion remains queued")
+	}
 	key, op := parseDropboxPath(path)
 	if key == "" || op != "content" {
 		return fmt.Errorf("unsupported Dropbox delete path: %s", path)

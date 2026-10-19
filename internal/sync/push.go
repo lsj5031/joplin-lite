@@ -516,8 +516,7 @@ func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
 		if err := backend.Delete(path); err != nil {
-			slog.Error("failed to delete remote item", "id", item.ItemID, "error", err)
-			continue
+			return fmt.Errorf("cannot delete remote item %s: %w", item.ItemID, err)
 		}
 
 		if err := db.RemoveDeletedItem(item.ID); err != nil {

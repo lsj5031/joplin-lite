@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
+	"github.com/lsj5031/joplin-lite/internal/models"
 )
 
 // fakeDropbox emulates the Dropbox API v2 endpoints the driver uses, plus the
@@ -214,6 +215,75 @@ func TestDropboxBackend_ExistingTokenWithoutOAuthApp(t *testing.T) {
 				t.Fatalf("existing token read failed: data=%q err=%v refreshes=%d", got, err, f.refreshCalls)
 			}
 		})
+	}
+}
+
+func TestDropboxBackend_BlockedDeletesPreserveRemoteAndQueue(t *testing.T) {
+	for _, itemType := range []int{models.TypeNote, models.TypeResource} {
+		for _, blocked := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%d/blocked=%t", itemType, blocked), func(t *testing.T) {
+				b, err := NewDropboxBackend(&config.Config{
+					DataDir: t.TempDir(), DropboxAuth: "synthetic-token", DropboxBlockDeletes: blocked,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				f := newFakeDropbox()
+				srv := httptest.NewServer(f.handler())
+				defer srv.Close()
+				b.apiBase, b.contentBase = srv.URL, srv.URL
+				const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+				f.put("/"+id+".md", []byte("keep metadata"))
+				if itemType == models.TypeResource {
+					f.put("/.resource/"+id, []byte("keep attachment"))
+				}
+				if err := b.Put("/api/items/root:/"+id+".md:/content", []byte("keep metadata")); err != nil {
+					t.Fatalf("deletion guard prevented an upload: %v", err)
+				}
+				// The guard must still permit lock acquisition and cleanup.
+				lock, err := b.AcquireLock()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := b.ReleaseLock(lock); err != nil {
+					t.Fatal(err)
+				}
+				db := testDB(t)
+				if err := db.AddDeletedItem(id, itemType, 7); err != nil {
+					t.Fatal(err)
+				}
+				err = PushChanges(b, db, nil)
+				if (err != nil) != blocked {
+					t.Fatalf("blocked=%t: push error %v", blocked, err)
+				}
+				pending, err := db.GetDeletedItems(7)
+				if err != nil || (len(pending) == 1) != blocked {
+					t.Fatalf("blocked=%t: pending %v, err %v", blocked, pending, err)
+				}
+				for path, content := range f.files {
+					if !blocked || (path != "/"+id+".md" && path != "/.resource/"+id) || len(content) == 0 {
+						t.Fatalf("unexpected remaining remote file: %q", path)
+					}
+					want := "keep metadata"
+					if path == "/.resource/"+id {
+						want = "keep attachment"
+					}
+					if string(content) != want {
+						t.Fatalf("remote file changed: %q", path)
+					}
+				}
+				wantFiles := 0
+				if blocked {
+					wantFiles = 1
+					if itemType == models.TypeResource {
+						wantFiles++
+					}
+				}
+				if len(f.files) != wantFiles {
+					t.Fatalf("remote files=%d, want %d", len(f.files), wantFiles)
+				}
+			})
+		}
 	}
 }
 
