@@ -16,6 +16,7 @@ rm -rf "$OUT" "$OUT.zip"
 mkdir -p "$OUT"
 cp tmp/gojoplin-desktop.exe "$OUT/"
 cp LICENSE NOTICE "$OUT/"
+cp shell/fonts/OFL.txt "$OUT/"
 
 cat > "$OUT/README.txt" <<'TXT'
 Joplin Lite (Windows, portable)
@@ -38,8 +39,12 @@ License: AGPL-3.0-or-later. This package includes LICENSE and NOTICE; the
 source is https://github.com/lsj5031/joplin-lite.
 TXT
 
-# Compress-Archive ships with Windows; it needs Windows paths.
-powershell -NoProfile -Command \
-  "Compress-Archive -Path '$(cygpath -w "$OUT")\*' -DestinationPath '$(cygpath -w "$OUT.zip")' -Force"
+# Compress-Archive ships with Windows; zip supports cross-packaging on macOS.
+if command -v cygpath >/dev/null 2>&1; then
+  powershell -NoProfile -Command \
+    "Compress-Archive -Path '$(cygpath -w "$OUT")\*' -DestinationPath '$(cygpath -w "$OUT.zip")' -Force"
+else
+  (cd "$OUT" && zip -qr "../$NAME.zip" .)
+fi
 
 echo "packaged $OUT.zip"

@@ -1,6 +1,6 @@
 # Field Notes — Humanist
 
-A quiet place to write: sage binding, warm paper, green ink, and a small folded-page mark.
+A quiet place to write: sage binding, warm paper, green ink, and a small folded-ribbon J mark.
 Keep the workspace spacious and useful. Paper is expressed through color, typography, and
 measure rather than texture, artificial folds, or decorative cards.
 
@@ -49,8 +49,8 @@ footer; the former illustrative route diagram is removed.
 
 ## Mark and assets
 
-The mark is a folded sheet in sage, formed from a few flat polygons. Keep it small beside the
-Optima wordmark. Platform application icons place the same mark on paper for legibility.
+The mark is a folded-ribbon J monogram in sage, formed from a few flat polygons. Keep it small
+beside the Optima wordmark. Platform application icons place the same mark on paper for legibility.
 Keep SVG, favicon, PNG, ICO, ICNS, and Windows executable resources consistent.
 
 ## Interaction and accessibility

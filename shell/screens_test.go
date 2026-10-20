@@ -213,6 +213,9 @@ func TestCaptureReadme(t *testing.T) {
 	app.showNote(selected.ID)
 	tt := ui.NewTester(app.view, 1280, 900)
 	capture(t, dir, "native-workspace", tt)
+	app.dark = true
+	capture(t, dir, "native-dark", tt)
+	app.dark = false
 	click(t, tt, "Edit")
 	capture(t, dir, "native-writing", tt)
 	click(t, tt, "Preview")

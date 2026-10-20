@@ -23,6 +23,7 @@ cp "$BIN" "$APP/Contents/MacOS/Joplin Lite"
 cp "$ICNS" "$APP/Contents/Resources/app-icon.icns"
 # AGPL: ship the license and the attributed notices with the app.
 cp LICENSE NOTICE "$APP/Contents/Resources/licenses/"
+cp shell/fonts/OFL.txt "$APP/Contents/Resources/licenses/"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

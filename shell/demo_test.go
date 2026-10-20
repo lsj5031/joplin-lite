@@ -10,7 +10,6 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/lsj5031/joplin-lite/internal/config"
 	"github.com/lsj5031/joplin-lite/service"
 )
 
@@ -78,7 +77,12 @@ func TestCaptureDemo(t *testing.T) {
 
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
-	work, notes, long := seedCaptures(t, svc)
+	work, _, long := seedCaptures(t, svc)
+	long.Title = "A slower Saturday"
+	long.Body = "## Leave the afternoon open\n\nA walk by the water, a small notebook, and no particular hurry.\n\n### Take along\n\n- [x] A thermos of coffee\n- [ ] The book from the bedside table\n- [ ] Something to write with\n\n> Make room for the things you notice."
+	if err := svc.UpdateNote(long); err != nil {
+		t.Fatal(err)
+	}
 	app.reloadNotebooks()
 	app.reloadTags()
 	app.selectedNotebook = work.ID
@@ -119,14 +123,15 @@ func TestCaptureDemo(t *testing.T) {
 	// Write a note: body first (the new note focuses it), then its title.
 	tt.Key(ui.Cmd, ui.KeyN)
 	d.hold(0.4)
-	tt.Type("The native shell is the product now.")
+	tt.Type("## Along the waterfront")
 	d.hold(0.3)
-	tt.Type("\nOne process, no Chromium, and the same vault ")
+	tt.Type("\n\nTake the long way home.")
 	d.hold(0.5)
-	tt.Type("the clipper writes into.")
+	tt.Type("\n\n- Stop for coffee\n- Bring a book")
 	d.hold(0.5)
 	d.click("Note title")
-	tt.Type("Why native")
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("Sunday plans")
 	d.hold(0.9)
 	tt.Key(ui.Cmd, ui.KeyE)
 	d.hold(1.6)
@@ -155,23 +160,24 @@ func TestCaptureDemo(t *testing.T) {
 	app.narrowEditor = false
 	d.hold(0.6)
 
-	// The status strip's states.
-	app.selectedNotebook = notes.ID
+	// Compare conflicting versions without discarding either one.
+	app.selectedNotebook = conflictsRail
+	app.reloadNotes()
+	d.hold(0.4)
+	d.click("Resolve conflict")
+	d.hold(2.0)
+	d.click("Cancel")
+
+	// Finish in a quiet reading view, in both appearances.
+	app.selectedNotebook = work.ID
 	app.selectedID = long.ID
 	app.reloadNotes()
 	app.showNote(long.ID)
-	st := &syncStatus{}
-	app.be = &backend{status: st, cfg: &config.Config{SyncTarget: 7}}
-	st.finish(nil)
-	d.hold(1.3)
-	st.start()
-	d.hold(1.4)
-	st.finish(fmt.Errorf("push: invalid credentials"))
-	d.hold(1.6)
-	app.be = nil
-	app.selectedNotebook = work.ID
-	app.reloadNotes()
-	d.hold(1.0)
+	app.editing = false
+	app.dark = true
+	d.hold(2.0)
+	app.dark = false
+	d.hold(1.5)
 
 	t.Logf("demo: %d frames in %s (%.1fs at %d fps)", d.n, frames, float64(d.n)/demoFPS, demoFPS)
 }

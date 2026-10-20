@@ -27,7 +27,7 @@ bash shell/bundle.sh    # -> tmp/Joplin Lite.app
 ```
 
 This wraps the same binary with an `Info.plist` (`com.joplinlite.desktop`),
-`app-icon.icns`, and `LICENSE`/`NOTICE` under `Contents/Resources/licenses/`.
+`app-icon.icns`, and `LICENSE`/`NOTICE`/`OFL.txt` under `Contents/Resources/licenses/`.
 The bundle is the package and supplies the icon; the Go code no longer calls
 `Dock.SetIcon`.
 
@@ -38,7 +38,7 @@ bash shell/package-windows.sh   # -> tmp/Joplin-Lite-0.1.0-windows-amd64.zip
 ```
 
 The zip holds `gojoplin-desktop.exe` (GUI subsystem: double-clicking opens no
-console), `LICENSE`, `NOTICE` and a short `README.txt`. The executable's icon
+console), `LICENSE`, `NOTICE`, `OFL.txt` and a short `README.txt`. The executable's icon
 and version block come from `shell/rsrc_windows_amd64.syso`, which `go build`
 embeds automatically; the icon is the same 512 px artwork the web preview and
 the macOS bundle use, and it is resource `#1` because MyGO loads that for the
@@ -247,9 +247,13 @@ screen — panes, filters, menus, dialogs, the narrow drawer and the sync/progre
 states — through the same view and writes 36 PNGs for design review against
 `DESIGN.md`; it is skipped without `CAPTURE_DIR`.
 
+`CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureReadme ./` refreshes the
+public screenshots with synthetic everyday notes in light, dark, writing and
+narrow views. Copy the four `native-*.png` files to `docs/screenshots/`.
+
 `CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureDemo ./` drives the same
 view through a short product tour — preview, search, writing a note, the tag
-menu, settings, the narrow drawer and the footer's sync states — and writes a
+menu, settings, the narrow drawer, conflict comparison and dark mode — and writes a
 PNG per frame at 30 fps (about 26 s). Cut the clip from them with:
 
 ```sh
@@ -277,13 +281,14 @@ cd .. && go build -o tmp/gojoplin.exe .     # the headless CLI
 are immutable and client routes fall back to `index.html`. `GOJOPLIN_WEB_DIR`
 sets the directory without the flag.
 
-## What is still missing
+## Validation limits
 
-- An updated macOS bundle smoke run; Windows is packaged and portable by
-  decision (no installer).
+- Windows is packaged and portable by decision (no installer). See each
+  release's notes for which packaged binaries were runtime-tested.
 - Lock and offline states were exercised headlessly and against a fake
   engine, not by pulling a real network cable or contending with a second
   device on a live target.
 - Real-target gates: clipper pairing has a native Accept/Reject dialog, but it
-  has not been exercised with the actual browser extension yet; Dropbox/S3
-  sync is rehearsal-tested only.
+  has not been exercised with the actual browser extension yet. Dropbox has
+  real encrypted-library dogfooding on macOS and Windows; other targets retain
+  the integration-test evidence described in the root README.

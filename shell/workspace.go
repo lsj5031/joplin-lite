@@ -183,17 +183,21 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// mark is the folded sheet beside the Humanist wordmark.
+// mark is the folded-ribbon J monogram beside the Humanist wordmark.
 func mark(c *ui.Context) ui.Element {
 	return ui.Box(c).Size(26, 32).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 		x, y := r.X, r.Y
-		var page, fold, crease ui.Path
-		page.MoveTo(x+3, y+2).LineTo(x+18, y+2).LineTo(x+24, y+10).LineTo(x+24, y+30).LineTo(x+3, y+30).Close()
-		fold.MoveTo(x+3, y+30).LineTo(x+18, y+12).LineTo(x+24, y+12).LineTo(x+14, y+30).Close()
-		crease.MoveTo(x+18, y+2).LineTo(x+18, y+12).LineTo(x+24, y+12).Close()
-		p.FillPath(&page, routeBlue.Alpha(0.25))
-		p.FillPath(&fold, routeBlue.Alpha(0.75))
-		p.FillPath(&crease, routeBlue)
+		var cap, stem, base, tailIn, tailOut ui.Path
+		cap.MoveTo(x+7, y+3).LineTo(x+24, y+3).LineTo(x+17, y+10).LineTo(x+7, y+10).Close()
+		stem.MoveTo(x+17, y+10).LineTo(x+24, y+3).LineTo(x+24, y+23).LineTo(x+17, y+23).Close()
+		base.MoveTo(x+2, y+23).LineTo(x+24, y+23).LineTo(x+17, y+30).LineTo(x+9, y+30).Close()
+		tailIn.MoveTo(x+9, y+16).LineTo(x+9, y+23).LineTo(x+2, y+23).Close()
+		tailOut.MoveTo(x+2, y+16).LineTo(x+9, y+16).LineTo(x+2, y+23).Close()
+		p.FillPath(&cap, routeBlue.Alpha(0.36))
+		p.FillPath(&stem, routeBlue.Alpha(0.74))
+		p.FillPath(&base, routeBlue)
+		p.FillPath(&tailIn, routeBlue.Alpha(0.56))
+		p.FillPath(&tailOut, routeBlue.Alpha(0.68))
 	})
 }
 
