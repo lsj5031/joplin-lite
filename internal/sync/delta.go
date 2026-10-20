@@ -1,10 +1,13 @@
 package sync
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
@@ -17,6 +20,10 @@ type DeltaResponse struct {
 	Items   []DeltaItem `json:"items"`
 	Cursor  string      `json:"cursor"`
 	HasMore bool        `json:"has_more"`
+	// Versioned flat-file targets can resume an unfinished page. The scope
+	// isolates receipts by endpoint and account; the cursor still commits
+	// only after the whole page succeeds.
+	CheckpointScope string `json:"checkpoint_scope,omitempty"`
 }
 
 // DeltaItem represents a single item in a delta response.
@@ -25,17 +32,20 @@ type DeltaItem struct {
 	ItemName    string `json:"item_name"`
 	Type        int    `json:"type"` // 1=put, 3=delete
 	UpdatedTime int64  `json:"updated_time"`
+	Revision    string `json:"revision,omitempty"`
 }
 
 // PullChanges fetches all changes from the server since the last sync cursor
-// and applies them to the local database.
-func PullChanges(backend SyncBackend, db *store.DB) error {
+// and applies them to the local database. Progress counts successfully applied
+// items; hasMore means the total only includes pages discovered so far.
+func PullChanges(backend SyncBackend, db *store.DB, progress func(done, total int, hasMore bool)) error {
 	cursor, err := db.GetSyncCursor()
 	if err != nil {
 		return fmt.Errorf("cannot get sync cursor: %w", err)
 	}
 
 	syncTarget := backend.SyncTarget()
+	done, total := 0, 0
 
 	for {
 		path := "/api/items/root:/:/delta"
@@ -53,7 +63,18 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 			return fmt.Errorf("cannot parse delta response: %w", err)
 		}
 
+		var checkpoints map[string]store.DownloadCheckpoint
+		if delta.CheckpointScope != "" {
+			checkpoints, err = db.DownloadCheckpoints(delta.CheckpointScope)
+			if err != nil {
+				return fmt.Errorf("cannot read download checkpoints: %w", err)
+			}
+		}
 		slog.Info("processing delta", "items", len(delta.Items), "has_more", delta.HasMore)
+		total += len(delta.Items)
+		if progress != nil {
+			progress(done, total, delta.HasMore)
+		}
 
 		typeCounts := make(map[string]int)
 
@@ -70,12 +91,23 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 			batch := delta.Items[start:end]
 			prefetched := make([][]byte, len(batch))
 			fetchErrs := make([]error, len(batch))
+			resumed := make([]bool, len(batch))
 			var mu sync.Mutex
 
 			_ = parallelEach(len(batch), deltaWorkers, func(i int) error {
 				item := batch[i]
 				if item.Type == 3 {
 					return nil
+				}
+				if saved, ok := checkpoints[item.ItemName]; ok && item.Revision != "" && saved.Revision == item.Revision {
+					resumed[i] = true
+					if isResourceBlob(item.ItemName) {
+						hash, err := downloadedBlobHash(db, item.ItemName)
+						resumed[i] = err == nil && saved.LocalHash != "" && hash == saved.LocalHash
+					}
+					if resumed[i] {
+						return nil
+					}
 				}
 				path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(item.ItemName))
 				content, err := backend.Get(path)
@@ -98,8 +130,28 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 				} else if isResourceBlob(item.ItemName) {
 					typeCounts["resource_blob"]++
 				}
-				if err := applyDeltaItem(backend, db, syncTarget, item, prefetched[i]); err != nil {
-					return fmt.Errorf("cannot apply delta item %s: %w", item.ItemName, err)
+				if resumed[i] {
+					typeCounts["resumed"]++
+				} else {
+					if err := applyDeltaItem(backend, db, syncTarget, item, prefetched[i]); err != nil {
+						return fmt.Errorf("cannot apply delta item %s: %w", item.ItemName, err)
+					}
+					if delta.CheckpointScope != "" && item.Revision != "" && item.Type != 3 {
+						saved := store.DownloadCheckpoint{Revision: item.Revision}
+						if isResourceBlob(item.ItemName) {
+							saved.LocalHash, err = downloadedBlobHash(db, item.ItemName)
+							if err != nil {
+								return fmt.Errorf("cannot verify downloaded blob %s: %w", item.ItemName, err)
+							}
+						}
+						if err := db.SaveDownloadCheckpoint(delta.CheckpointScope, item.ItemName, saved); err != nil {
+							return fmt.Errorf("cannot save download checkpoint: %w", err)
+						}
+					}
+				}
+				done++
+				if progress != nil {
+					progress(done, total, delta.HasMore)
 				}
 			}
 		}
@@ -109,6 +161,11 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 		if err := db.SetSyncCursor(cursor); err != nil {
 			return fmt.Errorf("cannot save sync cursor: %w", err)
 		}
+		if delta.CheckpointScope != "" {
+			if err := db.ClearDownloadCheckpoints(delta.CheckpointScope); err != nil {
+				return fmt.Errorf("cannot clear completed download checkpoints: %w", err)
+			}
+		}
 
 		if !delta.HasMore {
 			break
@@ -116,6 +173,19 @@ func PullChanges(backend SyncBackend, db *store.DB) error {
 	}
 
 	return nil
+}
+
+func downloadedBlobHash(db *store.DB, name string) (string, error) {
+	file, err := os.Open(db.GetResourceFile(extractResourceID(name)))
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
 // applyDeltaItem processes a single delta item. If prefetched is non-nil it is

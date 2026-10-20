@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -240,6 +241,7 @@ type dropboxEntry struct {
 	Tag            string `json:".tag"`
 	PathDisplay    string `json:"path_display"`
 	ServerModified string `json:"server_modified"` // RFC3339 with ms
+	Rev            string `json:"rev"`
 }
 
 type listFolderResponse struct {
@@ -309,7 +311,14 @@ func (b *DropboxBackend) getDelta(rawQuery string) ([]byte, error) {
 		return nil, err
 	}
 	maxMs := cursor
-	resp := DeltaResponse{}
+	// Refresh tokens survive normal access-token renewal. Hash the credential
+	// rather than writing it into the database; a different endpoint/account
+	// must never reuse an unfinished download from this one.
+	identity := b.token.RefreshToken
+	if identity == "" {
+		identity = b.token.AccessToken
+	}
+	resp := DeltaResponse{CheckpointScope: fmt.Sprintf("dropbox:%x", sha256.Sum256([]byte(b.apiBase+"\x00"+b.contentBase+"\x00"+identity)))}
 	for _, e := range entries {
 		if e.Tag != "file" {
 			continue
@@ -330,6 +339,7 @@ func (b *DropboxBackend) getDelta(rawQuery string) ([]byte, error) {
 			ItemName:    name,
 			Type:        1, // PUT
 			UpdatedTime: ts,
+			Revision:    e.Rev,
 		})
 	}
 	resp.Cursor = fmt.Sprintf("%d", maxMs)

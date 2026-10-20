@@ -1,8 +1,10 @@
 package sync
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -344,13 +346,51 @@ func TestPullChanges_RetainsCursorAfterFailedItem(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := PullChanges(backend, db); err == nil {
+			var progress []int
+			if err := PullChanges(backend, db, func(done, total int, hasMore bool) {
+				progress = append(progress, done)
+			}); err == nil {
 				t.Fatal("partial pull reported success")
+			}
+			if !slices.Equal(progress, []int{0}) {
+				t.Fatalf("failed item counted as completed: %v", progress)
 			}
 			if cursor, err := db.GetSyncCursor(); err != nil || cursor != "before" {
 				t.Fatalf("failed item skipped on retry: cursor %q, err %v", cursor, err)
 			}
 		})
+	}
+}
+
+func TestPullChangesProgressAcrossPagesAndBatches(t *testing.T) {
+	db := testDB(t)
+	backend := &mockBackend{responses: map[string][]byte{}}
+	var items []DeltaItem
+	for i := 0; i < 11; i++ {
+		id := fmt.Sprintf("%032x", i+1)
+		items = append(items, DeltaItem{ItemName: id + ".md", Type: 1})
+		backend.responses["/api/items/root:/"+id+".md:/content"] = []byte(models.SerializeNote(
+			&models.Note{ID: id, Title: fmt.Sprintf("Note %d", i), Body: "applied before reporting"}))
+	}
+	page, _ := json.Marshal(DeltaResponse{Items: items[:9], Cursor: "next", HasMore: true})
+	backend.responses["/api/items/root:/:/delta"] = page
+	page, _ = json.Marshal(DeltaResponse{Items: items[9:], Cursor: "finished"})
+	backend.responses["/api/items/root:/:/delta?cursor=next"] = page
+	var got []string
+	if err := PullChanges(backend, db, func(done, total int, more bool) {
+		if done > 0 {
+			note, err := db.GetNote(fmt.Sprintf("%032x", done))
+			if err != nil || note == nil || note.Body != "applied before reporting" {
+				t.Fatalf("progress %d preceded successful application: %+v, %v", done, note, err)
+			}
+		}
+		got = append(got, fmt.Sprintf("%d/%d/%t", done, total, more))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"0/9/true", "1/9/true", "2/9/true", "3/9/true", "4/9/true", "5/9/true", "6/9/true", "7/9/true", "8/9/true", "9/9/true", "9/11/false", "10/11/false", "11/11/false"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("progress = %v, want %v", got, want)
 	}
 }
 

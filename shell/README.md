@@ -73,12 +73,77 @@ same reason in a native dialog.
 
 | Flag | |
 |---|---|
-| `-config` | config file; defaults like `gojoplin serve` (Go Joplin YAML, else Joplin's `settings.json`) |
-| `-data-dir` | override the database directory |
+| `-config` | explicitly select a config file instead of remembered launch settings |
+| `-data-dir` | override the database directory, retaining ordinary config defaults |
 | `-no-sync` | local-only: no remote, no background sync |
 | `-addr` | override the API listen address |
 | `-smoke` | development check: capture `tmp/native-smoke.png` after the first frames, then quit |
 | `-smoke-after` | how long to let the window render before the capture (default 6s) |
+
+### Remembered native startup
+
+Finder launches read `joplin-lite/launch.json` inside Go's `os.UserConfigDir()`:
+`~/Library/Application Support/joplin-lite/launch.json` on macOS,
+`$XDG_CONFIG_HOME/joplin-lite/launch.json` (or `~/.config/joplin-lite/launch.json`)
+on Linux, and `%AppData%\joplin-lite\launch.json` on Windows. Create this file
+explicitly; the app never grants official credential reuse automatically.
+Without this file, prior startup behavior remains: Go Joplin YAML if present,
+otherwise Joplin's settings.json, with the usual Lite data directory default.
+A malformed or unreadable existing launch file fails startup when selected.
+The file is one JSON object
+with exactly these supported fields (paths must be absolute; `~` is not expanded):
+
+```json
+{
+  "config": "/Users/YOU/.config/joplin-desktop/settings.json",
+  "profile": "/Users/YOU/.config/joplin-desktop",
+  "addr": "127.0.0.1:41984",
+  "reuse_official_keychain": true,
+  "dropbox_block_deletes": true
+}
+```
+
+`config` and `profile` are required. `addr` is optional (otherwise the loaded
+config's API address applies); both booleans default to false. This file contains
+no credentials. Prefer a private directory and mode `0600` for the file.
+The app does not write it or rewrite official `settings.json`.
+
+Explicit `-config`, `-data-dir`, `-addr`, or `-no-sync` flags select an independent
+launch and bypass this file, including its credential permissions and deletion
+guard. `GOJOPLIN_CONFIG_PATH` does the same. `-data-dir` alone continues to use
+ordinary config defaults. Other config/environment behavior follows the existing
+config loader. Development-only smoke flags do not change profile selection.
+
+With `reuse_official_keychain: true`, only Dropbox target 7 is accepted. The
+selected profile must already contain `database.sqlite`, SQLite setting
+`sync.7.auth`, and encrypted key-value entry
+`KeychainServiceDriver.secureStore.setting.encryption.masterPassword`.
+The shell reads these from that profile and asks macOS Keychain for service
+`Joplin Safe Storage`, account `Joplin Key`; macOS may prompt for access.
+Only the supported Base64 `v10` AES-CBC format is accepted, using
+PBKDF2-HMAC-SHA1 (`saltysalt`, 1003 iterations, 16-byte key), a 16-space IV,
+and PKCS7 padding. The public production Dropbox app key is supplied when
+absent from the config. Missing credentials, denied Keychain access, unsupported
+ciphertext, or conflicting saved native target/password settings stop startup.
+
+Recovered credentials stay in memory: no FIFO, argv/env secrets, new plaintext
+credential files, or token-cache reads/writes in this mode. Settings receives
+an empty master-password field, even with **Show passwords** enabled. Saving
+Settings keeps the recovered password in memory and stores an empty password
+field; changing the protected target or entering a master password is rejected.
+To change those choices, edit the launch settings explicitly. The deletion guard
+is applied before creating each Dropbox backend, including after Settings saves.
+It blocks outgoing remote deletions; it does not disable local editing.
+
+Last successful sync time is stored in the selected profile's local `key_values`
+as `desktop.sync.last_success.<SHA-256 of effective target identity/config>`,
+with an RFC3339Nano UTC value. It is restored before the initial pass, remains
+visible through failures, and is never advanced by a failed pass. Another target,
+location, or account gets its own status. Dropbox uses the effective token's
+account ID (or refresh/bearer token when no ID exists), so a token change without
+an account ID conservatively starts with no recorded success. No credential
+values are stored in the timestamp key/value. A retiring engine cannot publish
+its old target's result in the replacement engine's footer.
 
 `-no-sync` is needed for a config without a sync target: the YAML loader
 defaults an omitted `sync.target` to S3 (target 8) and validation then asks
@@ -151,8 +216,9 @@ URL/email/password), the E2EE master password and the clipper API token
 `key_values` table — never in the config file, which may be Joplin desktop's
 `settings.json` — and are applied on save: the clipper accepts only the new
 token at once, and the sync loop is replaced after its current pass ends.
-The master password is stored locally and unencrypted, like Joplin's own
-settings; it never leaves the device. Server and master passwords are masked
+Outside official Keychain reuse mode, the master password is stored locally and
+unencrypted; use the explicit Keychain reuse launch mode above to keep recovered
+passwords out of storage. Server and master passwords are masked
 when Settings opens; **Show passwords** reveals them for the current dialog.
 Dropbox and S3 targets still come from
 the config file and are kept (shown read-only) by the dialog.

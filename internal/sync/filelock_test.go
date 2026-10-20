@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -42,7 +43,7 @@ func TestFileLock_AcquireAndRelease(t *testing.T) {
 	if !ok || l == nil || l.Type != LockTypeSync {
 		t.Fatalf("AcquireLock returned %+v, want a SYNC *Lock", lock)
 	}
-	lockPath := filepath.Join(dir, "locks", "1_3_joplin-lite.json")
+	lockPath := filepath.Join(dir, "locks", lockFileName(l))
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Fatalf("lock file not written: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestFileLock_ExclusiveLockRefusesAcquire(t *testing.T) {
 		t.Fatalf("AcquireLock = %v, want ErrExclusiveLock", err)
 	}
 	// We must not have left our own lock file behind.
-	if _, err := os.Stat(filepath.Join(dir, "locks", "1_3_joplin-lite.json")); !os.IsNotExist(err) {
+	if files, err := os.ReadDir(filepath.Join(dir, "locks")); err != nil || len(files) != 1 {
 		t.Fatalf("our lock file exists after refused acquire (stat err=%v)", err)
 	}
 
@@ -90,7 +91,7 @@ func TestFileLock_RefreshAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
-	lockPath := filepath.Join(dir, "locks", "1_3_joplin-lite.json")
+	lockPath := filepath.Join(dir, "locks", lockFileName(lock.(*Lock)))
 
 	// Age the lock to 2 min (still active) and refresh: the mtime is renewed.
 	when := time.Now().Add(-2 * time.Minute)
@@ -120,6 +121,69 @@ func TestFileLock_RefreshAndExpiry(t *testing.T) {
 	if err := b.ReleaseLock(lock); err != nil {
 		t.Fatalf("ReleaseLock: %v", err)
 	}
+}
+
+func TestFileLock_ClientsReleaseOnlyTheirOwnLock(t *testing.T) {
+	dir := t.TempDir()
+	first, second := NewLocalFolderBackend(dir), NewLocalFolderBackend(dir)
+	firstLock, err := first.AcquireLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { first.ReleaseLock(firstLock) })
+	secondLock, err := second.AcquireLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.ReleaseLock(secondLock); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.RefreshLock(firstLock); err != nil {
+		t.Fatalf("another client's release invalidated our live lock: %v", err)
+	}
+}
+
+type lostLockBackend struct {
+	*LocalFolderBackend
+	ctx context.Context
+}
+
+func (b *lostLockBackend) BeginSync(ctx context.Context) func() {
+	b.ctx = ctx
+	return func() {}
+}
+
+func (b *lostLockBackend) Get(string) ([]byte, error) {
+	<-b.ctx.Done()
+	return nil, b.ctx.Err()
+}
+
+func (b *lostLockBackend) RefreshLock(interface{}) error { return ErrLockExpired }
+
+func TestEngineLostLockCancelsPull(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		backend := &lostLockBackend{LocalFolderBackend: NewLocalFolderBackend(dir)}
+		engine := NewEngine(NewTracedBackend(backend, "test"), testDB(t), "")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		result := make(chan error, 1)
+		go func() { result <- engine.Sync(ctx) }()
+		time.Sleep(LockRefreshInterval + time.Second)
+		select {
+		case err := <-result:
+			if !errors.Is(err, ErrLockExpired) {
+				t.Fatalf("lost lock = %v, want ErrLockExpired", err)
+			}
+		default:
+			cancel()
+			<-result
+			t.Fatal("sync continued pulling after losing its lock")
+		}
+		if files, err := os.ReadDir(filepath.Join(dir, "locks")); err != nil || len(files) != 0 {
+			t.Fatalf("cancelled pass did not release its lock: %v", err)
+		}
+	})
 }
 
 func TestActiveLock_ExclusiveTieBreak(t *testing.T) {

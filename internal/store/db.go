@@ -186,7 +186,13 @@ func (db *DB) schemaVersion() int {
 // otherwise never get it. Names that could collide with a real Joplin table
 // are prefixed (`jl_revisions`; Joplin's own `revisions` holds note history).
 func (db *DB) ensureSidecarSchema() error {
-	for _, stmt := range []string{createItemRawSQL, createRevisionsSQL} {
+	for _, stmt := range []string{createItemRawSQL, createRevisionsSQL, `CREATE TABLE IF NOT EXISTS jl_sync_downloads (
+		scope TEXT NOT NULL,
+		item_name TEXT NOT NULL,
+		revision TEXT NOT NULL,
+		local_hash TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (scope, item_name)
+	)`} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("sidecar schema statement failed: %w\nSQL: %s", err, stmt)
 		}

@@ -82,7 +82,7 @@ func TestS3Backend_Locks(t *testing.T) {
 	if _, err := b.AcquireLock(); !errors.Is(err, ErrExclusiveLock) {
 		t.Fatalf("AcquireLock = %v, want ErrExclusiveLock", err)
 	}
-	if _, ok := f.data["locks/1_3_joplin-lite.json"]; ok {
+	if len(f.data) != 1 {
 		t.Fatal("our lock object exists after a refused acquire")
 	}
 	if err := f.DeleteObject(context.Background(), "locks/2_1_desktop.json"); err != nil {
@@ -94,7 +94,8 @@ func TestS3Backend_Locks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
-	if _, ok := f.data["locks/1_3_joplin-lite.json"]; !ok {
+	lockPath := "locks/" + lockFileName(lock.(*Lock))
+	if _, ok := f.data[lockPath]; !ok {
 		t.Fatalf("lock object not written: %v", f.data)
 	}
 	if err := b.RefreshLock(lock); err != nil {
@@ -103,7 +104,7 @@ func TestS3Backend_Locks(t *testing.T) {
 	if err := b.ReleaseLock(lock); err != nil {
 		t.Fatalf("ReleaseLock: %v", err)
 	}
-	if _, ok := f.data["locks/1_3_joplin-lite.json"]; ok {
+	if _, ok := f.data[lockPath]; ok {
 		t.Fatal("lock object still present after release")
 	}
 }

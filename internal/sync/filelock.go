@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Flat-file lock protocol for file-based sync targets (Joplin's LockHandler,
@@ -74,8 +76,9 @@ type fileLockManager struct {
 	nowMs      func() int64
 }
 
-func newFileLockManager(store lockStore, clientType int, clientID string) *fileLockManager {
-	return &fileLockManager{store: store, clientType: clientType, clientID: clientID,
+func newFileLockManager(store lockStore, clientType int, clientPrefix string) *fileLockManager {
+	// Distinct backend instances must never refresh or release each other's lock.
+	return &fileLockManager{store: store, clientType: clientType, clientID: clientPrefix + "-" + uuid.NewString(),
 		nowMs: func() int64 { return time.Now().UnixMilli() }}
 }
 

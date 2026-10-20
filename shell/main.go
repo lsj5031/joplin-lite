@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	cfgPath  = flag.String("config", "", "config file (default: ~/.config/go-joplin/config.yaml, else Joplin's settings.json)")
+	cfgPath  = flag.String("config", "", "config file (otherwise remembered launch settings, then normal config defaults)")
 	dataDir  = flag.String("data-dir", "", "database directory to open instead of the configured one")
 	noSync   = flag.Bool("no-sync", false, "serve the local database without syncing")
 	addrFlag = flag.String("addr", "", "override the API listen address, e.g. 127.0.0.1:41888")
@@ -49,7 +49,24 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		var err error
-		be, err = startBackend(*cfgPath, *dataDir, *noSync, *addrFlag)
+		path, err := launchSettingsPath()
+		if err != nil {
+			showFatal(err)
+			return
+		}
+		explicit := false
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "config", "data-dir", "addr", "no-sync":
+				explicit = true
+			}
+		})
+		launch, err := resolveLaunch(path, *cfgPath, *dataDir, *addrFlag, explicit)
+		if err != nil {
+			showFatal(err)
+			return
+		}
+		be, err = startBackend(launch.Config, launch.Profile, *noSync, launch.Addr, launch)
 		if err != nil {
 			showFatal(err)
 			return

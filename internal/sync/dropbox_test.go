@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/lsj5031/joplin-lite/internal/config"
 	"github.com/lsj5031/joplin-lite/internal/models"
+	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
 // fakeDropbox emulates the Dropbox API v2 endpoints the driver uses, plus the
@@ -107,6 +109,7 @@ func (f *fakeDropbox) handler() http.Handler {
 				Tag:            "file",
 				PathDisplay:    p,
 				ServerModified: f.times[p].UTC().Format(time.RFC3339Nano),
+				Rev:            fmt.Sprintf("%x", sha256.Sum256(f.files[p])),
 			})
 		}
 		resp.HasMore = end < len(paths)
@@ -458,6 +461,8 @@ func TestDropboxEngineInventoryIsCompleteAndFreshEachPass(t *testing.T) {
 	b.apiBase, b.contentBase = srv.URL, srv.URL
 	db := testDB(t)
 	engine := NewEngine(NewTracedBackend(b, "dropbox"), db, "")
+	var phases []string
+	engine.OnProgress = func(phase string) { phases = append(phases, phase) }
 	first := &models.Note{ID: strings.Repeat("a", 32), Title: "First", Body: "retain the complete inventory", CreatedTime: 1000, UpdatedTime: 1000}
 	second := &models.Note{ID: strings.Repeat("b", 32), Title: "Second", Body: "fresh next pass", CreatedTime: 2000, UpdatedTime: 2000}
 	f.put("/"+first.ID+".md", []byte(models.SerializeNote(first)))
@@ -469,6 +474,9 @@ func TestDropboxEngineInventoryIsCompleteAndFreshEachPass(t *testing.T) {
 	}
 	if got := rootListings.Load(); got != 1 {
 		t.Errorf("full inventories in first pass = %d, want 1", got)
+	}
+	if got := strings.Join(phases, "|"); got != "Checking remote|Downloading — 0 of 1|Downloading — 1 of 1|Checking library|Uploading|Finishing" {
+		t.Errorf("first-pass progress = %s", got)
 	}
 	f.mu.Lock()
 	delete(f.files, "/"+first.ID+".md")
@@ -592,32 +600,33 @@ func TestDropboxBackend_Locks(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "exclusive") {
 		t.Fatalf("AcquireLock error = %v, want the exclusive-lock refusal", err)
 	}
-	if _, ok := f.files["/locks/1_3_joplin-lite.json"]; ok {
+	if len(f.files) != 1 {
 		t.Fatal("our lock file exists after a refused acquire")
 	}
 	f.mu.Lock()
 	delete(f.files, "/locks/2_1_desktop.json")
 	f.mu.Unlock()
 
-	// Acquire writes locks/1_3_joplin-lite.json on Dropbox.
+	// Acquire writes this backend's own lock on Dropbox.
 	lock, err := b.AcquireLock()
 	if err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
-	if _, ok := f.files["/locks/1_3_joplin-lite.json"]; !ok {
+	lockPath := "/locks/" + lockFileName(lock.(*Lock))
+	if _, ok := f.files[lockPath]; !ok {
 		t.Fatalf("lock file not uploaded: %v", keysOf(f.files))
 	}
 
 	// The production tracing wrapper must preserve the refresh capability.
 	old := time.Now().Add(-time.Minute)
 	f.mu.Lock()
-	f.times["/locks/1_3_joplin-lite.json"] = old
+	f.times[lockPath] = old
 	f.mu.Unlock()
 	if err := NewTracedBackend(b, "dropbox").(LockRefresher).RefreshLock(lock); err != nil {
 		t.Fatalf("RefreshLock: %v", err)
 	}
 	f.mu.Lock()
-	refreshed := f.times["/locks/1_3_joplin-lite.json"]
+	refreshed := f.times[lockPath]
 	f.mu.Unlock()
 	if !refreshed.After(old) {
 		t.Fatal("traced refresh did not update the remote lock")
@@ -625,7 +634,7 @@ func TestDropboxBackend_Locks(t *testing.T) {
 	if err := b.ReleaseLock(lock); err != nil {
 		t.Fatalf("ReleaseLock: %v", err)
 	}
-	if _, ok := f.files["/locks/1_3_joplin-lite.json"]; ok {
+	if _, ok := f.files[lockPath]; ok {
 		t.Fatal("lock file still present after release")
 	}
 }
@@ -774,4 +783,152 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
+	for _, change := range []string{"unchanged", "remote revision", "missing blob", "corrupt blob", "different account", "different endpoint", "renewed access token", "apply failure"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFakeDropbox()
+			for i := 1; i <= 8; i++ {
+				f.put(fmt.Sprintf("/.resource/%032x", i), []byte(fmt.Sprintf("resource %d", i)))
+			}
+			note := &models.Note{ID: strings.Repeat("a", 32), Title: "Checkpoint", Body: "preserved across restart", CreatedTime: 1000, UpdatedTime: 1000}
+			last := &models.Note{ID: strings.Repeat("b", 32), Title: "Retry me", CreatedTime: 2000, UpdatedTime: 2000}
+			f.put("/"+note.ID+".md", []byte(models.SerializeNote(note)))
+			f.put("/"+last.ID+".md", []byte(models.SerializeNote(last)))
+			var fail atomic.Bool
+			fail.Store(change != "apply failure")
+			var mu sync.Mutex
+			downloads := make(map[string]int)
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/2/files/download" {
+					var arg struct{ Path string }
+					_ = json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg)
+					mu.Lock()
+					downloads[arg.Path]++
+					mu.Unlock()
+					if arg.Path == "/"+last.ID+".md" && fail.Load() {
+						http.Error(w, "interrupted download", http.StatusServiceUnavailable)
+						return
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			endpoint := srv.URL
+			backend := func(access, refresh string) *DropboxBackend {
+				b := newDropboxBackend(nil, &DropboxToken{AccessToken: access, RefreshToken: refresh}, "")
+				b.apiBase, b.contentBase = endpoint, endpoint
+				return b
+			}
+			dir := t.TempDir()
+			db, err := store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if change == "apply failure" {
+				if _, err := db.Exec(`CREATE TRIGGER reject_last BEFORE INSERT ON notes WHEN NEW.id = '` + last.ID + `' BEGIN SELECT RAISE(ABORT, 'injected apply failure'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := PullChanges(backend("access", "account-one"), db, nil); err == nil {
+				t.Fatal("interrupted pull succeeded")
+			}
+			if cursor, err := db.GetSyncCursor(); err != nil || cursor != "" {
+				t.Fatalf("unfinished page advanced cursor: %q, %v", cursor, err)
+			}
+			if got, err := db.GetNote(note.ID); err != nil || got == nil || got.Body != note.Body {
+				t.Fatalf("completed note not durable: %+v, %v", got, err)
+			}
+			blobID := fmt.Sprintf("%032x", 1)
+			access, refresh := "access", "account-one"
+			switch change {
+			case "remote revision":
+				f.mu.Lock()
+				f.files["/.resource/"+blobID] = []byte("new revision, identical timestamp")
+				f.mu.Unlock()
+			case "missing blob":
+				if err := os.Remove(db.GetResourceFile(blobID)); err != nil {
+					t.Fatal(err)
+				}
+			case "corrupt blob":
+				if err := os.WriteFile(db.GetResourceFile(blobID), []byte("truncated"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "different account":
+				refresh = "account-two"
+			case "different endpoint":
+				other := httptest.NewServer(srv.Config.Handler)
+				defer other.Close()
+				endpoint = other.URL
+			case "renewed access token":
+				access = "renewed"
+			case "apply failure":
+				if _, err := db.Exec(`DROP TRIGGER reject_last`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err = store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			fail.Store(false)
+			var completed int
+			if err := PullChanges(backend(access, refresh), db, func(done, total int, more bool) {
+				completed = done
+				if total != 10 || more {
+					t.Errorf("progress total=%d more=%t", total, more)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if completed != 10 {
+				t.Fatalf("resume progress=%d, want 10", completed)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for i := 1; i <= 8; i++ {
+				want := 1
+				if change == "different account" || change == "different endpoint" || (i == 1 && (change == "remote revision" || change == "missing blob" || change == "corrupt blob")) {
+					want = 2
+				}
+				path := fmt.Sprintf("/.resource/%032x", i)
+				if downloads[path] != want {
+					t.Errorf("%s downloaded %d times, want %d", path, downloads[path], want)
+				}
+			}
+			wantNote := 1
+			if change == "different account" || change == "different endpoint" {
+				wantNote = 2
+			}
+			if downloads["/"+note.ID+".md"] != wantNote || downloads["/"+last.ID+".md"] != 2 {
+				t.Errorf("note download counts: %v", downloads)
+			}
+			wantBytes := "resource 1"
+			if change == "remote revision" {
+				wantBytes = "new revision, identical timestamp"
+			}
+			if data, err := os.ReadFile(db.GetResourceFile(blobID)); err != nil || string(data) != wantBytes {
+				t.Fatalf("resumed blob=%q, %v", data, err)
+			}
+			if cursor, err := db.GetSyncCursor(); err != nil || cursor == "" {
+				t.Fatalf("completed page cursor=%q, %v", cursor, err)
+			}
+			var receipts int
+			if err := db.QueryRow(`SELECT count(*) FROM jl_sync_downloads`).Scan(&receipts); err != nil {
+				t.Fatal(err)
+			}
+			if wantNote == 1 && receipts != 0 {
+				t.Errorf("completed page retains %d receipts", receipts)
+			}
+			if got, err := db.GetNote(last.ID); err != nil || got == nil || got.Title != last.Title {
+				t.Fatalf("failed item not retried: %+v, %v", got, err)
+			}
+		})
+	}
 }

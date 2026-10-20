@@ -23,6 +23,42 @@ func (db *DB) SetSyncCursor(cursor string) error {
 	return err
 }
 
+// DownloadCheckpoint records an applied remote revision, not a sync cursor.
+// Resource bytes are checked against LocalHash before reusing the receipt.
+type DownloadCheckpoint struct {
+	Revision  string
+	LocalHash string
+}
+
+func (db *DB) DownloadCheckpoints(scope string) (map[string]DownloadCheckpoint, error) {
+	rows, err := db.Query(`SELECT item_name, revision, local_hash FROM jl_sync_downloads WHERE scope = ?`, scope)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make(map[string]DownloadCheckpoint)
+	for rows.Next() {
+		var name string
+		var item DownloadCheckpoint
+		if err := rows.Scan(&name, &item.Revision, &item.LocalHash); err != nil {
+			return nil, err
+		}
+		items[name] = item
+	}
+	return items, rows.Err()
+}
+
+func (db *DB) SaveDownloadCheckpoint(scope, name string, item DownloadCheckpoint) error {
+	_, err := db.Exec(`INSERT OR REPLACE INTO jl_sync_downloads (scope, item_name, revision, local_hash) VALUES (?, ?, ?, ?)`,
+		scope, name, item.Revision, item.LocalHash)
+	return err
+}
+
+func (db *DB) ClearDownloadCheckpoints(scope string) error {
+	_, err := db.Exec(`DELETE FROM jl_sync_downloads WHERE scope = ?`, scope)
+	return err
+}
+
 // GetActiveMasterKeyID returns the active E2EE master key ID from sync info (empty if not set).
 func (db *DB) GetActiveMasterKeyID() (string, error) {
 	var id string

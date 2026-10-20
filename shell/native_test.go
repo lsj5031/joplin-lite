@@ -1477,6 +1477,12 @@ func TestSyncNoticeStates(t *testing.T) {
 			hint: "last synced 15:04",
 		},
 		{
+			name: "downloading after success",
+			snap: syncSnapshot{Enabled: true, Running: true, Phase: "Downloading — 2138 of 7541", Last: last},
+			line: "Downloading — 2138 of 7541…",
+			hint: "last synced 15:04",
+		},
+		{
 			name: "never synced",
 			snap: syncSnapshot{Enabled: true},
 			line: "Not synced yet",
@@ -1610,7 +1616,7 @@ func TestNativeFooterShowsPausedStates(t *testing.T) {
 	if !tt.HasText("Sync queued…") {
 		t.Fatalf("running state not shown; texts = %v", tt.Texts())
 	}
-	for _, phase := range []string{"Checking remote", "Checking library", "Decrypting", "Uploading", "Finishing"} {
+	for _, phase := range []string{"Checking remote", "Downloading — 0 of 7541", "Downloading — 2138 of 7541", "Downloading — 9 of 9+", "Downloading — 7541 of 7541", "Checking library", "Decrypting", "Uploading", "Finishing"} {
 		st.progress(phase)
 		tt.Frame()
 		if !tt.HasText(phase + "…") {

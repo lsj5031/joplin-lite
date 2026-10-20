@@ -74,7 +74,7 @@ type LockRefresher interface {
 // startLockRefresh refreshes the held lock until the returned stop is called.
 // An expired lock is not re-acquired — the failure is reported and the loop
 // stops (Joplin 'lockExpired' cancels the operation).
-func startLockRefresh(r LockRefresher, lock interface{}) func() {
+func startLockRefresh(r LockRefresher, lock interface{}, cancel context.CancelCauseFunc) func() {
 	stopCh := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -88,6 +88,7 @@ func startLockRefresh(r LockRefresher, lock interface{}) func() {
 			case <-ticker.C:
 				if err := r.RefreshLock(lock); err != nil {
 					slog.Error("lock refresh failed", "error", err)
+					cancel(fmt.Errorf("sync lock refresh failed: %w", err))
 					return
 				}
 			}
@@ -108,7 +109,12 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 		return nil
 	}
 	defer e.syncMu.Unlock()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	defer func() {
+		if cause := context.Cause(ctx); cause != nil {
+			err = cause
+		}
 		if err == nil {
 			slog.Info("sync completed")
 		}
@@ -146,7 +152,7 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 	}()
 	if lock != nil {
 		if refresher, ok := e.backend.(LockRefresher); ok {
-			defer startLockRefresh(refresher, lock)()
+			defer startLockRefresh(refresher, lock, cancel)()
 		}
 	}
 
@@ -159,7 +165,13 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 
 	// Pull changes from server
 	slog.Info("pulling changes from server")
-	if err := PullChanges(e.backend, e.db); err != nil {
+	if err := PullChanges(e.backend, e.db, func(done, total int, hasMore bool) {
+		suffix := ""
+		if hasMore {
+			suffix = "+"
+		}
+		e.progress(fmt.Sprintf("Downloading — %d of %d%s", done, total, suffix))
+	}); err != nil {
 		return fmt.Errorf("pull failed: %w", err)
 	}
 

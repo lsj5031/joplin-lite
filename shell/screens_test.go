@@ -387,5 +387,13 @@ func TestCaptureScreens(t *testing.T) {
 	st.progress("Checking library")
 	tt.SetSize(900, 640)
 	capture(t, dir, "31-narrow-sync-phase", tt)
+	tt.SetSize(1280, 800)
+	for i, phase := range []string{"Downloading — 0 of 7541", "Downloading — 2138 of 7541", "Downloading — 9 of 9+", "Downloading — 7541 of 7541"} {
+		st.progress(phase)
+		capture(t, dir, fmt.Sprintf("%02d-download-progress", 32+i), tt)
+	}
+	st.progress("Downloading — 2138 of 7541")
+	tt.SetSize(900, 640)
+	capture(t, dir, "36-narrow-download-progress", tt)
 	app.be = nil
 }

@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -56,6 +58,7 @@ type backend struct {
 	closed     bool
 
 	status *syncStatus
+	launch launchSettings
 
 	// logRestore closes the desktop log file and puts the previous default
 	// logger back; nil for a backend that never opened one.
@@ -87,6 +90,7 @@ type syncStatus struct {
 	err      string
 	kind     syncFailure
 	retry    time.Time
+	persist  func(time.Time) error
 }
 
 // syncSnapshot is a consistent copy of the sync state.
@@ -144,6 +148,11 @@ func (s *syncStatus) finish(err error) {
 	} else {
 		s.err = ""
 		s.last = time.Now()
+		if s.persist != nil {
+			if err := s.persist(s.last); err != nil {
+				slog.Warn("cannot persist last successful sync time")
+			}
+		}
 	}
 	s.mu.Unlock()
 }
@@ -171,10 +180,23 @@ func (s *syncStatus) snapshot(enabled bool) syncSnapshot {
 	}
 }
 
-func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ *backend, err error) {
-	cfg, err := config.Load(cfgPath, config.Overrides{NoSync: noSync})
+func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string, launches ...launchSettings) (_ *backend, err error) {
+	var launch launchSettings
+	if len(launches) != 0 {
+		launch = launches[0]
+	}
+	// Official settings.json omits secure credentials and the public app key.
+	// Defer remote validation until the explicit recovery below supplies them.
+	cfg, err := config.Load(cfgPath, config.Overrides{NoSync: noSync || launch.ReuseOfficialKeychain})
 	if err != nil {
 		return nil, err
+	}
+	if launch.ReuseOfficialKeychain {
+		cfg.NoSync = noSync
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("GOJOPLIN_NO_SYNC"))) {
+		case "1", "true", "yes", "on":
+			cfg.NoSync = true
+		}
 	}
 	if dataDir != "" {
 		cfg.DataDir = dataDir
@@ -185,6 +207,18 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ 
 	cfg.DataDir, err = filepath.Abs(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve database directory: %w", err)
+	}
+	if launch.ReuseOfficialKeychain {
+		keychain := launch.keychain
+		if keychain == nil {
+			keychain = officialKeychainPassword
+		}
+		if err := recoverOfficialCredentials(cfg, keychain); err != nil {
+			return nil, err
+		}
+	}
+	if launch.DropboxBlockDeletes {
+		cfg.DropboxBlockDeletes = true
 	}
 
 	// Log to the data directory from here on, so a launch without a console
@@ -225,7 +259,15 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ 
 		db.Close()
 		return nil, err
 	} else if ok {
+		if launch.ReuseOfficialKeychain && (stored.Target != 7 || stored.MasterPassword != "") {
+			db.Close()
+			return nil, errors.New("stored native settings conflict with official Keychain credentials")
+		}
+		master := cfg.MasterPassword
 		overlayStoredSettings(cfg, stored)
+		if launch.ReuseOfficialKeychain {
+			cfg.MasterPassword = master
+		}
 	}
 
 	// A configured token keeps the Data API stable across launches (the web
@@ -246,7 +288,7 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ 
 	// error (and a settings-save error), not a loop that fails later.
 	var remote jsync.SyncBackend
 	if !cfg.NoSync && cfg.SyncTarget != 0 {
-		remote, err = newSyncBackend(cfg)
+		remote, err = newSyncBackend(cfg, launch.ReuseOfficialKeychain)
 		if err != nil {
 			db.Close()
 			return nil, err
@@ -279,6 +321,7 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ 
 		cfg:        cfg,
 		cncl:       ctx,
 		status:     status,
+		launch:     launch,
 		logRestore: logRestore,
 	}
 
@@ -301,6 +344,7 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string) (_ 
 	b.syncMu.Unlock()
 	if startErr != nil {
 		cancel()
+		_ = httpSrv.Close()
 		db.Close()
 		return nil, startErr
 	}
@@ -325,6 +369,17 @@ func overlayStoredSettings(cfg *config.Config, s desktopSettings) {
 // startSyncLocked starts the background loop. The caller holds syncMu (or is
 // still constructing the backend). A nil remote means "no sync".
 func (b *backend) startSyncLocked(remote jsync.SyncBackend) error {
+	b.status.reset()
+	key := syncSuccessKey(b.cfg, b.launch.ReuseOfficialKeychain)
+	raw, err := b.db.GetSetting(key)
+	if err != nil {
+		return fmt.Errorf("load last successful sync time: %w", err)
+	}
+	last, _ := time.Parse(time.RFC3339Nano, raw)
+	b.status.mu.Lock()
+	b.status.last = last.Local()
+	b.status.persist = func(at time.Time) error { return b.db.SetSetting(key, at.UTC().Format(time.RFC3339Nano)) }
+	b.status.mu.Unlock()
 	if remote == nil {
 		b.engine = nil
 		slog.Info("sync disabled: serving the local database only")
@@ -333,12 +388,12 @@ func (b *backend) startSyncLocked(remote jsync.SyncBackend) error {
 	ctx, cancel := context.WithCancel(b.cncl)
 	engine := jsync.NewEngine(remote, b.db, b.cfg.MasterPassword)
 	engine.OnProgress = b.status.progress
+	status := b.status
 	done := make(chan struct{})
 	b.engine, b.syncCancel, b.syncDone = engine, cancel, done
-	b.status.reset()
 	go func() {
 		defer close(done)
-		syncLoop(ctx, engine, b.status)
+		syncLoop(ctx, engine, status)
 	}()
 	return nil
 }
@@ -353,6 +408,10 @@ func (b *backend) Settings() desktopSettings {
 	}
 	b.syncMu.Lock()
 	cfg := *b.cfg
+	if b.launch.ReuseOfficialKeychain {
+		cfg.MasterPassword = ""
+		cfg.NoSync = false // Keep the protected target visible even on a local-only run.
+	}
 	b.syncMu.Unlock()
 	return settingsFromConfig(&cfg)
 }
@@ -375,12 +434,24 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 	}
 	cfg := *b.cfg
 	b.syncMu.Unlock()
+	if b.launch.ReuseOfficialKeychain && (s.Target != 7 || s.MasterPassword != "") {
+		return errors.New("official Keychain mode keeps the Dropbox target and its master password; edit launch settings to change them")
+	}
+	master := cfg.MasterPassword
+	disabled := cfg.NoSync
 	s.applyTo(&cfg)
+	if b.launch.ReuseOfficialKeychain {
+		cfg.MasterPassword = master
+		cfg.NoSync = disabled
+	}
+	if b.launch.DropboxBlockDeletes {
+		cfg.DropboxBlockDeletes = true
+	}
 
 	var remote jsync.SyncBackend
 	if !cfg.NoSync && cfg.SyncTarget != 0 {
 		var err error
-		remote, err = newSyncBackend(&cfg)
+		remote, err = newSyncBackend(&cfg, b.launch.ReuseOfficialKeychain)
 		if err != nil {
 			return fmt.Errorf("cannot use this sync target: %w", err)
 		}
@@ -396,6 +467,9 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 	}
 	b.syncCancel, b.syncDone = nil, nil
 	b.engine = nil
+	// A finishing old pass may still persist its own target's timestamp, but
+	// cannot publish that result as the newly selected target's status.
+	b.status = &syncStatus{}
 	b.cfg = &cfg
 	b.token = cfg.APIToken
 	b.syncGen++
@@ -425,16 +499,17 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 // SyncNow asks the sync loop to run immediately. It reports false when the
 // instance was started without a remote (-no-sync or no target).
 func (b *backend) SyncNow() bool {
-	if b == nil || b.status == nil {
+	if b == nil {
 		return false
 	}
 	b.syncMu.Lock()
 	engine := b.engine
+	status := b.status
 	b.syncMu.Unlock()
-	if engine == nil {
+	if engine == nil || status == nil {
 		return false
 	}
-	b.status.request()
+	status.request()
 	engine.TriggerSync()
 	return true
 }
@@ -446,13 +521,17 @@ func (b *backend) TriggerSync() { b.SyncNow() }
 // counts as enabled whenever the effective config has a target, even during
 // the short window where a settings change has no engine yet.
 func (b *backend) SyncState() syncSnapshot {
-	if b == nil || b.status == nil {
+	if b == nil {
 		return syncSnapshot{}
 	}
 	b.syncMu.Lock()
 	enabled := b.cfg != nil && !b.cfg.NoSync && b.cfg.SyncTarget != 0
+	status := b.status
 	b.syncMu.Unlock()
-	return b.status.snapshot(enabled)
+	if status == nil {
+		return syncSnapshot{}
+	}
+	return status.snapshot(enabled)
 }
 
 // baseURLFor turns the bound address into a URL the webview can fetch. A
@@ -470,11 +549,16 @@ func baseURLFor(addr net.Addr) string {
 
 // newSyncBackend selects the configured remote. The S3 backend is compiled
 // out unless the binary is built with -tags s3, and its stub explains that.
-func newSyncBackend(cfg *config.Config) (jsync.SyncBackend, error) {
+func newSyncBackend(cfg *config.Config, memoryOnly ...bool) (jsync.SyncBackend, error) {
 	switch cfg.SyncTarget {
 	case 2:
 		return jsync.NewTracedBackend(jsync.NewLocalFolderBackend(cfg.LocalDir), "local"), nil
 	case 7:
+		if len(memoryOnly) != 0 && memoryOnly[0] {
+			copy := *cfg
+			copy.DataDir = "" // Ignore token cache; recovered credentials stay in memory.
+			cfg = &copy
+		}
 		b, err := jsync.NewDropboxBackend(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("Dropbox backend: %w", err)
@@ -493,6 +577,41 @@ func newSyncBackend(cfg *config.Config) (jsync.SyncBackend, error) {
 		}
 		return jsync.NewTracedBackend(c, "joplin_server"), nil
 	}
+}
+
+// Only a hash of the effective remote identity is stored in the local profile.
+// Tokens are a conservative account boundary when no account ID is available.
+func syncSuccessKey(cfg *config.Config, memoryOnly bool) string {
+	var identity any
+	switch cfg.SyncTarget {
+	case 2:
+		path, _ := filepath.Abs(cfg.LocalDir)
+		identity = []any{2, path}
+	case 7:
+		dir := cfg.DataDir
+		if memoryOnly {
+			dir = ""
+		}
+		token, err := jsync.LoadDropboxToken(dir, cfg.DropboxAuth)
+		if err != nil || token == nil {
+			identity = []any{7, "unavailable"}
+		} else {
+			account := token.AccountID
+			if account == "" {
+				account = token.RefreshToken
+			}
+			if account == "" {
+				account = token.AccessToken
+			}
+			identity = []any{7, account, cfg.DropboxAppKey, cfg.DropboxBlockDeletes}
+		}
+	case 8:
+		identity = []any{8, cfg.S3URL, cfg.S3Bucket, cfg.S3Region, cfg.S3AccessKey, cfg.S3ForcePathStyle}
+	default:
+		identity = []any{cfg.SyncTarget, cfg.ServerURL, cfg.Username}
+	}
+	raw, _ := json.Marshal(identity)
+	return fmt.Sprintf("desktop.sync.last_success.%x", sha256.Sum256(raw))
 }
 
 func randomToken() (string, error) {

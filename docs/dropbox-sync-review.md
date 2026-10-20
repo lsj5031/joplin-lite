@@ -61,6 +61,73 @@ Dropbox files were modified during the Mac verification.
 The historical observations and release assessment below describe the
 pre-fix revision and explain the decisions; they are not current defect claims.
 
+## Live Mac first-pass findings
+
+On 2026-10-20, the original Mac profile's first Lite pass listed 7,599 entries
+over 204 pages in 88.299 seconds, then processed 7,541 candidates. Without a
+Lite cursor it downloaded existing content again: after about 17 minutes,
+2,138 resource files had been written (464,053,812 bytes), with 875 raw-item
+records. These are intermediate observations, not a successful completed pass
+or a throughput benchmark. Avoiding this initial replay requires a separately
+validated migration strategy; copying the official client's cursor is not an
+established safe shortcut.
+
+The pass also exposed two lock defects. All Lite instances used the filename
+`locks/1_3_joplin-lite.json`, and a failed refresh only stopped the refresh
+goroutine, leaving the sync running. Mercury completed its overlapping pass
+at 12:48:11.539 UTC+13; the Mac reported an expired/missing lock at 12:48:42.578.
+The timing is consistent with one instance deleting the other's shared lock,
+but logs do not identify the actual deletion's actor or timestamp. The Mac
+pass was stopped during pull, before the upload phase.
+
+The local follow-up assigns each backend instance a unique lock identity and
+cancels the pass if refresh fails, preserving that failure as the returned
+error. Regression tests reproduce both defects on the published baseline and
+pass with the fix, including cancellation of a blocked pull through the public
+engine. Backend, native, sync race and S3-enabled sync tests pass. This does
+not eliminate the separate first-pass download cost.
+
+The downloading stage now reports `Downloading — X of Y`, counting only
+successfully received/applied delta items, including attachment blobs. These
+are item counts, not byte counts or an estimate of remaining time. For paged
+targets `Y+` means only the pages seen so far are counted; the final page
+removes the `+`. Later reconciliation, decryption and upload remain separate
+phases, so finishing the download count does not claim sync has completed.
+
+### Restarting an unfinished download
+
+Dropbox downloads now record successfully applied item revisions in the
+profile's `jl_sync_downloads` sidecar table. Restart still obtains a fresh,
+complete remote inventory and reuses a receipt only if the filename and
+Dropbox revision match within the same endpoint/credential scope. Resource
+receipts also verify the current local file's SHA-256; missing or altered
+files download again. Receipts contain revision identifiers and hashes, not
+credentials or note bodies. Normal access-token renewal retains the scope
+when a refresh token is available; reauthorization may safely cause a replay.
+
+The sync cursor still advances only after a whole delta page succeeds, and
+receipts are cleared after that cursor is saved. A crash before saving a
+receipt may replay that item. A failed fetch/apply is never checkpointed.
+Reconciliation, conflict handling, encrypted upload requirements and the
+deletion guard remain in force. Targets without versioned receipts keep
+their existing page-cursor behavior.
+
+The download counter is reconstructed against the fresh inventory, counting
+both verified receipts and newly applied items. It does not restore a stale
+"Syncing" flag or promise that the previous total is still current. Tests
+close and reopen real SQLite around an interrupted loopback Dropbox pull,
+including a changed revision with an unchanged timestamp, missing/corrupt
+attachment files, account/endpoint changes, token renewal and failed apply.
+This is restart evidence with a synthetic service, not a forced interruption
+of the owner's ongoing real Dropbox pass.
+
+An older running binary has no receipts to reuse: installing the new bundle
+does not retrofit its unfinished pass. Let that pass finish if possible;
+checkpointed item reuse begins when the new binary runs. Receipts resume at
+whole-item boundaries, not midway through an attachment's bytes. Native
+remembered-profile/Keychain startup and persisted last-success time are
+documented in [the shell README](../shell/README.md#remembered-native-startup).
+
 ## What the baseline logs show
 
 The native log is `<data-dir>/desktop.log`, rotated to `desktop.log.1` on

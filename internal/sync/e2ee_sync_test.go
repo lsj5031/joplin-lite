@@ -98,7 +98,7 @@ func TestResourcePullPreservesAbsentBlobTimestamp(t *testing.T) {
 					"/api/items/root:/:/delta":                []byte(`{"items":[{"item_name":"` + id + `.md","type":1}],"cursor":"after"}`),
 					"/api/items/root:/" + id + ".md:/content": []byte(content),
 				}}
-				if err := PullChanges(backend, db); err != nil {
+				if err := PullChanges(backend, db, nil); err != nil {
 					t.Fatal(err)
 				}
 				if encrypted {
@@ -495,7 +495,7 @@ func TestE2EE_InterruptedResourcePullPreservesOfficialFile(t *testing.T) {
 					envelopeMeta(models.ResourceFields(resource), cipherMeta, key.ID))),
 				"/api/items/root:/.resource%2F" + resource.ID + ":/content": []byte(cipherBlob),
 			}}
-			if err := PullChanges(backend, db); err == nil {
+			if err := PullChanges(backend, db, nil); err == nil {
 				t.Fatal("injected later download failure was ignored")
 			}
 			if cursor, err := db.GetSyncCursor(); err != nil || cursor != "" {
@@ -515,7 +515,7 @@ func TestE2EE_InterruptedResourcePullPreservesOfficialFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			backend.responses["/api/items/root:/:/delta"] = page
-			if err := PullChanges(backend, db); err != nil {
+			if err := PullChanges(backend, db, nil); err != nil {
 				t.Fatal(err)
 			}
 			if err := DecryptPulledItems(db, svc, "test-password"); err != nil {
