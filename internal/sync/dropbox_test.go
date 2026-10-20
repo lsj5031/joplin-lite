@@ -792,6 +792,8 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 			for i := 1; i <= 8; i++ {
 				f.put(fmt.Sprintf("/.resource/%032x", i), []byte(fmt.Sprintf("resource %d", i)))
 			}
+			f.put("/.sync/readme.txt", []byte("Joplin sync metadata"))
+			f.put("/.resource/readme.md", []byte("Joplin attachment directory"))
 			note := &models.Note{ID: strings.Repeat("a", 32), Title: "Checkpoint", Body: "preserved across restart", CreatedTime: 1000, UpdatedTime: 1000}
 			last := &models.Note{ID: strings.Repeat("b", 32), Title: "Retry me", CreatedTime: 2000, UpdatedTime: 2000}
 			f.put("/"+note.ID+".md", []byte(models.SerializeNote(note)))
@@ -881,14 +883,14 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 			var completed int
 			if err := PullChanges(backend(access, refresh), db, func(done, total int, more bool) {
 				completed = done
-				if total != 10 || more {
+				if total != 12 || more {
 					t.Errorf("progress total=%d more=%t", total, more)
 				}
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if completed != 10 {
-				t.Fatalf("resume progress=%d, want 10", completed)
+			if completed != 12 {
+				t.Fatalf("resume progress=%d, want 12", completed)
 			}
 			mu.Lock()
 			defer mu.Unlock()

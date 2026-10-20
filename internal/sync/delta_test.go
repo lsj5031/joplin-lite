@@ -491,7 +491,10 @@ func TestIsResourceBlob(t *testing.T) {
 		name string
 		want bool
 	}{
-		{".resource/abc123", true},
+		{".resource/abcdef01234567890abcdef012345678", true},
+		{".sync/readme.txt", false},
+		{".resource/readme.md", false},
+		{".resource/abc123", false},
 		{"abc123.md", false},
 		{"ab", false},
 	}

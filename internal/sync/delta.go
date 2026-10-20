@@ -442,9 +442,9 @@ func parseItemName(name string) (string, int) {
 }
 
 // isResourceBlob checks if an item name refers to a resource blob.
-// Resource blobs don't end with ".md".
+// System readmes are not attachments, even when they do not end in ".md".
 func isResourceBlob(name string) bool {
-	return len(name) > 2 && !strings.HasSuffix(name, ".md")
+	return strings.HasPrefix(name, ".resource/") && isValidID(strings.TrimPrefix(name, ".resource/"))
 }
 
 // extractResourceID gets the resource ID from a blob item name.
