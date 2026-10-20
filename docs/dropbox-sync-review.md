@@ -40,13 +40,32 @@ changed, unreadable, nonregular, oversized, or unverifiable caches fall back
 to download. The actual profile comes from the engine, independently of the
 token-cache location, including secure Keychain startup.
 
+During an upgrade from a timestamp-only cursor, the first complete inventory
+still checks all items. Root `<id>.md` metadata can reuse its `item_raw` sidecar
+when its exact bytes match the fresh Dropbox content hash, through the same
+apply/conflict path as a download. Local edits are preserved by the normal
+conflict rules. A missing or different raw copy downloads normally; notably,
+decrypted plaintext cannot verify an encrypted remote envelope. This cannot
+eliminate every first-pass encrypted metadata download from an older profile.
+
 The first listing and uncached content still require network requests, and
-verified ciphertext still needs normal application/decryption. Pass logs add
-`cached_resources` alongside storage-request count; inventory logs identify
+verified ciphertext still needs normal application/decryption. The native
+phase says `Checking items — X of Y`, since processed items include cache hits
+and resumed receipts. Pass logs distinguish `cached_items` and
+`downloaded_items` (successful content downloads, excluding locks and
+`info.json`) alongside storage-request count; inventory logs identify
 incremental versus full listings. Tests use disposable SQLite profiles and
 loopback HTTP, covering restarts, older timestamps, cursor resets,
 account/endpoint isolation, interrupted apply, partial listing/cancellation,
 snapshot-write failure, directory changes, and matching/mismatched caches.
+
+Lock listings (including all continuation pages) and lock uploads each have
+a 30-second request budget, inside the three-minute lock lifetime. A timeout
+still cancels the pass; missing/expired locks are never silently reacquired.
+Refresh logs include elapsed time, and failed requests identify the endpoint
+and whether failure occurred before response headers or while reading the
+body. This bounds stalled lock operations and improves diagnosis; it does not
+establish the network cause of earlier production timeouts.
 
 Protocol references: [Dropbox list-folder processing rules](https://github.com/dropbox/dropbox-sdk-go-unofficial/blob/main/v6/dropbox/files/client.go),
 [cursor/reset definitions](https://github.com/dropbox/dropbox-sdk-python/blob/main/dropbox/files.py),

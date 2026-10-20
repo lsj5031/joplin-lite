@@ -69,7 +69,7 @@ func (b *DropboxBackend) listInventory() ([]dropboxEntry, error) {
 	pages := 0
 	for {
 		var resp listFolderResponse
-		if err := b.apiJSON(endpoint, arg, &resp); err != nil {
+		if err := b.apiJSON(b.ctx, endpoint, arg, &resp); err != nil {
 			if incremental && errors.Is(err, errDropboxCursorReset) {
 				// A reset invalidates the entire base, not just its cursor.
 				state = dropboxInventory{Entries: make(map[string]dropboxEntry), Pending: make(map[string]bool)}

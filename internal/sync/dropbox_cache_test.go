@@ -36,12 +36,12 @@ func TestCachedDropboxResourceContentHash(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry := dropboxEntry{Tag: "file", PathDisplay: "/.resource/" + id, ContentHash: tc.hash}
-			if got, ok := cachedDropboxResource(db, entry); !ok || !bytes.Equal(got, data) {
+			if got, ok := cachedDropboxItem(db, entry); !ok || !bytes.Equal(got, data) {
 				t.Fatalf("cache hit = %v, bytes = %d; want exact %d bytes", ok, len(got), len(data))
 			}
 			if tc.size != 0 {
 				entry.ContentHash = fmt.Sprintf("%x", sha256.Sum256(data))
-				if _, ok := cachedDropboxResource(db, entry); ok {
+				if _, ok := cachedDropboxItem(db, entry); ok {
 					t.Fatal("accepted ordinary SHA-256 instead of Dropbox content hash")
 				}
 			}
@@ -86,7 +86,7 @@ func TestCachedDropboxResourceCandidates(t *testing.T) {
 			if err := db.QueryRow("SELECT total_changes()").Scan(&before); err != nil {
 				t.Fatal(err)
 			}
-			got, ok := cachedDropboxResource(db, dropboxEntry{Tag: "file", PathDisplay: ".resource/" + id, ContentHash: hash})
+			got, ok := cachedDropboxItem(db, dropboxEntry{Tag: "file", PathDisplay: ".resource/" + id, ContentHash: hash})
 			if ok != tc.want || (ok && string(got) != "a") || (!ok && got != nil) {
 				t.Fatalf("got %q, %v; want hit %v", got, ok, tc.want)
 			}
@@ -113,13 +113,13 @@ func TestCachedDropboxResourceRejectsInvalidOrUnavailable(t *testing.T) {
 	const hash = "bf5d3affb73efd2ec6c36ad3112dd933efed63c4e1cbffcfa88e2759c144f2d8"
 	dir := filepath.Join(db.DataDir(), "resources")
 	valid := dropboxEntry{Tag: "file", PathDisplay: "/.resource/" + id, ContentHash: hash}
-	if _, ok := cachedDropboxResource(db, valid); ok {
+	if _, ok := cachedDropboxItem(db, valid); ok {
 		t.Fatal("accepted missing directory")
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("cache lookup created resources directory: %v", err)
 	}
-	if _, ok := cachedDropboxResource(nil, valid); ok {
+	if _, ok := cachedDropboxItem(nil, valid); ok {
 		t.Fatal("accepted nil database")
 	}
 	if err := os.WriteFile(filepath.Join(db.ResourceDir(), id+".crypted"), []byte("a"), 0o600); err != nil {
@@ -132,20 +132,20 @@ func TestCachedDropboxResourceRejectsInvalidOrUnavailable(t *testing.T) {
 	} {
 		entry := valid
 		entry.PathDisplay = path
-		if _, ok := cachedDropboxResource(db, entry); ok {
+		if _, ok := cachedDropboxItem(db, entry); ok {
 			t.Errorf("accepted invalid path %q", path)
 		}
 	}
 	for _, hash := range []string{"", "invalid", strings.Repeat("0", 62), strings.Repeat("0", 66), strings.Repeat("0", 64)} {
 		entry := valid
 		entry.ContentHash = hash
-		if _, ok := cachedDropboxResource(db, entry); ok {
+		if _, ok := cachedDropboxItem(db, entry); ok {
 			t.Errorf("accepted hash %q", hash)
 		}
 	}
 	entry := valid
 	entry.Tag = "folder"
-	if _, ok := cachedDropboxResource(db, entry); ok {
+	if _, ok := cachedDropboxItem(db, entry); ok {
 		t.Fatal("accepted folder")
 	}
 	// Directories cannot be read as cache files. An oversized sparse file must
@@ -157,7 +157,7 @@ func TestCachedDropboxResourceRejectsInvalidOrUnavailable(t *testing.T) {
 	if err := os.Mkdir(crypted, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cachedDropboxResource(db, valid); ok {
+	if _, ok := cachedDropboxItem(db, valid); ok {
 		t.Fatal("accepted directory cache")
 	}
 	if err := os.Remove(crypted); err != nil {
@@ -174,7 +174,7 @@ func TestCachedDropboxResourceRejectsInvalidOrUnavailable(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cachedDropboxResource(db, valid); ok {
+	if _, ok := cachedDropboxItem(db, valid); ok {
 		t.Fatal("accepted oversized cache")
 	}
 }

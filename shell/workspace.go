@@ -837,10 +837,6 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		if a.editing {
-			if a.pendingInsert != "" {
-				a.insertAttachmentRefs([]string{a.pendingInsert})
-				a.pendingInsert = ""
-			}
 			// Keep the writing surface quiet; code remains monospace in preview.
 			svc := c.Services()
 			editor := ui.TextArea(c.Key("body:"+a.note.ID), &a.body).
@@ -867,6 +863,23 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 				}
 				return false
 			})
+			if a.pendingCaret != nil {
+				editor.SetTextSelection(*a.pendingCaret, *a.pendingCaret)
+				a.pendingCaret = nil
+			}
+			if a.pendingInsert != "" {
+				start, end := editor.TextSelection()
+				body := []rune(a.body)
+				a.body = string(body[:start]) + a.pendingInsert + string(body[end:])
+				caret := start + len([]rune(a.pendingInsert))
+				a.pendingCaret = &caret
+				a.pendingInsert = ""
+				a.markDirty()
+				a.flush()
+				// The next build loads the replacement into the native editor,
+				// then places its caret after the inserted reference.
+				svc.Invalidate()
+			}
 			if a.focusBody {
 				editor.SetTextSelection(0, 0).AutoFocus()
 				a.focusBody = false

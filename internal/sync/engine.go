@@ -170,7 +170,9 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 		if hasMore {
 			suffix = "+"
 		}
-		e.progress(fmt.Sprintf("Downloading — %d of %d%s", done, total, suffix))
+		// Completed items include verified cache hits and resumed receipts;
+		// this is work processed, not a count of network downloads.
+		e.progress(fmt.Sprintf("Checking items — %d of %d%s", done, total, suffix))
 	}); err != nil {
 		return fmt.Errorf("pull failed: %w", err)
 	}

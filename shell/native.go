@@ -107,19 +107,20 @@ type nativeApp struct {
 	loadSettings   func() desktopSettings
 	applySettings  func(desktopSettings) error
 
-	tagMenuOpen           bool
-	tagFilter             string
-	tagActions            bool
-	tagOpen               bool
-	tagRename             bool
-	tagAttachNote         bool
-	tagTitle              string
-	tagErr                string
+	tagMenuOpen             bool
+	tagFilter               string
+	tagActions              bool
+	tagOpen                 bool
+	tagRename               bool
+	tagAttachNote           bool
+	tagTitle                string
+	tagErr                  string
 	confirmDeleteTag        bool
 	resolveConflict         bool
 	conflictOriginal        *models.Note
 	pickAttachmentPaths     func() ([]string, error)
 	pendingInsert           string
+	pendingCaret            *int
 	notebookActions         bool
 	notebookOpen            bool
 	notebookRename          bool
@@ -1082,12 +1083,12 @@ func (a *nativeApp) conflictDialog(c *ui.Context, t *ui.Theme) {
 							name = "Untitled"
 						}
 						ui.Text(c, name).FontSize(sizeUI).Bold().SingleLine()
-						preview := strings.TrimSpace(bodyText)
+						preview := bodyText
 						if preview == "" {
 							preview = "(Empty note)"
 						}
 						ui.Scroll(c.Key(key)).MaxHeight(130).Children(func() {
-							ui.Text(c, clip(preview, 360)).Font(fontMono).FontSize(sizeMonoSm).
+							ui.Text(c, preview).Font(fontMono).FontSize(sizeMonoSm).
 								LineHeight(1.45).TextColor(inkSoft).MaxWidth(225)
 						})
 					})
@@ -1157,11 +1158,11 @@ func (a *nativeApp) keepOriginalVersion() {
 		a.saveErr = "The original note is no longer on this device."
 		return
 	}
-	a.dirty = false
 	if err := a.svc.DeleteNote(conflictID); err != nil {
 		a.saveErr = err.Error()
 		return
 	}
+	a.dirty = false
 	a.saveErr = ""
 	a.note = nil
 	a.selectedID = ""

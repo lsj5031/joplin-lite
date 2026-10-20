@@ -502,7 +502,7 @@ func TestDropboxEngineInventoryIsCompleteAndFreshEachPass(t *testing.T) {
 	if got := rootListings.Load(); got != 1 {
 		t.Errorf("full inventories in first pass = %d, want 1", got)
 	}
-	if got := strings.Join(phases, "|"); got != "Checking remote|Downloading — 0 of 1|Downloading — 1 of 1|Checking library|Uploading|Finishing" {
+	if got := strings.Join(phases, "|"); got != "Checking remote|Checking items — 0 of 1|Checking items — 1 of 1|Checking library|Uploading|Finishing" {
 		t.Errorf("first-pass progress = %s", got)
 	}
 	f.mu.Lock()
@@ -962,6 +962,145 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 	}
 }
 
+func TestDropboxLockRefreshRequestDeadlines(t *testing.T) {
+	previous := dropboxLockRequestTimeout
+	dropboxLockRequestTimeout = 25 * time.Millisecond
+	defer func() { dropboxLockRequestTimeout = previous }()
+	for _, stage := range []string{"listing", "upload headers", "upload body"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newFakeDropbox()
+			var stall atomic.Bool
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if stall.Load() && ((stage == "listing" && r.URL.Path == "/2/files/list_folder") || (stage != "listing" && r.URL.Path == "/2/files/upload")) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					if stage == "upload body" {
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write([]byte("{"))
+						w.(http.Flusher).Flush()
+					}
+					<-r.Context().Done()
+					return
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			b := newDropboxBackend(nil, &DropboxToken{AccessToken: "access"}, "")
+			b.apiBase, b.contentBase = srv.URL, srv.URL
+			lock, err := b.AcquireLock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stall.Store(true)
+			started := time.Now()
+			if err := b.RefreshLock(lock); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("stalled refresh must fail closed with deadline, got %v", err)
+			}
+			if elapsed := time.Since(started); elapsed > time.Second {
+				t.Fatalf("refresh exceeded bounded wait: %s", elapsed)
+			}
+			stall.Store(false)
+			if err := b.RefreshLock(lock); err != nil {
+				t.Fatalf("active lock cannot refresh after network recovers: %v", err)
+			}
+			f.mu.Lock()
+			delete(f.files, "/locks/"+lockFileName(lock.(*Lock)))
+			delete(f.times, "/locks/"+lockFileName(lock.(*Lock)))
+			f.mu.Unlock()
+			if err := b.RefreshLock(lock); !errors.Is(err, ErrLockExpired) {
+				t.Fatalf("missing lock must not be reacquired: %v", err)
+			}
+		})
+	}
+}
+
+func TestDropboxUpgradeReusesVerifiedMetadata(t *testing.T) {
+	for _, change := range []string{"unchanged", "local edit", "older remote change", "missing raw", "mismatched raw"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFakeDropbox()
+			note := &models.Note{ID: strings.Repeat("a", 32), Title: "Already synced", Body: "original body", CreatedTime: 1000, UpdatedTime: 1000}
+			path := "/" + note.ID + ".md"
+			f.put(path, []byte(models.SerializeNote(note)))
+			var downloads atomic.Int64
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/2/files/download" {
+					var arg struct{ Path string }
+					_ = json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg)
+					if arg.Path == path {
+						downloads.Add(1)
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			backend := func() *DropboxBackend {
+				b := newDropboxBackend(nil, &DropboxToken{AccessToken: "access", RefreshToken: "account"}, "")
+				b.apiBase, b.contentBase = srv.URL, srv.URL
+				return b
+			}
+			dir := t.TempDir()
+			db, err := store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The old standalone pull leaves a timestamp, raw content, and no
+			// inventory or receipts after its successful page.
+			if err := PullChanges(backend(), db, nil); err != nil {
+				t.Fatal(err)
+			}
+			cursor, err := db.GetSyncCursor()
+			if _, parseErr := strconv.ParseInt(cursor, 10, 64); err != nil || parseErr != nil {
+				t.Fatalf("legacy cursor=%q, err=%v", cursor, err)
+			}
+			wantBody, wantDownloads := note.Body, int64(0)
+			switch change {
+			case "local edit":
+				note.Body = "unsynced local edit"
+				if err := db.UpdateNote(note); err != nil {
+					t.Fatal(err)
+				}
+				wantBody = note.Body
+			case "older remote change":
+				note.Body, note.UpdatedTime = "remote change below old listing cursor", 2000
+				f.put(path, []byte(models.SerializeNote(note)))
+				f.mu.Lock()
+				f.times[path] = time.Unix(1, 0)
+				f.mu.Unlock()
+				wantBody, wantDownloads = note.Body, 1
+			case "missing raw":
+				if err := db.DeleteItemRaw(note.ID); err != nil {
+					t.Fatal(err)
+				}
+				wantDownloads = 1
+			case "mismatched raw":
+				if err := db.SaveItemRaw(note.ID, []byte("invalid cached metadata"), note.UpdatedTime); err != nil {
+					t.Fatal(err)
+				}
+				wantDownloads = 1
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err = store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			downloads.Store(0)
+			if err := NewEngine(NewTracedBackend(backend(), "dropbox"), db, "").Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := downloads.Load(); got != wantDownloads {
+				t.Errorf("upgrade downloaded note %d times, want %d", got, wantDownloads)
+			}
+			if got, err := db.GetNote(note.ID); err != nil || got == nil || got.Body != wantBody {
+				t.Fatalf("upgrade changed/lost body: %+v, %v; want %q", got, err, wantBody)
+			}
+		})
+	}
+}
+
 func TestDropboxIncrementalInventoryAcrossRestart(t *testing.T) {
 	for _, change := range []string{"quiet", "older timestamp", "cursor reset", "different account", "different endpoint", "renewed access token"} {
 		t.Run(change, func(t *testing.T) {
@@ -1035,12 +1174,18 @@ func TestDropboxIncrementalInventoryAcrossRestart(t *testing.T) {
 			case "renewed access token":
 				access = "renewed"
 			}
+			if change == "different account" || change == "different endpoint" {
+				// A new scope must read its own inventory and hash, never trust
+				// the previous account's cached bytes for different remote data.
+				note.Body, note.UpdatedTime = "different remote library", 3000
+				f.put("/"+note.ID+".md", []byte(models.SerializeNote(note)))
+			}
 			run()
 			wantRoots, wantNotes := int64(0), int64(0)
 			if change == "cursor reset" || change == "different account" || change == "different endpoint" {
-				wantRoots, wantNotes = 1, 1
+				wantRoots = 1
 			}
-			if change == "older timestamp" {
+			if change == "older timestamp" || change == "different account" || change == "different endpoint" {
 				wantNotes = 1
 			}
 			if roots.Load() != wantRoots || notes.Load() != wantNotes {

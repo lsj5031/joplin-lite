@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/lsj5031/joplin-lite/internal/models"
 )
@@ -120,6 +124,172 @@ func TestNativeConflictFailuresKeepCopy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNativeKeepOriginalDeleteFailurePreservesDraft(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	original := addTestNote(t, app.svc, "", "Original", "Original body")
+	conflict := &models.Note{Title: "Conflict", Body: "Saved body", IsConflict: 1, ConflictOriginalID: original.ID}
+	if err := app.svc.CreateNote(conflict); err != nil {
+		t.Fatal(err)
+	}
+	app.selectedNotebook = conflictsRail
+	app.reloadNotes()
+	app.title, app.body = "Draft title", "Unsaved editor draft"
+	app.markDirty()
+	if _, err := db.Exec(`CREATE TRIGGER reject_delete BEFORE DELETE ON notes BEGIN SELECT RAISE(ABORT, 'fixture delete failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(app.view, 1280, 800)
+	click(t, tt, "Resolve conflict")
+	click(t, tt, "Keep original")
+	if !app.dirty || !strings.Contains(app.saveErr, "fixture delete failure") {
+		t.Fatalf("failed delete lost dirty draft: dirty=%v error=%q", app.dirty, app.saveErr)
+	}
+	app.flush()
+	got, err := app.svc.GetNote(conflict.ID)
+	if err != nil || got == nil || got.Title != "Draft title" || got.Body != "Unsaved editor draft" || got.IsConflict != 1 {
+		t.Fatalf("flush after failed delete lost draft: %#v, %v", got, err)
+	}
+	got, err = app.svc.GetNote(original.ID)
+	if err != nil || got == nil || got.Body != original.Body {
+		t.Fatalf("original changed: %#v, %v", got, err)
+	}
+}
+
+func TestNativeConflictCompleteScrollableBodies(t *testing.T) {
+	registerFonts()
+	for _, state := range []struct {
+		name  string
+		width int
+		dark  bool
+	}{{"light", 1280, false}, {"dark", 1280, true}, {"narrow", 600, false}} {
+		t.Run(state.name, func(t *testing.T) {
+			app, _ := openNativeTestApp(t)
+			prefix := "# Deployment plan\n\n    preserve indentation\n\n" + strings.Repeat("Shared checklist entry\n", 24)
+			original := addTestNote(t, app.svc, "", "Original plan", prefix+"\nORIGINAL: deploy Friday\n")
+			conflict := &models.Note{Title: "Local plan", Body: prefix + "\nCONFLICT: deploy Monday\n", IsConflict: 1, ConflictOriginalID: original.ID}
+			if err := app.svc.CreateNote(conflict); err != nil {
+				t.Fatal(err)
+			}
+			app.dark = state.dark
+			app.selectedNotebook = conflictsRail
+			app.reloadNotes()
+			app.openResolveConflict()
+			tt := ui.NewTester(app.view, state.width, 600)
+			tt.Advance(300 * time.Millisecond)
+			for _, body := range []string{conflict.Body, original.Body} {
+				if _, ok := tt.Find(body); !ok {
+					t.Fatalf("comparison omitted full formatted body %q", body)
+				}
+			}
+			if dir := os.Getenv("NATIVE_SAFETY_CAPTURE_DIR"); dir != "" {
+				capture(t, dir, "conflict-"+state.name, tt)
+			}
+			left, _ := tt.Find("This conflict copy")
+			right, _ := tt.Find("Original note")
+			panePixels := func(body string) string {
+				r, _ := tt.Find(body)
+				var buf bytes.Buffer
+				// Exclude the scrollbar, which fades when the pointer leaves.
+				if err := png.Encode(&buf, tt.Image().SubImage(image.Rect(int(r.X), int(r.Y), int(r.X+r.W)-16, int(r.Y+r.H)))); err != nil {
+					t.Fatal(err)
+				}
+				return buf.String()
+			}
+			originalBefore := panePixels(original.Body)
+			copyBefore := panePixels(conflict.Body)
+			tt.Scroll(left.X+50, left.Y+80, 0, 2000)
+			tt.Advance(300 * time.Millisecond)
+			tt.Frame()
+			copyAfter := panePixels(conflict.Body)
+			if copyAfter == copyBefore || panePixels(original.Body) != originalBefore {
+				t.Fatal("scrolling the conflict must change only its own pane")
+			}
+			tt.Scroll(right.X+50, right.Y+80, 0, 2000)
+			tt.Advance(300 * time.Millisecond)
+			tt.Frame()
+			if panePixels(original.Body) == originalBefore || panePixels(conflict.Body) != copyAfter {
+				t.Fatal("scrolling the original must change only its own pane")
+			}
+			for _, label := range []string{"Cancel", "Keep original", "Keep this version"} {
+				r, ok := tt.Find(label)
+				if !ok || r.X < 0 || r.Y < 0 || r.X+r.W > float32(state.width) || r.Y+r.H > 600 {
+					t.Fatalf("action %s clipped: %v", label, r)
+				}
+			}
+			if dir := os.Getenv("NATIVE_SAFETY_CAPTURE_DIR"); dir != "" {
+				capture(t, dir, "conflict-"+state.name+"-scrolled", tt)
+			}
+		})
+	}
+}
+
+func TestNativeAttachmentPasteUsesSelection(t *testing.T) {
+	registerFonts()
+	var pngData bytes.Buffer
+	if err := png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"image", "files"} {
+		for _, selection := range []string{"all", "caret", "range"} {
+			t.Run(kind+"/"+selection, func(t *testing.T) {
+				app, db := openNativeTestApp(t)
+				note := addTestNote(t, app.svc, "", "Paste target", "αβOLD終")
+				app.reloadNotes()
+				app.showNote(note.ID)
+				tt := ui.NewTester(app.view, 1280, 800)
+				click(t, tt, "Edit")
+				before, after := "", ""
+				if selection == "all" {
+					tt.Key(ui.Cmd, ui.KeyA)
+				} else {
+					tt.Key(0, ui.KeyRight)
+					tt.Key(0, ui.KeyRight)
+					before, after = "αβ", "OLD終"
+					if selection == "range" {
+						for range 3 {
+							tt.Key(ui.Shift, ui.KeyRight)
+						}
+						after = "終"
+					}
+				}
+				if kind == "image" {
+					tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, pngData.Bytes()))))
+				} else {
+					path := filepath.Join(t.TempDir(), "paste.txt")
+					if err := os.WriteFile(path, []byte("synthetic attachment"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					data, err := transfer.FileData(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					tt.SetClipboardData(data)
+				}
+				tt.Key(ui.Cmd, ui.KeyV)
+				tt.Frame()
+				tt.Frame()
+				linked, err := db.GetResourcesByNote(note.ID)
+				if err != nil || len(linked) != 1 {
+					t.Fatalf("pasted resources = %#v, %v", linked, err)
+				}
+				ref := "[paste.txt](:/" + linked[0].ID + ")"
+				if kind == "image" {
+					ref = "![pasted-image.png](:/" + linked[0].ID + ")"
+				}
+				if want := before + ref + after; app.body != want {
+					t.Fatalf("pasted body = %q, want %q", app.body, want)
+				}
+				tt.Type("NEXT")
+				app.flush()
+				got, err := app.svc.GetNote(note.ID)
+				if want := before + ref + "NEXT" + after; err != nil || got == nil || got.Body != want {
+					t.Fatalf("typing after paste = %#v, %v, want %q", got, err, want)
+				}
+			})
+		}
 	}
 }
 

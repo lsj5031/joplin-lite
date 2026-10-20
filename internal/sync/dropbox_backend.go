@@ -48,8 +48,13 @@ type DropboxBackend struct {
 	db           *store.DB
 	inventory    *dropboxInventory
 	cacheHits    atomic.Int64
+	downloads    atomic.Int64
 	requests     atomic.Int64
 }
+
+// A refresh lists locks and writes ours. Bound each leg well inside the
+// three-minute TTL, leaving time for the engine to cancel safely on failure.
+var dropboxLockRequestTimeout = 30 * time.Second
 
 // NewDropboxBackend creates the Dropbox driver from config. Credentials come
 // from the user's own Dropbox OAuth app (sync.7.appKey / sync.7.appSecret);
@@ -95,9 +100,10 @@ func (b *DropboxBackend) BeginSync(ctx context.Context, db *store.DB) func() {
 	b.rootEntries, b.rootListed = nil, false
 	b.requests.Store(0)
 	b.cacheHits.Store(0)
+	b.downloads.Store(0)
 	started := time.Now()
 	return func() {
-		slog.Info("Dropbox pass finished", "storage_requests", b.requests.Load(), "cached_resources", b.cacheHits.Load(), "duration", time.Since(started))
+		slog.Info("Dropbox pass finished", "storage_requests", b.requests.Load(), "cached_items", b.cacheHits.Load(), "downloaded_items", b.downloads.Load(), "duration", time.Since(started))
 		b.ctx, b.inSync = context.Background(), false
 		b.db, b.inventory = nil, nil
 		b.rootEntries, b.rootListed = nil, false
@@ -165,7 +171,10 @@ func (b *DropboxBackend) RefreshLock(lock interface{}) error {
 	if lock == nil {
 		return nil
 	}
-	return b.locks.Refresh()
+	started := time.Now()
+	err := b.locks.Refresh()
+	slog.Info("Dropbox lock refresh finished", "duration", time.Since(started), "error", err)
+	return err
 }
 
 // Get implements SyncBackend for the Joplin-Server-style paths.
@@ -270,11 +279,17 @@ func (b *DropboxBackend) listAll(path string) ([]dropboxEntry, error) {
 	started := time.Now()
 	pages := 0
 	var out []dropboxEntry
+	ctx := b.ctx
+	if path == "/locks" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, dropboxLockRequestTimeout)
+		defer cancel()
+	}
 	arg := map[string]any{"path": path, "recursive": true, "limit": 500}
 	endpoint := "/2/files/list_folder"
 	for {
 		var resp listFolderResponse
-		if err := b.apiJSON(endpoint, arg, &resp); err != nil {
+		if err := b.apiJSON(ctx, endpoint, arg, &resp); err != nil {
 			return nil, err
 		}
 		pages++
@@ -389,12 +404,12 @@ func (b *DropboxBackend) getChildren() ([]byte, error) {
 }
 
 // apiJSON posts a JSON-RPC-style Dropbox request (apiBase endpoint).
-func (b *DropboxBackend) apiJSON(endpoint string, arg any, out any) error {
+func (b *DropboxBackend) apiJSON(ctx context.Context, endpoint string, arg any, out any) error {
 	body, err := json.Marshal(arg)
 	if err != nil {
 		return err
 	}
-	respBody, status, err := b.do(func(req *http.Request) {
+	respBody, status, err := b.do(ctx, func(req *http.Request) {
 		req.URL, _ = url.Parse(b.apiBase + endpoint)
 		req.Header.Set("Content-Type", "application/json")
 		req.Body = io.NopCloser(strings.NewReader(string(body)))
@@ -414,13 +429,19 @@ func (b *DropboxBackend) apiJSON(endpoint string, arg any, out any) error {
 
 // upload uploads raw content to a Dropbox path (files/upload).
 func (b *DropboxBackend) upload(path string, content []byte) error {
+	ctx := b.ctx
+	if strings.HasPrefix(path, "/locks/") {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, dropboxLockRequestTimeout)
+		defer cancel()
+	}
 	arg, err := json.Marshal(map[string]any{
 		"path": path, "mode": "overwrite", "autorename": false, "mute": true,
 	})
 	if err != nil {
 		return err
 	}
-	respBody, status, err := b.do(func(req *http.Request) {
+	respBody, status, err := b.do(ctx, func(req *http.Request) {
 		req.URL, _ = url.Parse(b.contentBase + "/2/files/upload")
 		req.Header.Set("Dropbox-API-Arg", string(arg))
 		req.Header.Set("Content-Type", "application/octet-stream")
@@ -441,7 +462,7 @@ func (b *DropboxBackend) upload(path string, content []byte) error {
 func (b *DropboxBackend) download(path string) ([]byte, error) {
 	if b.inventory != nil {
 		if entry, ok := b.inventory.Entries[strings.ToLower(path)]; ok {
-			if data, ok := cachedDropboxResource(b.db, entry); ok {
+			if data, ok := cachedDropboxItem(b.db, entry); ok {
 				b.cacheHits.Add(1)
 				return data, nil
 			}
@@ -451,7 +472,7 @@ func (b *DropboxBackend) download(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	respBody, status, err := b.do(func(req *http.Request) {
+	respBody, status, err := b.do(b.ctx, func(req *http.Request) {
 		req.URL, _ = url.Parse(b.contentBase + "/2/files/download")
 		req.Header.Set("Dropbox-API-Arg", string(arg))
 	}, "/2/files/download")
@@ -464,6 +485,9 @@ func (b *DropboxBackend) download(path string) ([]byte, error) {
 	if status != http.StatusOK {
 		return nil, dropboxError(status, respBody)
 	}
+	if !strings.HasPrefix(path, "/locks/") && path != "/info.json" {
+		b.downloads.Add(1)
+	}
 	return respBody, nil
 }
 
@@ -471,7 +495,7 @@ func (b *DropboxBackend) download(path string) ([]byte, error) {
 // no-op (the item is already gone from the target).
 func (b *DropboxBackend) deletePath(path string) error {
 	var out any
-	err := b.apiJSON("/2/files/delete_v2", map[string]string{"path": path}, &out)
+	err := b.apiJSON(b.ctx, "/2/files/delete_v2", map[string]string{"path": path}, &out)
 	if err != nil && isNotFound([]byte(err.Error())) {
 		return nil
 	}
@@ -479,23 +503,29 @@ func (b *DropboxBackend) deletePath(path string) error {
 }
 
 // do runs an authenticated request, refreshing the token once on 401.
-func (b *DropboxBackend) do(setup func(*http.Request), endpoint string) ([]byte, int, error) {
+func (b *DropboxBackend) do(ctx context.Context, setup func(*http.Request), endpoint string) ([]byte, int, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequestWithContext(b.ctx, http.MethodPost, "", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", nil)
 		if err != nil {
 			return nil, 0, err
 		}
 		setup(req)
 		req.Header.Set("Authorization", "Bearer "+b.token.AccessToken)
 		b.requests.Add(1)
+		started := time.Now()
 		resp, err := b.http.Do(req)
 		if err != nil {
+			slog.Warn("Dropbox request failed", "endpoint", endpoint, "stage", "response headers", "duration", time.Since(started), "error", err)
 			return nil, 0, err
 		}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
 		resp.Body.Close()
 		if err != nil {
+			slog.Warn("Dropbox request failed", "endpoint", endpoint, "stage", "response body", "duration", time.Since(started), "status", resp.StatusCode, "error", err)
 			return nil, resp.StatusCode, err
+		}
+		if time.Since(started) >= 5*time.Second || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+			slog.Warn("Dropbox request finished", "endpoint", endpoint, "duration", time.Since(started), "status", resp.StatusCode)
 		}
 		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
 			if aerr := b.Authenticate(); aerr != nil {

@@ -12,20 +12,35 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
-// cachedDropboxResource returns local bytes only when fresh Dropbox metadata
+// cachedDropboxItem returns local bytes only when fresh Dropbox metadata
 // verifies them. Ciphertext is returned unchanged for the normal decrypt path.
-func cachedDropboxResource(db *store.DB, entry dropboxEntry) ([]byte, bool) {
+// Root metadata can also reuse its exact raw sidecar; a decrypted sidecar will
+// not match an encrypted remote envelope and must fall back to a download.
+func cachedDropboxItem(db *store.DB, entry dropboxEntry) ([]byte, bool) {
 	name := strings.TrimPrefix(entry.PathDisplay, "/")
 	const prefix = ".resource/"
-	if db == nil || entry.Tag != "file" || !strings.HasPrefix(name, prefix) {
+	if db == nil || entry.Tag != "file" {
 		return nil, false
 	}
-	id := strings.TrimPrefix(name, prefix)
+	blob := strings.HasPrefix(name, prefix)
+	id := strings.TrimSuffix(name, ".md")
+	if blob {
+		id = strings.TrimPrefix(name, prefix)
+	} else if !strings.HasSuffix(name, ".md") {
+		return nil, false
+	}
 	if len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
 		return nil, false
 	}
 	want, err := hex.DecodeString(entry.ContentHash)
 	if err != nil || len(want) != sha256.Size {
+		return nil, false
+	}
+	if !blob {
+		data, _, ok, err := db.GetItemRaw(id)
+		if err == nil && ok && matchesDropboxContent(data, want) {
+			return data, true
+		}
 		return nil, false
 	}
 	// ResourceDir (also called by GetResourceFile) creates missing directories.
@@ -63,6 +78,13 @@ func verifiedDropboxCacheFile(path string, want []byte) ([]byte, bool) {
 	if n, err := f.Read(extra[:]); n != 0 || err != io.EOF {
 		return nil, false
 	}
+	if !matchesDropboxContent(data, want) {
+		return nil, false
+	}
+	return data, true
+}
+
+func matchesDropboxContent(data, want []byte) bool {
 	// https://www.dropbox.com/developers/reference/content-hash
 	overall := sha256.New()
 	for remaining := data; len(remaining) > 0; {
@@ -71,8 +93,5 @@ func verifiedDropboxCacheFile(path string, want []byte) ([]byte, bool) {
 		overall.Write(block[:])
 		remaining = remaining[n:]
 	}
-	if !bytes.Equal(overall.Sum(nil), want) {
-		return nil, false
-	}
-	return data, true
+	return bytes.Equal(overall.Sum(nil), want)
 }
