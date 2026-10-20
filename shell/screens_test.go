@@ -396,4 +396,35 @@ func TestCaptureScreens(t *testing.T) {
 	tt.SetSize(900, 640)
 	capture(t, dir, "36-narrow-download-progress", tt)
 	app.be = nil
+
+	// 37. Self-contained Resolve conflict side-by-side comparison modal.
+	tt.SetSize(1280, 800)
+	app.narrowEditor = false
+	app.selectedNotebook = conflictsRail
+	app.selectedID = ""
+	app.reloadNotes()
+	tt.Frame()
+	if err := tt.Click("Resolve conflict"); err != nil {
+		t.Fatalf("click Resolve conflict for screen 37: %v", err)
+	}
+	tt.Advance(220 * time.Millisecond)
+	capture(t, dir, "37-resolve-conflict-diff", tt)
+	if err := tt.Click("Cancel"); err != nil {
+		t.Fatalf("cancel Resolve conflict for screen 37: %v", err)
+	}
+
+	// 38-39. Field Notes dark palette: workspace and preview.
+	app.dark = true
+	app.selectedNotebook = work.ID
+	app.selectedID = long.ID
+	app.reloadNotes()
+	app.showNote(long.ID)
+	app.toggleEdit()
+	tt.Frame()
+	capture(t, dir, "38-dark-workspace", tt)
+	app.toggleEdit()
+	tt.Frame()
+	capture(t, dir, "39-dark-preview", tt)
+	app.dark = false
+	applyPalette(false)
 }

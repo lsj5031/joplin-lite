@@ -23,6 +23,8 @@ var overpassMonoTTF []byte
 // Field Notes: sage binding, warm paper, green ink. Semantic colors remain
 // distinct so warnings and failures are never merely decorative.
 var (
+	darkPalette = false
+
 	paper       = ui.Hex("#F9FAF5") // warm paper
 	paperSunken = ui.Hex("#E9EEE3") // sage binding
 	paperRaised = ui.Hex("#F9FAF5") // a continuous reading surface
@@ -54,6 +56,58 @@ var (
 
 	shadowPopover = ui.RGBA(15, 29, 45, 0.22) // the one shadow vocabulary entry
 )
+
+// applyPalette switches the Field Notes tokens between light and dark mode.
+func applyPalette(dark bool) {
+	darkPalette = dark
+	if dark {
+		paper = ui.Hex("#20271F")
+		paperSunken = ui.Hex("#1A2119")
+		paperRaised = ui.Hex("#20271F")
+		inkNavy = ui.Hex("#E8ECDF")
+		inkSoft = ui.Hex("#AFBAA5")
+		hairline = ui.Hex("#364130")
+		hairlineStrong = ui.Hex("#67765C")
+		navyDeep = paperRaised
+		navyLine = hairline
+		navyText = inkSoft
+		routeBlue = ui.Hex("#C1D2AD")
+		routeBlueSoft = routeBlue
+		routeBlueDeep = ui.Hex("#D1E0C0")
+		routeBlueDown = ui.Hex("#A8BC93")
+		moss = ui.Hex("#6BC48A")
+		mossBright = moss
+		signalRed = ui.Hex("#F06A63")
+		signalRedSoft = signalRed
+		amberInk = ui.Hex("#E5A94C")
+		amberBright = amberInk
+		violet = routeBlue
+		shadowPopover = ui.RGBA(0, 0, 0, 0.45)
+		return
+	}
+	paper = ui.Hex("#F9FAF5")
+	paperSunken = ui.Hex("#E9EEE3")
+	paperRaised = ui.Hex("#F9FAF5")
+	inkNavy = ui.Hex("#344238")
+	inkSoft = ui.Hex("#606F5A")
+	hairline = ui.Hex("#DCE3D6")
+	hairlineStrong = ui.Hex("#A8B69F")
+	navyDeep = paperRaised
+	navyLine = hairline
+	navyText = inkSoft
+	routeBlue = ui.Hex("#566C4A")
+	routeBlueSoft = routeBlue
+	routeBlueDeep = ui.Hex("#485C3D")
+	routeBlueDown = ui.Hex("#3C4E32")
+	moss = ui.Hex("#276B43")
+	mossBright = moss
+	signalRed = ui.Hex("#C8322B")
+	signalRedSoft = signalRed
+	amberInk = ui.Hex("#8A5A12")
+	amberBright = amberInk
+	violet = routeBlue
+	shadowPopover = ui.RGBA(15, 29, 45, 0.22)
+}
 
 // Installed Humanist families with bundled Overpass fallbacks.
 var (
@@ -126,6 +180,9 @@ func registerFonts() {
 // designTheme carries Field Notes into MyGo's standard widgets.
 func designTheme() *ui.Theme {
 	t := ui.LightTheme()
+	if darkPalette {
+		t = ui.DarkTheme()
+	}
 	t.Background = paper
 	t.Surface = paperRaised
 	t.SurfaceHover = paperSunken
@@ -137,7 +194,10 @@ func designTheme() *ui.Theme {
 	t.AccentHover = routeBlueDeep
 	t.AccentPressed = routeBlueDown
 	t.AccentText = paper
-	t.Dark = false
+	if darkPalette {
+		t.AccentText = paperSunken
+	}
+	t.Dark = darkPalette
 	t.Danger = signalRed
 	t.Warning = amberInk
 	t.Success = moss
@@ -171,6 +231,9 @@ func actionTheme() *ui.Theme {
 	t.AccentHover = routeBlueDeep
 	t.AccentPressed = routeBlueDown
 	t.AccentText = paper
+	if darkPalette {
+		t.AccentText = paperSunken
+	}
 	return t
 }
 
@@ -196,7 +259,7 @@ func dangerTheme() *ui.Theme {
 	t.Accent = signalRed
 	t.AccentHover = ui.Hex("#AD2A24")
 	t.AccentPressed = ui.Hex("#93231E")
-	t.AccentText = paper
+	t.AccentText = ui.Hex("#F9FAF5")
 	return t
 }
 

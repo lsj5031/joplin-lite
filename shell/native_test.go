@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
@@ -1865,4 +1867,170 @@ func TestNativePopoverFiltersAndConflictCount(t *testing.T) {
 		t.Fatalf("created top-level notebook = %#v", created)
 	}
 }
+
+func TestNativeConflictDialogComparisonAndKeepOriginal(t *testing.T) {
+	registerFonts()
+	app, _ := openNativeTestApp(t)
+	original := addTestNote(t, app.svc, "", "Original title", "original body line 1\noriginal body line 2")
+	conflict := &models.Note{
+		Title:              "Conflict title",
+		Body:               "conflict body line 1",
+		IsConflict:         1,
+		ConflictOriginalID: original.ID,
+	}
+	if err := app.svc.CreateNote(conflict); err != nil {
+		t.Fatalf("CreateNote conflict: %v", err)
+	}
+	app.selectedNotebook = conflictsRail
+	app.reloadNotes()
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	if err := tt.Click("Resolve conflict"); err != nil {
+		t.Fatalf("click Resolve conflict: %v", err)
+	}
+	for _, want := range []string{
+		"This conflict copy",
+		"Original note",
+		"Original title",
+		"original body line 1",
+		"Conflict: 4 words (1 lines)  ·  Original: 8 words (2 lines)",
+	} {
+		if !tt.HasText(want) {
+			t.Fatalf("conflict comparison dialog missing %q; texts = %v", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("Keep original"); err != nil {
+		t.Fatalf("click Keep original: %v", err)
+	}
+	if got, _ := app.svc.GetNote(conflict.ID); got != nil {
+		t.Fatalf("conflict copy still exists after Keep original: %#v", got)
+	}
+	if got, err := app.svc.GetNote(original.ID); err != nil || got == nil || got.Body != original.Body {
+		t.Fatalf("original note altered after Keep original: %#v, err %v", got, err)
+	}
+	if app.conflictCount != 0 {
+		t.Fatalf("conflictCount = %d, want 0", app.conflictCount)
+	}
+}
+
+func TestNativeDarkAppearanceSetting(t *testing.T) {
+	registerFonts()
+	app, db := openNativeTestApp(t)
+	app.loadSettings = func() desktopSettings {
+		return desktopSettings{Target: targetOff, APIToken: "test-token", Dark: loadDarkSetting(db)}
+	}
+	app.applySettings = func(s desktopSettings) error {
+		if err := s.validate(); err != nil {
+			return err
+		}
+		return s.save(db)
+	}
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	if app.dark || darkPalette {
+		t.Fatal("expected light mode by default")
+	}
+
+	// Preview Dark in Settings, then Cancel -> restores Light.
+	app.openSettings()
+	tt.Frame()
+	if err := tt.Click("Dark"); err != nil {
+		t.Fatalf("click Dark segment: %v", err)
+	}
+	tt.Frame()
+	if !app.dark || !darkPalette {
+		t.Fatal("clicking Dark should preview dark palette immediately")
+	}
+	if err := tt.Click("Cancel settings"); err != nil {
+		t.Fatalf("click Cancel settings: %v", err)
+	}
+	tt.Frame()
+	if app.dark || darkPalette {
+		t.Fatal("cancelling settings should restore previous appearance")
+	}
+
+	// Reopen Settings, choose Dark, Save -> persists in key_values.
+	app.openSettings()
+	tt.Frame()
+	if err := tt.Click("Dark"); err != nil {
+		t.Fatalf("click Dark segment: %v", err)
+	}
+	if err := tt.Click("Save settings"); err != nil {
+		t.Fatalf("click Save settings: %v", err)
+	}
+	tt.Frame()
+	if !app.dark || !loadDarkSetting(db) {
+		t.Fatal("saving Dark appearance did not persist")
+	}
+	if fresh := newNativeApp(db); !fresh.dark {
+		t.Fatal("fresh app did not load persisted dark setting")
+	}
+	// Reset global palette for subsequent tests.
+	applyPalette(false)
+}
+
+func TestNativeEditorAttachAndPaste(t *testing.T) {
+	registerFonts()
+	app, db := openNativeTestApp(t)
+	note := addTestNote(t, app.svc, "", "Field Log", "Initial entry.")
+	app.reloadNotes()
+	app.showNote(note.ID)
+
+	tmpDir := t.TempDir()
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 86, G: 108, B: 74, A: 255}}, image.Point{}, draw.Src)
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	imgPath := filepath.Join(tmpDir, "diagram.png")
+	if err := os.WriteFile(imgPath, pngBuf.Bytes(), 0o600); err != nil {
+		t.Fatalf("write png: %v", err)
+	}
+	docPath := filepath.Join(tmpDir, "notes.txt")
+	if err := os.WriteFile(docPath, []byte("attachment text"), 0o600); err != nil {
+		t.Fatalf("write txt: %v", err)
+	}
+
+	app.pickAttachmentPaths = func() ([]string, error) {
+		return []string{imgPath, docPath}, nil
+	}
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	if err := tt.Click("Attach file"); err != nil {
+		t.Fatalf("click Attach file: %v", err)
+	}
+	if !strings.Contains(app.body, "![diagram.png](:/") || !strings.Contains(app.body, "[notes.txt](:/") {
+		t.Fatalf("expected image and file markdown links in body, got %q", app.body)
+	}
+	saved, err := app.svc.GetNote(note.ID)
+	if err != nil || saved == nil {
+		t.Fatalf("GetNote: %v", err)
+	}
+	linked, err := db.GetResourcesByNote(saved.ID)
+	if err != nil || len(linked) != 2 {
+		t.Fatalf("GetResourcesByNote = %#v, err %v (body=%q)", linked, err, saved.Body)
+	}
+
+	// Paste a PNG image from the clipboard into the focused editor.
+	if err := tt.Click("Edit"); err != nil {
+		t.Fatalf("click Edit: %v", err)
+	}
+	if !tt.Focused("Note body") {
+		if err := tt.Click("Note body"); err != nil {
+			t.Fatalf("focus Note body: %v", err)
+		}
+	}
+	tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, pngBuf.Bytes()))))
+	tt.Key(ui.Cmd, ui.KeyV)
+	tt.Frame()
+	if !strings.Contains(app.body, "![pasted-image.png](:/") {
+		t.Fatalf("expected pasted image link in body, got %q", app.body)
+	}
+	linked, err = db.GetResourcesByNote(note.ID)
+	if err != nil || len(linked) != 3 {
+		t.Fatalf("GetResourcesByNote after paste = %#v, err %v", linked, err)
+	}
+}
+
 

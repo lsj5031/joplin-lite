@@ -42,6 +42,10 @@ const (
 // MyGO UI over service/, with no webview and no HTTP.
 type nativeApp struct {
 	svc *service.Service
+	db  *store.DB
+
+	dark      bool
+	savedDark bool
 
 	notebooks     []*models.Folder // flat, parents before children
 	notebookTree  []*models.Folder // roots with Children
@@ -111,8 +115,11 @@ type nativeApp struct {
 	tagAttachNote         bool
 	tagTitle              string
 	tagErr                string
-	confirmDeleteTag      bool
-	resolveConflict       bool
+	confirmDeleteTag        bool
+	resolveConflict         bool
+	conflictOriginal        *models.Note
+	pickAttachmentPaths     func() ([]string, error)
+	pendingInsert           string
 	notebookActions         bool
 	notebookOpen            bool
 	notebookRename          bool
@@ -173,7 +180,8 @@ func (a *nativeApp) targetLabel() string {
 }
 
 func newNativeApp(db *store.DB) *nativeApp {
-	app := &nativeApp{svc: service.New(db), selectedNote: -1}
+	dark := loadDarkSetting(db)
+	app := &nativeApp{svc: service.New(db), db: db, dark: dark, savedDark: dark, selectedNote: -1}
 	// Screenshot attachments can decode to hundreds of MB; load one at a time.
 	var imageMu sync.Mutex
 	app.md = &markdown.Options{LoadImage: func(ref string) (ui.ImageSource, error) {
@@ -1040,6 +1048,129 @@ func (a *nativeApp) setTodo(on bool) {
 	}
 }
 
+// openResolveConflict snapshots the original note (if still present) and opens
+// the conflict resolution modal.
+func (a *nativeApp) openResolveConflict() {
+	a.conflictOriginal = nil
+	if a.note != nil && a.note.ConflictOriginalID != "" {
+		if orig, err := a.svc.GetNote(a.note.ConflictOriginalID); err == nil {
+			a.conflictOriginal = orig
+		}
+	}
+	a.resolveConflict = true
+}
+
+// conflictDialog shows the conflict copy alongside the original note (when
+// present) so the user can compare both versions before choosing one.
+func (a *nativeApp) conflictDialog(c *ui.Context, t *ui.Theme) {
+	if !a.resolveConflict {
+		return
+	}
+	ui.Modal(c, &a.resolveConflict, func() {
+		ui.Text(c, "Keep this version?").FontSize(sizeBody).Bold()
+		ui.Text(c, "Copies this version to the original, then removes the conflict. If the original is missing, keeps this note as a regular note. Errors leave the conflict intact.").
+			MaxWidth(520).TextColor(inkSoft)
+
+		if orig := a.conflictOriginal; orig != nil {
+			ui.Row(c).Width(520).Gap(10).AlignItems(ui.Stretch).Children(func() {
+				conflictCard := func(heading string, headingColor ui.Color, titleText, bodyText, key string) {
+					ui.Column(c).Width(255).Shrink(0).Padding(10, 12).Gap(6).
+						Background(paperSunken).Border(1, hairline).Radius(radiusControl).Children(func() {
+						ui.Text(c, heading).FontSize(sizeSmall).Bold().TextColor(headingColor)
+						name := strings.TrimSpace(titleText)
+						if name == "" {
+							name = "Untitled"
+						}
+						ui.Text(c, name).FontSize(sizeUI).Bold().SingleLine()
+						preview := strings.TrimSpace(bodyText)
+						if preview == "" {
+							preview = "(Empty note)"
+						}
+						ui.Scroll(c.Key(key)).MaxHeight(130).Children(func() {
+							ui.Text(c, clip(preview, 360)).Font(fontMono).FontSize(sizeMonoSm).
+								LineHeight(1.45).TextColor(inkSoft).MaxWidth(225)
+						})
+					})
+				}
+				conflictCard("This conflict copy", amberInk, a.title, a.body, "conflict-copy-preview")
+				conflictCard("Original note", inkSoft, orig.Title, orig.Body, "conflict-orig-preview")
+			})
+			ui.Text(c, conflictDiffSummary(a.body, orig.Body)).
+				Font(fontMono).FontSize(sizeMonoSm).TextColor(inkSoft)
+		} else {
+			ui.Column(c).Width(420).Padding(10, 12).Gap(4).
+				Background(paperSunken).Border(1, hairline).Radius(radiusControl).Children(func() {
+				ui.Text(c, "Original note not on this device").FontSize(sizeSmall).Bold().TextColor(amberInk)
+				ui.Text(c, "Keeping this version turns the conflict copy into a regular note in place.").
+					FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(390)
+			})
+		}
+
+		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+			if ui.Button(c, "Cancel").AutoFocus().Clicked() {
+				a.resolveConflict = false
+			}
+			if a.conflictOriginal != nil {
+				if ui.Button(c, "Keep original").Tooltip("Discard this conflict copy and keep the original note").Clicked() {
+					a.resolveConflict = false
+					a.keepOriginalVersion()
+				}
+			}
+			if underTheme(c, actionTheme, func() ui.Element { return ui.PrimaryButton(c, "Keep this version") }).Clicked() {
+				a.resolveConflict = false
+				a.keepConflictVersion()
+			}
+		})
+	})
+}
+
+func conflictDiffSummary(conflictBody, origBody string) string {
+	cw := len(strings.Fields(conflictBody))
+	ow := len(strings.Fields(origBody))
+	cl := len(strings.Split(strings.TrimSpace(conflictBody), "\n"))
+	if strings.TrimSpace(conflictBody) == "" {
+		cl = 0
+	}
+	ol := len(strings.Split(strings.TrimSpace(origBody), "\n"))
+	if strings.TrimSpace(origBody) == "" {
+		ol = 0
+	}
+	return fmt.Sprintf("Conflict: %d words (%d lines)  ·  Original: %d words (%d lines)", cw, cl, ow, ol)
+}
+
+// keepOriginalVersion discards the conflict copy and keeps the original note.
+func (a *nativeApp) keepOriginalVersion() {
+	if a.note == nil || a.note.IsConflict == 0 {
+		return
+	}
+	conflictID := a.note.ID
+	origID := a.note.ConflictOriginalID
+	if origID == "" {
+		return
+	}
+	original, err := a.svc.GetNote(origID)
+	if err != nil {
+		a.saveErr = err.Error()
+		return
+	}
+	if original == nil {
+		a.saveErr = "The original note is no longer on this device."
+		return
+	}
+	a.dirty = false
+	if err := a.svc.DeleteNote(conflictID); err != nil {
+		a.saveErr = err.Error()
+		return
+	}
+	a.saveErr = ""
+	a.note = nil
+	a.selectedID = ""
+	a.title, a.body = "", ""
+	a.noteTags = nil
+	a.reloadNotebooks()
+	a.reloadNotes()
+}
+
 // keepConflictVersion copies the conflict's title and body onto the original
 // note and deletes the conflict. If the original is gone, the conflict becomes
 // a normal note in place, preserving its content, tags and ID.
@@ -1086,6 +1217,117 @@ func (a *nativeApp) keepConflictVersion() {
 	a.noteTags = nil
 	a.reloadNotebooks()
 	a.reloadNotes()
+}
+
+// attachFiles creates Joplin resources for each local file path and appends
+// their Markdown references to the open note.
+func (a *nativeApp) attachFiles(paths []string) {
+	if a.note == nil || len(paths) == 0 {
+		return
+	}
+	refs := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		_, ref, err := a.svc.AttachFile(p)
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		refs = append(refs, ref)
+	}
+	a.insertAttachmentRefs(refs)
+}
+
+func (a *nativeApp) queuePasteFiles(paths []string) bool {
+	if a.note == nil || len(paths) == 0 {
+		return false
+	}
+	refs := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		_, ref, err := a.svc.AttachFile(p)
+		if err != nil {
+			a.saveErr = err.Error()
+			return true
+		}
+		refs = append(refs, ref)
+	}
+	if len(refs) == 0 {
+		return false
+	}
+	a.pendingInsert = strings.Join(refs, "\n")
+	return true
+}
+
+func (a *nativeApp) queuePasteBytes(filename, mimeType string, data []byte) bool {
+	if a.note == nil || len(data) == 0 {
+		return false
+	}
+	_, ref, err := a.svc.AttachBytes(filename, mimeType, data)
+	if err != nil {
+		a.saveErr = err.Error()
+		return true
+	}
+	a.pendingInsert = ref
+	return true
+}
+
+func (a *nativeApp) insertAttachmentRefs(refs []string) {
+	if a.note == nil || len(refs) == 0 {
+		return
+	}
+	block := strings.Join(refs, "\n")
+	switch {
+	case strings.TrimSpace(a.body) == "":
+		a.body = block
+	case strings.HasSuffix(a.body, "\n\n"):
+		a.body += block
+	case strings.HasSuffix(a.body, "\n"):
+		a.body += "\n" + block
+	default:
+		a.body += "\n\n" + block
+	}
+	a.markDirty()
+	a.flush()
+}
+
+// promptAttachFiles opens a file picker (or invokes pickAttachmentPaths in
+// headless tests) and attaches the chosen files to the open note.
+func (a *nativeApp) promptAttachFiles() {
+	if a.note == nil {
+		return
+	}
+	if a.pickAttachmentPaths != nil {
+		paths, err := a.pickAttachmentPaths()
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		a.attachFiles(paths)
+		return
+	}
+	go func() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Title:    "Attach files",
+			Multiple: true,
+		})
+		mygo.RunOnMain(func() {
+			if err != nil {
+				a.saveErr = err.Error()
+			} else if len(paths) > 0 {
+				a.attachFiles(paths)
+			}
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		})
+	}()
 }
 
 // deleteNote removes the open note and loads the next one. Pending edits are
@@ -1290,7 +1532,13 @@ func (a *nativeApp) openSettings() {
 	case a.be != nil:
 		a.settings = a.be.Settings()
 	default:
-		a.settings = desktopSettings{}
+		a.settings = desktopSettings{Dark: a.dark}
+	}
+	a.savedDark = a.dark
+	if a.settings.Dark {
+		a.dark = true
+	} else {
+		a.settings.Dark = a.dark
 	}
 	a.settingsErr = ""
 	a.settingsReveal = false
@@ -1333,6 +1581,9 @@ func (a *nativeApp) submitSettings() {
 		a.settingsErr = err.Error()
 		return
 	}
+	a.dark = a.settings.Dark
+	a.savedDark = a.dark
+	_ = saveDarkSetting(a.db, a.dark)
 	a.settingsOpen = false
 	a.settingsErr = ""
 	// Even when the new target is off, one poll refreshes rows after the
@@ -1355,6 +1606,16 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 		_, height := c.Size()
 		ui.Scroll(c.Key("settings-fields")).Width(420).MaxHeight(max(120, height-210)).Children(func() {
 			ui.Column(c).Gap(8).Children(func() {
+				appearancePick := 0
+				if a.settings.Dark {
+					appearancePick = 1
+				}
+				appSeg := ui.Segmented(c, &appearancePick, "Light", "Dark").Label("Appearance")
+				if appSeg.Changed() {
+					a.settings.Dark = appearancePick == 1
+					a.dark = a.settings.Dark
+				}
+
 				labels, targets := a.settingsTargets()
 				seg := ui.Segmented(c, &a.settingsPick, labels...).Label("Sync target")
 				if seg.Changed() {
@@ -1422,6 +1683,8 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "Cancel").Label("Cancel settings").Clicked() {
+				a.dark = a.savedDark
+				a.settings.Dark = a.savedDark
 				a.settingsOpen = false
 			}
 			if primaryAction(c, "Save").Label("Save settings").Clicked() {
@@ -1429,6 +1692,10 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 			}
 		})
 	})
+	if !a.settingsOpen {
+		a.dark = a.savedDark
+		a.settings.Dark = a.savedDark
+	}
 }
 
 func (a *nativeApp) statusText() string {

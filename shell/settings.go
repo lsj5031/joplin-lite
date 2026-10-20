@@ -25,6 +25,7 @@ const (
 	settingPassword       = "desktop.sync.9.password"
 	settingMasterPassword = "desktop.e2ee.master_password"
 	settingAPIToken       = "desktop.api.token"
+	settingDark           = "desktop.dark"
 )
 
 // Sync targets the native dialog can configure. Dropbox (7) and S3 (8) need an
@@ -46,6 +47,7 @@ type desktopSettings struct {
 	Password       string
 	MasterPassword string
 	APIToken       string
+	Dark           bool
 }
 
 // settingsFromConfig fills the dialog with the config that is actually in
@@ -97,12 +99,38 @@ func loadStoredSettings(db *store.DB) (desktopSettings, bool, error) {
 		}
 		*dst = v
 	}
+	s.Dark = loadDarkSetting(db)
 	return s, true, nil
+}
+
+// loadDarkSetting reads the persisted appearance preference from key_values.
+func loadDarkSetting(db *store.DB) bool {
+	if db == nil {
+		return false
+	}
+	v, err := db.GetSetting(settingDark)
+	return err == nil && v == "1"
+}
+
+// saveDarkSetting stores the appearance preference in key_values.
+func saveDarkSetting(db *store.DB, dark bool) error {
+	if db == nil {
+		return nil
+	}
+	val := "0"
+	if dark {
+		val = "1"
+	}
+	return db.SetSetting(settingDark, val)
 }
 
 // save writes every field, so the dialog is the single source of truth after
 // the first save and clearing a field really clears it.
 func (s desktopSettings) save(db *store.DB) error {
+	darkVal := "0"
+	if s.Dark {
+		darkVal = "1"
+	}
 	values := map[string]string{
 		settingSyncTarget:     strconv.Itoa(s.Target),
 		settingLocalDir:       strings.TrimSpace(s.LocalDir),
@@ -111,6 +139,7 @@ func (s desktopSettings) save(db *store.DB) error {
 		settingPassword:       s.Password,
 		settingMasterPassword: s.MasterPassword,
 		settingAPIToken:       strings.TrimSpace(s.APIToken),
+		settingDark:           darkVal,
 	}
 	for key, value := range values {
 		if err := db.SetSetting(key, value); err != nil {

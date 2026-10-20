@@ -6,7 +6,7 @@ measure rather than texture, artificial folds, or decorative cards.
 
 ## Palette
 
-| Role | Light | Browser dark |
+| Role | Light | Dark |
 | --- | --- | --- |
 | Paper / editor | `#F9FAF5` | `#20271F` |
 | Binding / navigation | `#E9EEE3` | `#1A2119` |
@@ -18,7 +18,7 @@ measure rather than texture, artificial folds, or decorative cards.
 
 Selection uses a light sage tint and a clear edge. Red remains reserved for destructive
 actions, conflicts, and errors; amber indicates warnings. Status always includes text.
-The native shell currently uses the light palette.
+Both the native shell and browser support the light and dark palettes.
 
 ## Typography
 

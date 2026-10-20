@@ -436,7 +436,7 @@ func (b *backend) Settings() desktopSettings {
 		return desktopSettings{}
 	}
 	if b.cfg == nil {
-		return desktopSettings{APIToken: b.token}
+		return desktopSettings{APIToken: b.token, Dark: loadDarkSetting(b.db)}
 	}
 	b.syncMu.Lock()
 	cfg := *b.cfg
@@ -445,7 +445,9 @@ func (b *backend) Settings() desktopSettings {
 		cfg.NoSync = false // Keep the protected target visible even on a local-only run.
 	}
 	b.syncMu.Unlock()
-	return settingsFromConfig(&cfg)
+	s := settingsFromConfig(&cfg)
+	s.Dark = loadDarkSetting(b.db)
+	return s
 }
 
 // ApplySettings validates and persists the dialog's values, then applies them

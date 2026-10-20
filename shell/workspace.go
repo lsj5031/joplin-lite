@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 
@@ -32,6 +33,7 @@ func (a *nativeApp) view(c *ui.Context) {
 		a.invalidate = c.Services().Invalidate
 	}
 	// DESIGN.md's palette and type scale, applied to every widget.
+	applyPalette(a.dark)
 	c.SetTheme(designTheme())
 	t := c.Theme()
 
@@ -56,14 +58,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.tagDialogs(c, t)
 	a.settingsDialog(c, t)
 	a.savedSearchDialog(c, t)
-
-	if a.resolveConflict {
-		if confirmDialog(c, actionTheme, &a.resolveConflict, "Keep this version?",
-			"Copies this version to the original, then removes the conflict. If the original is missing, keeps this note as a regular note. Errors leave the conflict intact.",
-			"Keep this version") == 1 {
-			a.keepConflictVersion()
-		}
-	}
+	a.conflictDialog(c, t)
 
 	if a.confirmDelete {
 		if confirmDialog(c, dangerTheme, &a.confirmDelete, "Delete note?",
@@ -825,7 +820,16 @@ func (a *nativeApp) emptyList(c *ui.Context, t *ui.Theme) {
 // editorPane is the work surface: the note's title, its state, its tags, and
 // the Markdown editor or the rendered preview of its body.
 func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Grow(1).MinWidth(0).Background(paperRaised).Children(func() {
+	pane := ui.Column(c).Grow(1).MinWidth(0).Background(paperRaised)
+	if a.note != nil {
+		if files := pane.DroppedFiles(); len(files) > 0 {
+			a.attachFiles(files)
+		}
+		if pane.FileDragOver() {
+			pane.Border(2, routeBlue)
+		}
+	}
+	pane.Children(func() {
 		a.editorHeader(c, t)
 		hairlineRule(c)
 		if a.note == nil {
@@ -833,7 +837,12 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		if a.editing {
+			if a.pendingInsert != "" {
+				a.insertAttachmentRefs([]string{a.pendingInsert})
+				a.pendingInsert = ""
+			}
 			// Keep the writing surface quiet; code remains monospace in preview.
+			svc := c.Services()
 			editor := ui.TextArea(c.Key("body:"+a.note.ID), &a.body).
 				Placeholder("Write in Markdown…").
 				Label("Note body").
@@ -845,6 +854,19 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 				Border(0, ui.Transparent).
 				FillWidth().
 				Grow(1)
+			editor.OnPaste(func(text string) bool {
+				if text != "" {
+					return false
+				}
+				data := svc.ReadClipboardData(transfer.FileList, transfer.PNG)
+				if files, err := data.Files(); err == nil && len(files) > 0 {
+					return a.queuePasteFiles(files)
+				}
+				if pngBytes, err := data.Read(transfer.PNG); err == nil && len(pngBytes) > 0 {
+					return a.queuePasteBytes("pasted-image.png", "image/png", pngBytes)
+				}
+				return false
+			})
 			if a.focusBody {
 				editor.SetTextSelection(0, 0).AutoFocus()
 				a.focusBody = false
@@ -936,10 +958,10 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "Conflict").FontSize(sizeMonoSm).Bold().TextColor(amberInk)
 				})
 				resolve := ui.Button(c, "Resolve conflict").
-					Tooltip("Choose how to keep this version")
+					Tooltip("Compare versions and resolve this conflict")
 				resolve.Padding(4, 8)
 				if resolve.Clicked() {
-					a.resolveConflict = true
+					a.openResolveConflict()
 				}
 				if a.note.ConflictOriginalID != "" {
 					if ui.Button(c, "View original").Tooltip("Inspect the original; return with " + historyHint(false)).Clicked() {
@@ -977,6 +999,12 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 				a.moveOpen = !a.moveOpen
 			}
 			a.menu(c, move, &a.moveOpen, "move", 240, func() { a.moveMenu(c, t) })
+
+			attach := ui.Button(c, "Attach…").Label("Attach file").Tooltip("Attach an image or file to this note")
+			attach.Padding(4, 8)
+			if attach.Clicked() {
+				a.promptAttachFiles()
+			}
 
 			del := ui.Button(c, "Delete…").Label("Delete note").Tooltip("Delete note")
 			del.Padding(4, 8)
