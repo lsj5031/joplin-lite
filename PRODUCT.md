@@ -4,15 +4,15 @@
 
 ## Platform
 
-web
+desktop (native Go UI via MyGO `ui` in `shell/`; optional standalone browser SPA in `web/`)
 
 ## Stack
 
-TanStack Start (latest) + React + TypeScript — user-directed ("try tanstack.com/start/latest with react"). Prototype UI lives in `web/`. The production shell is MyGO (webview) over a headless Go backend; editor dependencies planned earlier (CodeMirror 6, markdown-it, KaTeX, DOMPurify) still govern note rendering. [inferred from INTENT.md] the prototype's data layer is mock-only in this phase and swaps to MyGO typed bindings later.
+Go (`CGO_ENABLED=0`) + MyGO native `ui` (`shell/`) over the headless Go `service/`, `internal/store/`, `internal/sync/`, and `internal/clipper/` packages. There is no embedded webview, Chromium/WebView2 process, or Node runtime in the desktop binary. An optional React/TanStack browser UI lives in `web/` for standalone browser preview over the HTTP Data API.
 
 ## Users
 
-[inferred from INTENT.md] Primary user: the project owner — a developer and long-time Joplin user who keeps one note library shared with Joplin desktop and mobile, synced to their own Dropbox target with E2EE enabled, and clips pages from the browser with the official Web Clipper extension. Situation: wants notes open instantly, without the ~200 MB Electron footprint. Job: capture, read, edit, and sync the same library everywhere with zero data risk.
+Primary user: the project owner — a developer and long-time Joplin user who keeps one note library shared with Joplin desktop and mobile, synced to their own Dropbox target with E2EE enabled, and clips pages from the browser with the official Web Clipper extension. Situation: wants notes open instantly, without the ~200 MB Electron footprint. Job: capture, read, edit, and sync the same library everywhere with zero data risk.
 
 ## Product Purpose
 
@@ -24,7 +24,7 @@ A real Joplin peer at a fraction of the footprint: full E2EE and multi-target sy
 
 ## Operating Context
 
-Runs as a desktop app (MyGO webview shell) beside Joplin desktop and mobile on the same sync target. The clipper extension in the browser talks to a loopback server (default port 41184, ping-scanned 41184–41194). E2EE master password is entered by the user; it never leaves clients. Sync targets are the user's own Dropbox (v1 driver), later local folder / WebDAV / S3 / Joplin Server / OneDrive.
+Runs as a single-process native desktop app (`shell/`, rendered directly by MyGO `ui`) beside Joplin desktop and mobile on the same sync target. The clipper extension in the browser talks to the in-process loopback server (default port 41184, ping-scanned 41184–41194). E2EE master password is entered by the user or read in memory via explicit official Keychain launch opt-in; it never leaves clients. Sync targets are the user's own Dropbox, local folder, Joplin Server, and optional S3.
 
 ## Capabilities and Constraints
 
@@ -40,13 +40,13 @@ Runs as a desktop app (MyGO webview shell) beside Joplin desktop and mobile on t
 
 ## Brand Commitments
 
-Name: **joplin-lite**. No other identity assets exist yet. [inferred] visual identity for the UI is open — this prototype establishes it.
+Name: **joplin-lite**. Visual direction: **Field Notes — Humanist** (`DESIGN.md`), featuring a sage binding (`#E9EEE3`), warm paper editor (`#F9FAF5`), green-charcoal ink (`#344238`), forest accent (`#566C4A`), Optima headings, Avenir Next reading/UI copy, Overpass Mono machine metadata, and a folded-sheet mark.
 
 ## Evidence on Hand
 
-- `reference/go-joplin` — the AGPL fork: proven `internal/e2ee` port, item serialize/unserialize, SQLite store, sync engine + S3/Joplin-Server drivers, clipper server. Path: `reference/go-joplin/`.
-- `INTENT.md` — requirements and success criteria (authoritative for product truth).
-- Real encrypted notes on the user's Dropbox sync target exist but are not in this repository. No user-facing UI exists yet; all prototype data is synthetic mock content and must be labeled as such.
+- `shell/` — native desktop workspace, editor/preview, notebook/tag management, sync status footer, Settings dialog, and 36 headless screenshot states (`TestCaptureScreens`).
+- `reference/go-joplin` — the AGPL fork: proven `internal/e2ee` port, item serialize/unserialize, SQLite store, sync engine + S3/Joplin-Server drivers, clipper server.
+- `INTENT.md` and `DESIGN.md` — requirements, success criteria, and Field Notes visual specification.
 
 ## Product Principles
 

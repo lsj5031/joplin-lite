@@ -99,8 +99,8 @@ func (db *DB) FolderTree() ([]*models.Folder, error) {
 		return nil, err
 	}
 
-	// Count notes per folder
-	rows, err := db.Query("SELECT parent_id, COUNT(*) FROM notes GROUP BY parent_id")
+	// Count non-conflict notes per folder so rail counts match the notebook list.
+	rows, err := db.Query("SELECT parent_id, COUNT(*) FROM notes WHERE is_conflict = 0 GROUP BY parent_id")
 	if err != nil {
 		return nil, err
 	}

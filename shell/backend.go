@@ -58,6 +58,7 @@ type backend struct {
 	closed     bool
 
 	status *syncStatus
+	notify func()
 	launch launchSettings
 
 	// logRestore closes the desktop log file and puts the previous default
@@ -91,6 +92,7 @@ type syncStatus struct {
 	kind     syncFailure
 	retry    time.Time
 	persist  func(time.Time) error
+	notify   func()
 }
 
 // syncSnapshot is a consistent copy of the sync state.
@@ -108,6 +110,27 @@ type syncSnapshot struct {
 	Retry time.Time
 }
 
+func (s *syncStatus) setNotify(fn func()) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.notify = fn
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) wake() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	fn := s.notify
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // reset clears the last result when a new sync engine (a new target) replaces
 // the old one, so the footer does not show the previous target's failure.
 func (s *syncStatus) reset() {
@@ -116,12 +139,14 @@ func (s *syncStatus) reset() {
 	s.phase = ""
 	s.kind, s.retry = syncFailureNone, time.Time{}
 	s.mu.Unlock()
+	s.wake()
 }
 
 func (s *syncStatus) request() {
 	s.mu.Lock()
 	s.pending = true
 	s.mu.Unlock()
+	s.wake()
 }
 
 func (s *syncStatus) start() {
@@ -130,12 +155,17 @@ func (s *syncStatus) start() {
 	s.phase = ""
 	s.retry = time.Time{}
 	s.mu.Unlock()
+	s.wake()
 }
 
 func (s *syncStatus) progress(phase string) {
 	s.mu.Lock()
+	changed := s.phase != phase
 	s.phase = phase
 	s.mu.Unlock()
+	if changed {
+		s.wake()
+	}
 }
 
 func (s *syncStatus) finish(err error) {
@@ -155,6 +185,7 @@ func (s *syncStatus) finish(err error) {
 		}
 	}
 	s.mu.Unlock()
+	s.wake()
 }
 
 // retryIn records the automatic retry the loop has armed.
@@ -162,6 +193,7 @@ func (s *syncStatus) retryIn(at time.Time) {
 	s.mu.Lock()
 	s.retry = at
 	s.mu.Unlock()
+	s.wake()
 }
 
 func (s *syncStatus) snapshot(enabled bool) syncSnapshot {
@@ -469,7 +501,7 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 	b.engine = nil
 	// A finishing old pass may still persist its own target's timestamp, but
 	// cannot publish that result as the newly selected target's status.
-	b.status = &syncStatus{}
+	b.status = &syncStatus{notify: b.notify}
 	b.cfg = &cfg
 	b.token = cfg.APIToken
 	b.syncGen++
@@ -516,6 +548,20 @@ func (b *backend) SyncNow() bool {
 
 // TriggerSync satisfies clipper.SyncTrigger: a mutation queues a pass.
 func (b *backend) TriggerSync() { b.SyncNow() }
+
+// setNotify registers a callback invoked whenever sync state changes.
+func (b *backend) setNotify(fn func()) {
+	if b == nil {
+		return
+	}
+	b.syncMu.Lock()
+	b.notify = fn
+	status := b.status
+	b.syncMu.Unlock()
+	if status != nil {
+		status.setNotify(fn)
+	}
+}
 
 // SyncState returns a consistent snapshot of the sync state for the UI. Sync
 // counts as enabled whenever the effective config has a target, even during

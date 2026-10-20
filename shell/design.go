@@ -174,8 +174,8 @@ func actionTheme() *ui.Theme {
 	return t
 }
 
-// primaryAction is the route-blue button. MyGO colors primary buttons from the
-// accent, so the action theme goes on for the construction only.
+// primaryAction is the sage-accented primary button. MyGO colors primary buttons
+// from the accent, so the action theme goes on for the construction only.
 func primaryAction(c *ui.Context, label string) ui.Element {
 	return underTheme(c, actionTheme, func() ui.Element { return ui.PrimaryButton(c, label) })
 }
@@ -190,7 +190,7 @@ func underTheme(c *ui.Context, t func() *ui.Theme, make func() ui.Element) ui.El
 
 // dangerTheme is designTheme with signal red on the accent, for the destructive
 // button of a confirmation that deletes something: destroying work is red,
-// never the violet selection or the route-blue primary action.
+// never the sage selection or primary action.
 func dangerTheme() *ui.Theme {
 	t := designTheme()
 	t.Accent = signalRed
@@ -221,16 +221,14 @@ func confirmDialog(c *ui.Context, theme func() *ui.Theme, open *bool, title, mes
 	return chosen
 }
 
-// sidebarButtons keeps the toolbar chrome of a nav pane compact: the arrows
-// that own a pane read as one control, not as two floating buttons.
+// toolbarButton keeps the toolbar chrome of a pane compact.
 func toolbarButton(c *ui.Context, label, tip string) ui.Element {
 	btn := ui.Button(c, label).Tooltip(tip)
 	btn.Padding(4, 8).MinWidth(26)
 	return btn
 }
 
-// label is the signpost style: 11px, semibold, uppercase, +0.08em tracking.
-// It heads a section and nothing else (DESIGN.md's Label).
+// label renders a quiet 11px sentence-case section heading (DESIGN.md).
 func label(c *ui.Context, text string) ui.Element {
 	return labelOn(c, text, inkSoft)
 }

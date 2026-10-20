@@ -175,11 +175,13 @@ HTTP server down, waits for the last sync pass, and closes SQLite
 The window has a notebook tree with create/rename/delete, a keyset-paged note
 list with search, **Saved** searches and a **Sort** menu (updated, created or
 title; either direction), tags with create/rename/delete, filtering and
-per-note assignment, a Conflicts view with **Resolve conflict** (keep this
-version on the original, or preserve it as a regular note if the original
-was deleted), a title and Markdown body editor that autosaves
-after 500 ms, a rendered preview, new note, todo toggle, move to another
-notebook, delete with confirmation, and Back/Forward through visited notes.
+per-note assignment (with an inline filter and **New tag…** inside the note
+**Tags** popover), a Conflicts view with a live conflict count in the notebook
+rail and **Resolve conflict** (keep this version on the original, or preserve it
+as a regular note if the original was deleted), a title and Markdown body editor
+that starts at the top of the note and autosaves after 500 ms, a rendered
+preview, new note, todo toggle, move to another notebook (with inline notebook
+filtering), delete with confirmation, and Back/Forward through visited notes.
 Sorting pages with the same keyset cursor, so a deep page never scans the rows
 before it. Saved searches name the active query, apply it with one click and
 live in `key_values` (`desktop.saved_searches`), so they are per-device and
@@ -241,8 +243,8 @@ see the macOS re-measurement in `docs/native-ui-migration.md`. `go test ./...` i
 save settings through the real view.
 
 `CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureScreens ./` renders every
-screen — panes, filters, menus, dialogs, the narrow drawer and the five sync
-states — through the same view and writes 25 PNGs for design review against
+screen — panes, filters, menus, dialogs, the narrow drawer and the sync/progress
+states — through the same view and writes 36 PNGs for design review against
 `DESIGN.md`; it is skipped without `CAPTURE_DIR`.
 
 `CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureDemo ./` drives the same

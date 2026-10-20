@@ -147,7 +147,7 @@ func seedCaptures(t *testing.T, svc *service.Service) (work, notes *models.Folde
 		if err := svc.CreateTag(tag); err != nil {
 			t.Fatalf("CreateTag: %v", err)
 		}
-		if title == "work" {
+		if title == "work" || title == "deep-work" {
 			if err := svc.AddTag(long.ID, tag.ID); err != nil {
 				t.Fatalf("AddTag: %v", err)
 			}

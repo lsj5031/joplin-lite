@@ -1762,3 +1762,107 @@ func TestNativeResourcePreview(t *testing.T) {
 		t.Fatal("rendering rewrote the original Markdown")
 	}
 }
+
+func TestNativePopoverFiltersAndConflictCount(t *testing.T) {
+	registerFonts()
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+
+	work := &models.Folder{Title: "Work"}
+	archive := &models.Folder{Title: "Archive"}
+	for _, nb := range []*models.Folder{work, archive} {
+		if err := svc.CreateNotebook(nb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, title := range []string{"alpha", "beta", "gamma"} {
+		if err := svc.CreateTag(&models.Tag{Title: title}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	note := addTestNote(t, svc, work.ID, "Plan", "body")
+	conflict := &models.Note{
+		ParentID:           work.ID,
+		Title:              "Plan (conflict)",
+		Body:               "conflict body",
+		IsConflict:         1,
+		ConflictOriginalID: note.ID,
+	}
+	if err := svc.CreateNote(conflict); err != nil {
+		t.Fatal(err)
+	}
+
+	app.reloadNotebooks()
+	app.reloadTags()
+	app.reloadNotes()
+	if app.conflictCount != 1 {
+		t.Fatalf("conflictCount = %d, want 1", app.conflictCount)
+	}
+	if got := app.notebookByID(work.ID); got == nil || got.NoteCount != 1 {
+		t.Fatalf("work NoteCount = %#v, want 1 (excluding conflict copy)", got)
+	}
+
+	tt := ui.NewTester(app.view, 1280, 800)
+
+	// Filter tags inside the note Tags popover and open New tag… from the menu.
+	if err := tt.Click("Note tags"); err != nil {
+		t.Fatalf("open note tags: %v", err)
+	}
+	if err := tt.Click("Filter tags"); err != nil {
+		t.Fatalf("focus tag filter: %v", err)
+	}
+	tt.Type("bet")
+	tt.Frame()
+	if !tt.HasText("beta") || tt.HasText("gamma") {
+		t.Fatalf("tag filter should narrow to beta: %v", tt.Texts())
+	}
+	if err := tt.Click("New tag…"); err != nil {
+		t.Fatalf("click New tag from popover: %v", err)
+	}
+	if app.tagMenuOpen || !app.tagOpen {
+		t.Fatalf("New tag… should close tagMenuOpen (%v) and open tagOpen (%v)", app.tagMenuOpen, app.tagOpen)
+	}
+	tt.Type("delta")
+	if err := tt.Click("Create"); err != nil {
+		t.Fatalf("create tag from note popover: %v", err)
+	}
+	if len(app.noteTags) != 1 || app.noteTags[0].Title != "delta" {
+		t.Fatalf("New tag… from note popover should attach tag to open note: %#v", app.noteTags)
+	}
+	tt.Frame()
+
+	// Filter notebooks inside the Move popover.
+	if err := tt.Click("Move note"); err != nil {
+		t.Fatalf("open move menu: %v", err)
+	}
+	if err := tt.Click("Filter notebooks"); err != nil {
+		t.Fatalf("focus notebook filter: %v", err)
+	}
+	tt.Type("arch")
+	tt.Frame()
+	if err := tt.Click("Move to Archive"); err != nil {
+		t.Fatalf("move filtered notebook: %v", err)
+	}
+	if app.note == nil || app.note.ParentID != archive.ID {
+		t.Fatalf("note parent = %v, want %s", app.note, archive.ID)
+	}
+	if w, a := app.notebookByID(work.ID), app.notebookByID(archive.ID); w.NoteCount != 0 || a.NoteCount != 1 {
+		t.Fatalf("counts after move: work=%d archive=%d, want 0 and 1", w.NoteCount, a.NoteCount)
+	}
+
+	// Create a top-level notebook even while Archive is selected.
+	app.selectedNotebook = archive.ID
+	app.openNewNotebook()
+	tt.Frame()
+	if err := tt.Click("Top level"); err != nil {
+		t.Fatalf("select Top level parent: %v", err)
+	}
+	tt.Type("TopLevelBook")
+	if err := tt.Click("Create"); err != nil {
+		t.Fatalf("create top-level notebook: %v", err)
+	}
+	if created := app.notebookByID(app.selectedNotebook); created == nil || created.ParentID != "" || created.Title != "TopLevelBook" {
+		t.Fatalf("created top-level notebook = %#v", created)
+	}
+}
+

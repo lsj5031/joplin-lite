@@ -90,6 +90,8 @@ type nativeApp struct {
 	todo          bool
 	confirmDelete bool
 	moveOpen      bool
+	moveFilter    string
+	conflictCount int
 
 	// settings is the dialog's draft; settingsPick indexes the target segment
 	// (the labels and targets come from settingsTargets).
@@ -102,21 +104,24 @@ type nativeApp struct {
 	applySettings  func(desktopSettings) error
 
 	tagMenuOpen           bool
+	tagFilter             string
 	tagActions            bool
 	tagOpen               bool
 	tagRename             bool
+	tagAttachNote         bool
 	tagTitle              string
 	tagErr                string
 	confirmDeleteTag      bool
 	resolveConflict       bool
-	notebookActions       bool
-	notebookOpen          bool
-	notebookRename        bool
-	notebookTitle         string
-	notebookParent        string
-	notebookErr           string
-	confirmDeleteNotebook bool
-	notebookBlocked       bool
+	notebookActions         bool
+	notebookOpen            bool
+	notebookRename          bool
+	notebookTitle           string
+	notebookParent          string
+	notebookCandidateParent string
+	notebookErr             string
+	confirmDeleteNotebook   bool
+	notebookBlocked         bool
 
 	// history is the visited note IDs, ending at histPos. Moving between
 	// notes records a step; walking history itself does not.
@@ -241,6 +246,13 @@ func (a *nativeApp) reloadNotebooks() {
 	if a.selectedNotebook != "" && a.selectedNotebook != conflictsRail && a.notebookByID(a.selectedNotebook) == nil {
 		a.selectedNotebook = ""
 	}
+	a.reloadConflictCount()
+}
+
+func (a *nativeApp) reloadConflictCount() {
+	if page, err := a.svc.ListNoteSummaries(service.NoteFilter{ConflictOnly: true, Page: service.Page{Limit: nativePageSize}}); err == nil {
+		a.conflictCount = len(page.Notes)
+	}
 }
 
 func (a *nativeApp) reloadTags() {
@@ -264,11 +276,18 @@ func (a *nativeApp) tagByID(id string) *models.Tag {
 }
 
 func (a *nativeApp) openNewTag() {
+	a.tagMenuOpen = false
 	a.tagActions = false
 	a.tagRename = false
+	a.tagAttachNote = false
 	a.tagTitle = ""
 	a.tagErr = ""
 	a.tagOpen = true
+}
+
+func (a *nativeApp) openNewTagForNote() {
+	a.openNewTag()
+	a.tagAttachNote = a.note != nil
 }
 
 func (a *nativeApp) openRenameTag() {
@@ -278,6 +297,7 @@ func (a *nativeApp) openRenameTag() {
 	}
 	a.tagActions = false
 	a.tagRename = true
+	a.tagAttachNote = false
 	a.tagTitle = tag.Title
 	a.tagErr = ""
 	a.tagOpen = true
@@ -302,14 +322,23 @@ func (a *nativeApp) submitTag() {
 			return
 		}
 	} else {
-		if err := a.svc.CreateTag(&models.Tag{Title: title}); err != nil {
+		tag := &models.Tag{Title: title}
+		if err := a.svc.CreateTag(tag); err != nil {
 			a.tagErr = err.Error()
 			return
 		}
+		if a.tagAttachNote && a.note != nil {
+			a.flush()
+			if err := a.svc.AddTag(a.note.ID, tag.ID); err != nil {
+				a.saveErr = err.Error()
+			}
+		}
 	}
 	a.tagOpen = false
+	a.tagAttachNote = false
 	a.tagErr = ""
 	a.reloadTags()
+	a.reloadNoteTags()
 }
 
 func (a *nativeApp) deleteTag() {
@@ -325,6 +354,7 @@ func (a *nativeApp) deleteTag() {
 	a.selectedID = ""
 	a.reloadTags()
 	a.reloadNotes()
+	a.reloadNoteTags()
 }
 
 // tagDialogs draws the create/rename modal and the delete confirmation.
@@ -366,7 +396,6 @@ func (a *nativeApp) tagDialogs(c *ui.Context, t *ui.Theme) {
 	}
 }
 
-// tagActionsMenu is the Rename/Delete menu for the selected tag.
 func (a *nativeApp) reloadNoteTags() {
 	if a.note == nil {
 		a.noteTags = nil
@@ -458,6 +487,9 @@ func (a *nativeApp) reloadNotes() {
 	}
 	a.notes = page.Notes
 	a.hasMore, a.cursor = page.HasMore, page.NextCursor
+	if a.selectedNotebook == conflictsRail && a.query == "" {
+		a.conflictCount = len(a.notes)
+	}
 	a.pruneSelection()
 
 	idx := -1
@@ -471,6 +503,11 @@ func (a *nativeApp) reloadNotes() {
 		idx = 0
 	}
 	a.selectedNote = idx
+	if idx == 0 {
+		a.list.ScrollTo(0, ui.Start)
+	} else if idx > 0 {
+		a.list.ScrollIntoView(idx)
+	}
 	a.loadNote()
 }
 
@@ -598,7 +635,9 @@ func (a *nativeApp) noteInRows(id string) bool {
 		}
 	}
 	return false
-} // historyShortcuts walks the note history with the keyboard. MyGO keeps Alt
+}
+
+// historyShortcuts walks the note history with the keyboard. MyGO keeps Alt
 // and an arrow for a focused editor on macOS, where that is word-by-word
 // caret movement in every native text field, so there the reported binding is
 // the browser convention Cmd+[ / Cmd+]; Alt+Left/Right still work wherever no
@@ -752,6 +791,7 @@ func (a *nativeApp) newNote() {
 	a.selectedID = note.ID
 	a.note = nil
 	a.dirty = false
+	a.reloadNotebooks()
 	a.reloadNotes()
 	a.editing = true
 	a.focusBody = true
@@ -772,6 +812,7 @@ func (a *nativeApp) moveTo(folderID string) {
 		return
 	}
 	a.note = &n
+	a.reloadNotebooks()
 	for _, row := range a.notes {
 		if row.ID == n.ID {
 			row.ParentID = folderID
@@ -792,6 +833,7 @@ func (a *nativeApp) openNewNotebook() {
 	if a.notebookParent == conflictsRail {
 		a.notebookParent = ""
 	}
+	a.notebookCandidateParent = a.notebookParent
 	a.notebookTitle = ""
 	a.notebookErr = ""
 	a.notebookOpen = true
@@ -805,6 +847,7 @@ func (a *nativeApp) openRenameNotebook() {
 	a.notebookActions = false
 	a.notebookRename = true
 	a.notebookParent = nb.ParentID
+	a.notebookCandidateParent = ""
 	a.notebookTitle = nb.Title
 	a.notebookErr = ""
 	a.notebookOpen = true
@@ -904,21 +947,36 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 			title, action := "New notebook", "Create"
 			if a.notebookRename {
 				title, action = "Rename notebook", "Save"
-			} else {
-				parent := "top level"
-				if a.notebookParent != "" {
-					if nb := a.notebookByID(a.notebookParent); nb != nil {
-						parent = "“" + nb.Title + "”"
-					}
-				}
-				ui.Text(c, "Inside "+parent).FontSize(12).TextColor(t.TextMuted)
 			}
 			ui.Text(c, title).FontSize(17).Bold()
+			parentChanged := false
+			if !a.notebookRename {
+				if nb := a.notebookByID(a.notebookCandidateParent); nb != nil {
+					parentIdx := 0
+					if a.notebookParent == "" {
+						parentIdx = 1
+					}
+					seg := ui.Segmented(c, &parentIdx, "Inside “"+nb.Title+"”", "Top level").Label("Notebook location")
+					if seg.Changed() {
+						parentChanged = true
+						if parentIdx == 0 {
+							a.notebookParent = a.notebookCandidateParent
+						} else {
+							a.notebookParent = ""
+						}
+					}
+				} else {
+					ui.Text(c, "At top level").FontSize(12).TextColor(t.TextMuted)
+				}
+			}
 			input := ui.TextInput(c.Key("notebook-name"), &a.notebookTitle).
 				Placeholder("Notebook name").
 				Label("Notebook name").
 				Width(320).
 				AutoFocus()
+			if parentChanged {
+				input.Focus()
+			}
 			if input.Submitted() {
 				a.submitNotebook()
 			}
@@ -1026,6 +1084,7 @@ func (a *nativeApp) keepConflictVersion() {
 	a.selectedID = ""
 	a.title, a.body = "", ""
 	a.noteTags = nil
+	a.reloadNotebooks()
 	a.reloadNotes()
 }
 
@@ -1048,6 +1107,7 @@ func (a *nativeApp) deleteNote() {
 	a.noteTags = nil
 	a.history = nil
 	a.histPos = 0
+	a.reloadNotebooks()
 	a.reloadNotes()
 }
 
@@ -1166,13 +1226,18 @@ func (a *nativeApp) pollSync() {
 
 // tickSync observes even passes that start and finish between two frames.
 func (a *nativeApp) tickSync() {
-	st := a.syncState()
-	if st.Enabled {
-		a.scheduleSyncPoll()
+	if a.be != nil {
+		a.be.setNotify(a.pollSync)
 	}
+	st := a.syncState()
 	finished := st.Revision != a.syncRevision
 	a.syncRevision = st.Revision
 	active := st.Running || st.Pending
+	if active {
+		a.scheduleSyncPoll()
+	} else if a.syncPoll != nil {
+		a.syncPoll.Stop()
+	}
 	if finished || (a.syncWatch && !active) {
 		a.refreshAfterSync()
 	}
@@ -1301,18 +1366,18 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "Sync folder").FontSize(12).Bold()
 					ui.TextInput(c.Key("settings-folder"), &a.settings.LocalDir).
 						Placeholder("Folder Joplin's File system target uses").
-						Label("Sync folder path").Width(360)
+						Label("Sync folder path").Width(408)
 				case targetServer:
 					ui.Text(c, "Server URL").FontSize(12).Bold()
 					ui.TextInput(c.Key("settings-url"), &a.settings.ServerURL).
 						Placeholder("https://sync.example.com").
-						Label("Joplin Server URL").Width(360)
+						Label("Joplin Server URL").Width(408)
 					ui.Text(c, "Email").FontSize(12).Bold()
 					ui.TextInput(c.Key("settings-user"), &a.settings.Username).
-						Label("Server account email").Width(360)
+						Label("Server account email").Width(408)
 					ui.Text(c, "Password").FontSize(12).Bold()
 					password := ui.TextInput(c.Key("settings-pass"), &a.settings.Password).
-						Label("Server account password").Width(360)
+						Label("Server account password").Width(408)
 					if !a.settingsReveal {
 						password.Password()
 					}
@@ -1327,18 +1392,18 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
 				master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
 					Placeholder("Leave empty when E2EE is off").
-					Label("E2EE master password").Width(360)
+					Label("E2EE master password").Width(408)
 				if !a.settingsReveal {
 					master.Password()
 				}
 				ui.Checkbox(c, &a.settingsReveal, "Show passwords")
-				ui.Text(c, "Decrypts synced notes on this device. Stored locally and never sent anywhere.").
+				ui.Text(c, "Decrypts synced notes on this device. Stored locally in this vault and never sent anywhere.").
 					FontSize(11).TextColor(t.TextMuted)
 
 				ui.Text(c, "Clipper token").FontSize(12).Bold()
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Width(408).Gap(6).AlignItems(ui.Center).Children(func() {
 					ui.TextInput(c.Key("settings-token"), &a.settings.APIToken).
-						Label("Clipper API token").Width(300)
+						Label("Clipper API token").Grow(1).MinWidth(0)
 					if ui.Button(c, "Regenerate").Tooltip("Replace the token with a fresh one").Clicked() {
 						if token, err := randomToken(); err == nil {
 							a.settings.APIToken = token
@@ -1379,15 +1444,6 @@ func (a *nativeApp) statusText() string {
 	}
 }
 
-// tagMenu toggles the tags of the open note. The menu stays open so several
-// tags can be added in one go.
-// notebookMenu is the Rename/Delete menu for the selected notebook.
-// sortMenu sets the note-list order. The default is updated_time descending,
-// as before; the choice is per-window state, not a saved setting.
-// notebookPicker is the scrollable "move to notebook" menu shared by the open
-// note and the multi-row selection.
-// moveMenu lists the notebooks the open note can move to.
-// bulkMoveMenu moves every selected note to one notebook.
 // selectedIDs returns the chosen notes in list order. The choice may name
 // rows that a reload has since dropped, so only visible rows are returned.
 func (a *nativeApp) selectedIDs() []string {
@@ -1459,6 +1515,7 @@ func (a *nativeApp) deleteSelected() {
 		}
 	}
 	a.selection.Clear()
+	a.reloadNotebooks()
 	a.reloadNotes()
 }
 
@@ -1517,6 +1574,9 @@ func openNativeWindow(be *backend) *mygo.Window {
 		Content:   ui.View(app.view),
 	})
 	win.OnClosed(func() {
+		if app.be != nil {
+			app.be.setNotify(nil)
+		}
 		app.flush()
 		if app.saveTimer != nil {
 			app.saveTimer.Stop()
