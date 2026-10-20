@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
+	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
 // DropboxBackend implements SyncBackend over Dropbox API v2 (sync target 7,
@@ -24,12 +26,11 @@ import (
 //   - files/upload, files/download for item content
 //     (Dropbox-API-Arg header, raw body),
 //   - files/list_folder + files/list_folder/continue for the delta/children
-//     emulation (flat-file targets have no delta API — the listing is
-//     synthesized like s3_backend.getDelta),
+//     emulation, merging changes into a complete persisted inventory,
 //   - files/delete_v2 for deletions.
 //
-// Deletions cannot be reconstructed from a listing; they surface through the
-// reconcile pass (PullMissingItems), same as LocalFolderBackend. Locks use
+// Deletions update the inventory and surface through the reconcile pass
+// (PullMissingItems), same as LocalFolderBackend. Locks use
 // the shared flat-file protocol (locks/<type>_<clientType>_<clientId>.json).
 type DropboxBackend struct {
 	oauth        *DropboxOAuth
@@ -44,6 +45,9 @@ type DropboxBackend struct {
 	inSync       bool
 	rootListed   bool
 	rootEntries  []dropboxEntry
+	db           *store.DB
+	inventory    *dropboxInventory
+	cacheHits    atomic.Int64
 	requests     atomic.Int64
 }
 
@@ -83,16 +87,19 @@ func newDropboxBackend(oauth *DropboxOAuth, token *DropboxToken, dataDir string)
 // SyncTarget returns 7 (Dropbox).
 func (b *DropboxBackend) SyncTarget() int { return 7 }
 
-// BeginSync shares one complete inventory between delta and reconciliation.
-// It is discarded on every exit, including failed or cancelled passes.
-func (b *DropboxBackend) BeginSync(ctx context.Context) func() {
+// BeginSync shares one fresh, complete inventory between delta and reconciliation.
+// The profile retains its listing cursor and pending changes across restarts.
+func (b *DropboxBackend) BeginSync(ctx context.Context, db *store.DB) func() {
 	b.ctx, b.inSync = ctx, true
+	b.db, b.inventory = db, nil
 	b.rootEntries, b.rootListed = nil, false
 	b.requests.Store(0)
+	b.cacheHits.Store(0)
 	started := time.Now()
 	return func() {
-		slog.Info("Dropbox pass finished", "storage_requests", b.requests.Load(), "duration", time.Since(started))
+		slog.Info("Dropbox pass finished", "storage_requests", b.requests.Load(), "cached_resources", b.cacheHits.Load(), "duration", time.Since(started))
 		b.ctx, b.inSync = context.Background(), false
+		b.db, b.inventory = nil, nil
 		b.rootEntries, b.rootListed = nil, false
 	}
 }
@@ -240,8 +247,10 @@ func dropboxPath(key string) string {
 type dropboxEntry struct {
 	Tag            string `json:".tag"`
 	PathDisplay    string `json:"path_display"`
+	PathLower      string `json:"path_lower"`
 	ServerModified string `json:"server_modified"` // RFC3339 with ms
 	Rev            string `json:"rev"`
+	ContentHash    string `json:"content_hash"`
 }
 
 type listFolderResponse struct {
@@ -254,6 +263,9 @@ type listFolderResponse struct {
 func (b *DropboxBackend) listAll(path string) ([]dropboxEntry, error) {
 	if path == "" && b.inSync && b.rootListed {
 		return b.rootEntries, nil
+	}
+	if path == "" && b.inSync && b.db != nil {
+		return b.listInventory()
 	}
 	started := time.Now()
 	pages := 0
@@ -298,8 +310,17 @@ func entryTimeMs(e dropboxEntry) int64 {
 	return 0
 }
 
-// getDelta synthesizes a delta response from the listing (s3_backend model,
-// at-least-once delivery at the cursor boundary like LocalFolderBackend).
+// checkpointScope isolates persisted state by endpoint and authorization.
+func (b *DropboxBackend) checkpointScope() string {
+	identity := b.token.RefreshToken
+	if identity == "" {
+		identity = b.token.AccessToken
+	}
+	return fmt.Sprintf("dropbox:%x", sha256.Sum256([]byte(b.apiBase+"\x00"+b.contentBase+"\x00"+identity)))
+}
+
+// getDelta delivers pending inventory changes. Calls outside an engine pass
+// retain the standalone timestamp-listing behavior.
 func (b *DropboxBackend) getDelta(rawQuery string) ([]byte, error) {
 	var cursor int64
 	if rawQuery != "" {
@@ -311,14 +332,7 @@ func (b *DropboxBackend) getDelta(rawQuery string) ([]byte, error) {
 		return nil, err
 	}
 	maxMs := cursor
-	// Refresh tokens survive normal access-token renewal. Hash the credential
-	// rather than writing it into the database; a different endpoint/account
-	// must never reuse an unfinished download from this one.
-	identity := b.token.RefreshToken
-	if identity == "" {
-		identity = b.token.AccessToken
-	}
-	resp := DeltaResponse{CheckpointScope: fmt.Sprintf("dropbox:%x", sha256.Sum256([]byte(b.apiBase+"\x00"+b.contentBase+"\x00"+identity)))}
+	resp := DeltaResponse{CheckpointScope: b.checkpointScope()}
 	for _, e := range entries {
 		if e.Tag != "file" {
 			continue
@@ -331,7 +345,11 @@ func (b *DropboxBackend) getDelta(rawQuery string) ([]byte, error) {
 		if ts > maxMs {
 			maxMs = ts
 		}
-		if cursor != 0 && ts < cursor {
+		if b.inventory != nil {
+			if !b.inventory.Pending[e.path()] {
+				continue
+			}
+		} else if cursor != 0 && ts < cursor {
 			continue
 		}
 		resp.Items = append(resp.Items, DeltaItem{
@@ -343,6 +361,9 @@ func (b *DropboxBackend) getDelta(rawQuery string) ([]byte, error) {
 		})
 	}
 	resp.Cursor = fmt.Sprintf("%d", maxMs)
+	if b.inventory != nil {
+		resp.Cursor = b.inventory.applyCursor(resp.CheckpointScope)
+	}
 	return json.Marshal(resp)
 }
 
@@ -418,6 +439,14 @@ func (b *DropboxBackend) upload(path string, content []byte) error {
 // download fetches a Dropbox path (files/download). Missing files return
 // nil, nil — the engine's "may not exist yet" convention.
 func (b *DropboxBackend) download(path string) ([]byte, error) {
+	if b.inventory != nil {
+		if entry, ok := b.inventory.Entries[strings.ToLower(path)]; ok {
+			if data, ok := cachedDropboxResource(b.db, entry); ok {
+				b.cacheHits.Add(1)
+				return data, nil
+			}
+		}
+	}
 	arg, err := json.Marshal(map[string]string{"path": path})
 	if err != nil {
 		return nil, err
@@ -484,8 +513,14 @@ func (b *DropboxBackend) do(setup func(*http.Request), endpoint string) ([]byte,
 func dropboxError(status int, body []byte) error {
 	var e struct {
 		ErrorSummary string `json:"error_summary"`
+		Error        struct {
+			Tag string `json:".tag"`
+		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &e)
+	if status == http.StatusConflict && e.Error.Tag == "reset" {
+		return errDropboxCursorReset
+	}
 	if e.ErrorSummary != "" {
 		return fmt.Errorf("dropbox API error %d: %s", status, e.ErrorSummary)
 	}
@@ -495,6 +530,8 @@ func dropboxError(status int, body []byte) error {
 func isNotFound(body []byte) bool {
 	return strings.Contains(string(body), "not_found")
 }
+
+var errDropboxCursorReset = errors.New("Dropbox listing cursor reset")
 
 // lockStore implementation (flat-file lock protocol over Dropbox).
 

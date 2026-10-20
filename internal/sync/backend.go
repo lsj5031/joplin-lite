@@ -1,11 +1,15 @@
 package sync
 
-import "context"
+import (
+	"context"
+
+	"github.com/lsj5031/joplin-lite/internal/store"
+)
 
 // syncSessionBackend scopes remote requests and temporary inventory to one pass.
 // The returned cleanup runs after lock refresh and lock release have stopped.
 type syncSessionBackend interface {
-	BeginSync(context.Context) func()
+	BeginSync(context.Context, *store.DB) func()
 }
 
 // SyncBackend abstracts the remote sync target (Joplin Server HTTP API or S3).

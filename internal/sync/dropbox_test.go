@@ -38,12 +38,23 @@ type fakeDropbox struct {
 	tokenForms    []url.Values
 	listLimit     int // entries per list page (0 = one page)
 	pageCallbacks int
+	listings      map[string]fakeDropboxListing
+	listingID     int
+}
+
+type fakeDropboxListing struct {
+	path     string
+	entries  []dropboxEntry
+	snapshot map[string]dropboxEntry
+	offset   int
+	complete bool
 }
 
 func newFakeDropbox() *fakeDropbox {
 	return &fakeDropbox{
-		files: map[string][]byte{},
-		times: map[string]time.Time{},
+		files:    map[string][]byte{},
+		times:    map[string]time.Time{},
+		listings: map[string]fakeDropboxListing{},
 	}
 }
 
@@ -90,34 +101,59 @@ func (f *fakeDropbox) handler() http.Handler {
 		w.Write(content)
 	})
 
-	listPage := func(w http.ResponseWriter, path string, offset, limit int) {
+	listPage := func(w http.ResponseWriter, path, cursor string) {
 		f.mu.Lock()
-		var paths []string
-		for p := range f.files {
-			if path == "" || p == path || strings.HasPrefix(p, path+"/") {
-				paths = append(paths, p)
+		defer f.mu.Unlock()
+		prior, known := f.listings[cursor]
+		if cursor != "" && !known {
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"error_summary":"reset/expired","error":{".tag":"reset"}}`))
+			return
+		}
+		page := prior
+		if cursor == "" || prior.complete {
+			if cursor != "" {
+				path = prior.path
 			}
+			page = fakeDropboxListing{path: path, snapshot: make(map[string]dropboxEntry)}
+			for p := range f.files {
+				if path == "" || p == path || strings.HasPrefix(p, path+"/") {
+					hash := sha256.New()
+					for remaining := f.files[p]; len(remaining) > 0; {
+						n := min(len(remaining), 4<<20)
+						block := sha256.Sum256(remaining[:n])
+						hash.Write(block[:])
+						remaining = remaining[n:]
+					}
+					entry := dropboxEntry{
+						Tag: "file", PathDisplay: p, PathLower: strings.ToLower(p),
+						ServerModified: f.times[p].UTC().Format(time.RFC3339Nano),
+						Rev:            fmt.Sprintf("%x", sha256.Sum256(f.files[p])),
+						ContentHash:    fmt.Sprintf("%x", hash.Sum(nil)),
+					}
+					page.snapshot[p] = entry
+					if old, exists := prior.snapshot[p]; !exists || old != entry {
+						page.entries = append(page.entries, entry)
+					}
+				}
+			}
+			for p := range prior.snapshot {
+				if _, exists := page.snapshot[p]; !exists {
+					page.entries = append(page.entries, dropboxEntry{Tag: "deleted", PathDisplay: p, PathLower: strings.ToLower(p)})
+				}
+			}
+			sort.Slice(page.entries, func(i, j int) bool { return page.entries[i].PathDisplay < page.entries[j].PathDisplay })
 		}
-		sort.Strings(paths)
-		resp := listFolderResponse{}
-		end := offset + limit
-		if end > len(paths) {
-			end = len(paths)
-		}
-		for _, p := range paths[offset:end] {
-			resp.Entries = append(resp.Entries, dropboxEntry{
-				Tag:            "file",
-				PathDisplay:    p,
-				ServerModified: f.times[p].UTC().Format(time.RFC3339Nano),
-				Rev:            fmt.Sprintf("%x", sha256.Sum256(f.files[p])),
-			})
-		}
-		resp.HasMore = end < len(paths)
-		resp.Cursor = "off:" + strconv.Itoa(end)
+		limit := f.listLimit
 		if limit <= 0 {
-			resp.HasMore = false
+			limit = 500
 		}
-		f.mu.Unlock()
+		end := min(page.offset+limit, len(page.entries))
+		resp := listFolderResponse{Entries: page.entries[page.offset:end], HasMore: end < len(page.entries)}
+		page.offset, page.complete = end, !resp.HasMore
+		f.listingID++
+		resp.Cursor = "cursor:" + strconv.Itoa(f.listingID)
+		f.listings[resp.Cursor] = page
 		json.NewEncoder(w).Encode(resp)
 	}
 
@@ -128,11 +164,7 @@ func (f *fakeDropbox) handler() http.Handler {
 			Limit int    `json:"limit"`
 		}
 		json.Unmarshal(newBody(r), &arg)
-		limit := f.listLimit
-		if limit <= 0 {
-			limit = 500
-		}
-		listPage(w, arg.Path, 0, limit)
+		listPage(w, arg.Path, "")
 	})
 
 	mux.HandleFunc("/2/files/list_folder/continue", func(w http.ResponseWriter, r *http.Request) {
@@ -144,12 +176,7 @@ func (f *fakeDropbox) handler() http.Handler {
 			Cursor string `json:"cursor"`
 		}
 		json.Unmarshal(newBody(r), &arg)
-		offset, _ := strconv.Atoi(strings.TrimPrefix(arg.Cursor, "off:"))
-		limit := f.listLimit
-		if limit <= 0 {
-			limit = 500
-		}
-		listPage(w, "", offset, limit)
+		listPage(w, "", arg.Cursor)
 	})
 
 	mux.HandleFunc("/2/files/delete_v2", func(w http.ResponseWriter, r *http.Request) {
@@ -492,8 +519,8 @@ func TestDropboxEngineInventoryIsCompleteAndFreshEachPass(t *testing.T) {
 	if got, err := db.GetNote(second.ID); err != nil || got == nil || got.Body != second.Body {
 		t.Fatalf("second pull = %+v, %v", got, err)
 	}
-	if got := rootListings.Load(); got != 2 {
-		t.Errorf("full inventories in two passes = %d, want 2", got)
+	if got := rootListings.Load(); got != 1 {
+		t.Errorf("full inventories in two passes = %d, want 1 plus incremental updates", got)
 	}
 	// An incomplete listing must neither prune existing notes nor persist its
 	// partial inventory/cursor into the retry.
@@ -930,6 +957,396 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 			}
 			if got, err := db.GetNote(last.ID); err != nil || got == nil || got.Title != last.Title {
 				t.Fatalf("failed item not retried: %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestDropboxIncrementalInventoryAcrossRestart(t *testing.T) {
+	for _, change := range []string{"quiet", "older timestamp", "cursor reset", "different account", "different endpoint", "renewed access token"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFakeDropbox()
+			f.listLimit = 2
+			note := &models.Note{ID: strings.Repeat("a", 32), Title: "Keep", Body: "original", CreatedTime: 1000, UpdatedTime: 1000}
+			f.put("/"+note.ID+".md", []byte(models.SerializeNote(note)))
+			var roots, continuations, notes atomic.Int64
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/2/files/list_folder":
+					body := newBody(r)
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					var arg struct{ Path string }
+					json.Unmarshal(body, &arg)
+					if arg.Path == "" {
+						roots.Add(1)
+					}
+				case "/2/files/list_folder/continue":
+					continuations.Add(1)
+				case "/2/files/download":
+					var arg struct{ Path string }
+					json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg)
+					if arg.Path == "/"+note.ID+".md" {
+						notes.Add(1)
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			endpoint, access, refresh := srv.URL, "access", "account"
+			dir := t.TempDir()
+			run := func() {
+				t.Helper()
+				db, err := store.Open(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				b := newDropboxBackend(nil, &DropboxToken{AccessToken: access, RefreshToken: refresh}, "")
+				b.apiBase, b.contentBase = endpoint, endpoint
+				if err := NewEngine(NewTracedBackend(b, "dropbox"), db, "").Sync(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if got, err := db.GetNote(note.ID); err != nil || got == nil || got.Body != note.Body {
+					t.Fatalf("note after reopen = %+v, %v; want %q", got, err, note.Body)
+				}
+			}
+			run()
+			roots.Store(0)
+			continuations.Store(0)
+			notes.Store(0)
+			switch change {
+			case "older timestamp":
+				note.Body, note.UpdatedTime = "changed while offline", 2000
+				f.put("/"+note.ID+".md", []byte(models.SerializeNote(note)))
+				f.mu.Lock()
+				f.times["/"+note.ID+".md"] = time.Unix(1, 0)
+				f.mu.Unlock()
+			case "cursor reset":
+				f.mu.Lock()
+				clear(f.listings)
+				f.mu.Unlock()
+			case "different account":
+				refresh = "other-account"
+			case "different endpoint":
+				other := httptest.NewServer(srv.Config.Handler)
+				defer other.Close()
+				endpoint = other.URL
+			case "renewed access token":
+				access = "renewed"
+			}
+			run()
+			wantRoots, wantNotes := int64(0), int64(0)
+			if change == "cursor reset" || change == "different account" || change == "different endpoint" {
+				wantRoots, wantNotes = 1, 1
+			}
+			if change == "older timestamp" {
+				wantNotes = 1
+			}
+			if roots.Load() != wantRoots || notes.Load() != wantNotes {
+				t.Fatalf("after restart full listings=%d note downloads=%d; want %d/%d", roots.Load(), notes.Load(), wantRoots, wantNotes)
+			}
+			if (change == "quiet" || change == "renewed access token") && continuations.Load() != 2 {
+				// Previous lock deletion + current lock creation + first info.json
+				// upload comprise three changes, delivered two entries per page.
+				t.Fatalf("quiet continuation pages=%d, want 2", continuations.Load())
+			}
+		})
+	}
+}
+
+func TestDropboxIncrementalPendingApplySurvivesRestart(t *testing.T) {
+	for _, failure := range []string{"download", "apply"} {
+		t.Run(failure, func(t *testing.T) {
+			f := newFakeDropbox()
+			first := &models.Note{ID: strings.Repeat("a", 32), Title: "First", Body: "durable", CreatedTime: 1000, UpdatedTime: 1000}
+			last := &models.Note{ID: strings.Repeat("b", 32), Title: "Last", Body: "pending", CreatedTime: 2000, UpdatedTime: 2000}
+			for _, n := range []*models.Note{first, last} {
+				f.put("/"+n.ID+".md", []byte(models.SerializeNote(n)))
+			}
+			var fail atomic.Bool
+			var firstFetches atomic.Int64
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/2/files/download" {
+					var arg struct{ Path string }
+					json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg)
+					if arg.Path == "/"+first.ID+".md" {
+						firstFetches.Add(1)
+					}
+					if arg.Path == "/"+last.ID+".md" && fail.Load() {
+						http.Error(w, "injected download failure", http.StatusServiceUnavailable)
+						return
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			dir := t.TempDir()
+			db, err := store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend := func() *DropboxBackend {
+				b := newDropboxBackend(nil, &DropboxToken{AccessToken: "access", RefreshToken: "account"}, "")
+				b.apiBase, b.contentBase = srv.URL, srv.URL
+				return b
+			}
+			if err := NewEngine(backend(), db, "").Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			beforeCursor, err := db.GetSyncCursor()
+			if err != nil || beforeCursor == "" {
+				t.Fatalf("initial apply cursor=%q, %v", beforeCursor, err)
+			}
+			for _, n := range []*models.Note{first, last} {
+				n.Body += " after initial sync"
+				n.UpdatedTime += 2000
+				f.put("/"+n.ID+".md", []byte(models.SerializeNote(n)))
+			}
+			firstFetches.Store(0)
+			fail.Store(failure == "download")
+			if failure == "apply" {
+				if _, err := db.Exec(`CREATE TRIGGER reject_last BEFORE INSERT ON notes WHEN NEW.id = '` + last.ID + `' BEGIN SELECT RAISE(ABORT, 'injected apply failure'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := NewEngine(NewTracedBackend(backend(), "dropbox"), db, "").Sync(context.Background()); err == nil {
+				t.Fatal("unfinished apply succeeded")
+			}
+			if cursor, err := db.GetSyncCursor(); err != nil || cursor != beforeCursor {
+				t.Fatalf("unfinished apply committed cursor=%q, %v", cursor, err)
+			}
+			if failure == "apply" {
+				if _, err := db.Exec(`DROP TRIGGER reject_last`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err = store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			fail.Store(false)
+			if err := NewEngine(NewTracedBackend(backend(), "dropbox"), db, "").Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if firstFetches.Load() != 1 {
+				t.Fatalf("completed revision downloaded %d times, want 1", firstFetches.Load())
+			}
+			for _, n := range []*models.Note{first, last} {
+				if got, err := db.GetNote(n.ID); err != nil || got == nil || got.Body != n.Body {
+					t.Fatalf("pending item lost on restart: %+v, %v", got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDropboxIncrementalListingFailurePreservesInventory(t *testing.T) {
+	for _, failure := range []string{"second page", "cancelled", "snapshot write", "reset rebuild"} {
+		t.Run(failure, func(t *testing.T) {
+			f := newFakeDropbox()
+			f.listLimit = 1
+			old := &models.Note{ID: strings.Repeat("a", 32), Title: "Keep until complete", Body: "old", UpdatedTime: 1000}
+			fresh := &models.Note{ID: strings.Repeat("b", 32), Title: "New", Body: "new", UpdatedTime: 2000}
+			f.put("/"+old.ID+".md", []byte(models.SerializeNote(old)))
+			var armed atomic.Bool
+			var pages atomic.Int64
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if armed.Load() && r.URL.Path == "/2/files/list_folder/continue" && pages.Add(1) == 2 {
+					armed.Store(false)
+					if failure == "cancelled" {
+						cancel()
+					}
+					http.Error(w, "injected second-page failure", http.StatusServiceUnavailable)
+					return
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			backend := func() *DropboxBackend {
+				b := newDropboxBackend(nil, &DropboxToken{AccessToken: "access", RefreshToken: "account"}, "")
+				b.apiBase, b.contentBase = srv.URL, srv.URL
+				return b
+			}
+			dir := t.TempDir()
+			db, err := store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := backend()
+			if err := NewEngine(b, db, "").Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			key := "sync.dropbox.inventory.v1." + b.checkpointScope()
+			before, err := db.GetSetting(key)
+			if err != nil || before == "" {
+				t.Fatalf("initial inventory missing: %v", err)
+			}
+			beforeCursor, err := db.GetSyncCursor()
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			delete(f.files, "/"+old.ID+".md")
+			delete(f.times, "/"+old.ID+".md")
+			if failure == "reset rebuild" {
+				clear(f.listings)
+			}
+			f.mu.Unlock()
+			f.put("/"+fresh.ID+".md", []byte(models.SerializeNote(fresh)))
+			if failure == "snapshot write" {
+				if _, err := db.Exec(`CREATE TRIGGER reject_inventory BEFORE INSERT ON key_values WHEN NEW.key LIKE 'sync.dropbox.inventory.%' BEGIN SELECT RAISE(ABORT, 'injected snapshot failure'); END`); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				armed.Store(true)
+			}
+			if err := NewEngine(backend(), db, "").Sync(ctx); err == nil {
+				t.Fatal("incomplete inventory succeeded")
+			}
+			if after, err := db.GetSetting(key); err != nil || after != before {
+				t.Fatalf("failed listing committed partial inventory: %v", err)
+			}
+			if cursor, err := db.GetSyncCursor(); err != nil || cursor != beforeCursor {
+				t.Fatalf("failed listing committed apply cursor: %v", err)
+			}
+			if got, err := db.GetNote(old.ID); err != nil || got == nil || got.Body != old.Body {
+				t.Fatalf("partial deletion reached local data: %+v, %v", got, err)
+			}
+			if got, err := db.GetNote(fresh.ID); err != nil || got != nil {
+				t.Fatalf("partial addition reached local data: %+v, %v", got, err)
+			}
+			if failure == "snapshot write" {
+				if _, err := db.Exec(`DROP TRIGGER reject_inventory`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err = store.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if err := NewEngine(backend(), db, "").Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := db.GetNote(old.ID); err != nil || got != nil {
+				t.Fatalf("completed listing missed deletion: %+v, %v", got, err)
+			}
+			if got, err := db.GetNote(fresh.ID); err != nil || got == nil || got.Body != fresh.Body {
+				t.Fatalf("completed listing missed addition: %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestDropboxEngineReusesVerifiedOfficialResource(t *testing.T) {
+	for _, cache := range []string{"a", "stale", "missing"} {
+		t.Run(cache, func(t *testing.T) {
+			b, f, done := newTestDropbox(t)
+			defer done()
+			const id = "0123456789abcdef0123456789abcdef"
+			f.put("/.resource/"+id, []byte("a"))
+			var downloads atomic.Int64
+			handler := f.handler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/2/files/download" {
+					var arg struct{ Path string }
+					json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg)
+					if arg.Path == "/.resource/"+id {
+						downloads.Add(1)
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			b.apiBase, b.contentBase = srv.URL, srv.URL
+			db := testDB(t)
+			if cache != "missing" {
+				if err := os.WriteFile(db.GetResourceFile(id)+".crypted", []byte(cache), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := NewEngine(NewTracedBackend(b, "dropbox"), db, "").Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := int64(1)
+			if cache == "a" {
+				want = 0
+			}
+			if downloads.Load() != want {
+				t.Fatalf("attachment downloads=%d, want %d", downloads.Load(), want)
+			}
+			if got, err := os.ReadFile(db.GetResourceFile(id)); err != nil || string(got) != "a" {
+				t.Fatalf("applied attachment=%q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestDropboxInventoryDirectoryChanges(t *testing.T) {
+	for _, tag := range []string{"deleted", "file"} {
+		t.Run(tag, func(t *testing.T) {
+			const child = ".resource/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			const adjacent = ".resource-other/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			var roots atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				resp := listFolderResponse{Cursor: "after"}
+				if r.URL.Path == "/2/files/list_folder" {
+					roots.Add(1)
+					resp.Cursor = "before"
+					resp.Entries = []dropboxEntry{
+						{Tag: "folder", PathDisplay: "/.resource"},
+						{Tag: "file", PathDisplay: "/" + child},
+						{Tag: "file", PathDisplay: "/" + adjacent},
+					}
+				} else if r.URL.Path == "/2/files/list_folder/continue" {
+					resp.Entries = []dropboxEntry{{Tag: tag, PathLower: "/.resource", PathDisplay: "/.resource"}}
+				} else {
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					w.WriteHeader(500)
+					return
+				}
+				json.NewEncoder(w).Encode(resp)
+			}))
+			defer srv.Close()
+			b := newDropboxBackend(nil, &DropboxToken{AccessToken: "access"}, "")
+			b.apiBase, b.contentBase = srv.URL, srv.URL
+			db := testDB(t)
+			children := func() map[string]bool {
+				t.Helper()
+				end := b.BeginSync(context.Background(), db)
+				defer end()
+				data, err := b.Get("/api/items/root:/:/children")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var resp ChildrenResponse
+				if err := json.Unmarshal(data, &resp); err != nil {
+					t.Fatal(err)
+				}
+				out := make(map[string]bool)
+				for _, item := range resp.Items {
+					out[item.Name] = true
+				}
+				return out
+			}
+			if initial := children(); !initial[child] || !initial[adjacent] {
+				t.Fatalf("initial inventory=%v", initial)
+			}
+			got := children()
+			if roots.Load() != 1 || got[child] || !got[adjacent] || got[".resource"] != (tag == "file") {
+				t.Fatalf("directory %s inventory=%v, full listings=%d", tag, got, roots.Load())
 			}
 		})
 	}

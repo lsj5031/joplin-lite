@@ -127,6 +127,14 @@ See [the example config](config.yaml.example),
 [the authorization command](cmd/dropbox_auth.go), and
 [desktop configuration](shell/README.md) before connecting a real library.
 
+Dropbox saves its own change cursor and complete remote inventory in the
+profile. After the first full listing, later passes request only changes,
+including after restarting the app. Unfinished downloads remain pending;
+an invalidated Dropbox cursor safely triggers a fresh full listing. Existing
+official attachment files, including `.crypted` caches, avoid a download only
+when their bytes match Dropbox's content hash. Missing or mismatched files
+download normally. This does not import the official client's sync cursor.
+
 Encrypted uploads require an unlocked active key. Supply the master password
 through `GOJOPLIN_MASTER_PASSWORD` rather than committing it to config. Native
 Settings masks passwords visually, but saving them stores them **unencrypted
@@ -135,9 +143,10 @@ Windows machine is not part of the portable package.
 
 ## Current limits
 
-- Dropbox still performs a full inventory per pass. Routine checks can be
-  slow on large libraries; this is not yet persisted incremental Dropbox sync.
-  See the [timing review and improvement record](docs/dropbox-sync-review.md).
+- The first Dropbox inventory, cursor-reset recovery, uncached downloads and
+  decryption can still take time on large libraries. Later passes use Dropbox
+  changes and the saved inventory. See the
+  [timing review and improvement record](docs/dropbox-sync-review.md).
 - The API and native workspace are covered by tests, but actual Web Clipper
   extension pairing, assistive technology, and broad real-device testing
   remain release-validation work.

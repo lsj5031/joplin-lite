@@ -148,7 +148,7 @@ type lostLockBackend struct {
 	ctx context.Context
 }
 
-func (b *lostLockBackend) BeginSync(ctx context.Context) func() {
+func (b *lostLockBackend) BeginSync(ctx context.Context, _ *store.DB) func() {
 	b.ctx = ctx
 	return func() {}
 }

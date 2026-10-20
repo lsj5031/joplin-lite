@@ -5,7 +5,82 @@ Reviewed 2026-10-20 (UTC+13), against published revision
 Measurements are from the native Windows app on Mercury with the existing
 encrypted Dropbox library. This is one profile/network, not a general benchmark.
 
-## Follow-up implementation and Mac validation
+## Persisted changes and verified attachment reuse
+
+Dropbox engine passes now persist the provider's listing cursor together with
+a complete inventory in the active SQLite profile. After the first complete
+listing, `/files/list_folder/continue` supplies changes across passes and app
+restarts. Ordered file/folder/deletion events update the inventory, including
+directory deletions and replacement by a file. Reconciliation still receives
+the complete merged inventory; it is not given only the change feed.
+
+A single SQLite value commits the inventory, provider cursor and pending
+downloads together after **all** listing pages succeed. A failed/cancelled
+listing or failed database write leaves that value unchanged and never reaches
+local pruning. Pending items survive until the engine's applied-page cursor
+acknowledges that inventory version. Listing success alone cannot lose an
+unfinished download. Existing revision receipts continue to skip successfully
+applied items after an interrupted pull. Changed files are selected from
+Dropbox's feed rather than timestamp comparisons, so equal/older timestamps
+cannot hide a changed remote revision.
+
+An HTTP 409 tagged `reset` discards the cached base and rebuilds a complete
+inventory. No partial replacement is committed if that rebuild fails.
+Inventory and receipts are scoped by endpoint and hashed authorization identity;
+access-token renewal keeps the scope when the refresh token is unchanged.
+Neither credentials nor the official Joplin client's cursor are imported into
+this inventory.
+
+Attachment downloads can reuse `resources/<id>.crypted` or the normal resource
+file only after matching the current Dropbox metadata's `content_hash`.
+This is Dropbox's SHA-256 over the concatenated binary SHA-256 digests of
+4 MiB blocks, **not** an ordinary file SHA-256. The lookup is read-only and
+returns the exact verified bytes to the normal apply/decrypt path. Missing,
+changed, unreadable, nonregular, oversized, or unverifiable caches fall back
+to download. The actual profile comes from the engine, independently of the
+token-cache location, including secure Keychain startup.
+
+The first listing and uncached content still require network requests, and
+verified ciphertext still needs normal application/decryption. Pass logs add
+`cached_resources` alongside storage-request count; inventory logs identify
+incremental versus full listings. Tests use disposable SQLite profiles and
+loopback HTTP, covering restarts, older timestamps, cursor resets,
+account/endpoint isolation, interrupted apply, partial listing/cancellation,
+snapshot-write failure, directory changes, and matching/mismatched caches.
+
+Protocol references: [Dropbox list-folder processing rules](https://github.com/dropbox/dropbox-sdk-go-unofficial/blob/main/v6/dropbox/files/client.go),
+[cursor/reset definitions](https://github.com/dropbox/dropbox-sdk-python/blob/main/dropbox/files.py),
+and [official content-hash implementation](https://github.com/dropbox/dropbox-api-content-hasher/blob/master/python/dropbox_content_hasher.py).
+
+### Controlled comparison against the previous build
+
+Compared with [the previous published build](https://github.com/lsj5031/joplin-lite/commit/ca3c97df58a3162eedc3fff5c64925db0d07a6b8),
+the same public engine/SQLite/loopback fixture used 1,001 notes, one notebook,
+20 resource records and 20 real FileV1 attachment envelopes. Both builds had
+the same 15 ms delay per root response; nine quiet passes included one real
+database close/reopen and new backend construction.
+
+| Quiet pass | Previous build | Current implementation |
+| --- | ---: | ---: |
+| Full root listings | 1 | 0 |
+| Root response pages | 3 | 1 |
+| All storage HTTP requests | 10 | 7 |
+| Note content downloads | 1 | 0 |
+| Median elapsed | 60.289 ms | 24.489 ms |
+
+These are synthetic results, not real Dropbox timings. With the same 20 valid
+official-style `.crypted` files present initially, attachment downloads fell
+from 20 / 5,651,820 bytes to zero. Same-size single-byte corruption forced all
+20 correct downloads. Every final decrypted file was compared byte-for-byte
+with independently generated plaintext, including an envelope larger than
+the 4 MiB hashing boundary. Initial-pass samples did **not** establish a time
+improvement; the cache evidence proves saved bytes/requests. A later batch of
+503 events verified multi-page incremental addition/deletion handling, and
+every remaining raw item and attachment still matched.
+
+The older timing measurements below predate these two optimizations.
+
+## Earlier follow-up implementation and Mac validation
 
 The follow-up to this baseline now scopes Dropbox requests and inventory to
 one engine pass. Delta and reconciliation reuse one **complete** listing;

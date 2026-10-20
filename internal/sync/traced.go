@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 
+	"github.com/lsj5031/joplin-lite/internal/store"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -47,9 +48,9 @@ func (t *tracedBackend) SyncTarget() int {
 	return t.inner.SyncTarget()
 }
 
-func (t *tracedBackend) BeginSync(ctx context.Context) func() {
+func (t *tracedBackend) BeginSync(ctx context.Context, db *store.DB) func() {
 	if remote, ok := t.inner.(syncSessionBackend); ok {
-		return remote.BeginSync(ctx)
+		return remote.BeginSync(ctx, db)
 	}
 	return func() {}
 }

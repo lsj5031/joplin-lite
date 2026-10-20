@@ -120,7 +120,7 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 		}
 	}()
 	if remote, ok := e.backend.(syncSessionBackend); ok {
-		defer remote.BeginSync(ctx)()
+		defer remote.BeginSync(ctx, e.db)()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
