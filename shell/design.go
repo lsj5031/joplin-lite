@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -24,6 +25,7 @@ var overpassMonoTTF []byte
 // distinct so warnings and failures are never merely decorative.
 var (
 	darkPalette = false
+	activeWash  = "sage"
 
 	paper       = ui.Hex("#F9FAF5") // warm paper
 	paperSunken = ui.Hex("#E9EEE3") // sage binding
@@ -109,8 +111,10 @@ func applyPalette(dark bool) {
 	shadowPopover = ui.RGBA(15, 29, 45, 0.22)
 }
 
-// Installed Humanist families with bundled Overpass fallbacks.
+// Installed Humanist families with bundled Overpass fallbacks for reading and
+// brand headings, while chrome and controls use the native OS UI font.
 var (
+	fontUI      = ""
 	fontSans    = "Overpass"
 	fontHeading = "Overpass"
 )
@@ -131,17 +135,23 @@ const (
 
 // Two panes by default; notebook management opens on demand.
 const (
-	railWidth          = float32(300)
+	railWidth          = float32(260)
+	railMinWidth       = float32(200)
+	railMaxWidth       = float32(380)
 	listWidth          = float32(300)
-	topBarHeight       = float32(68)
-	statusHeight       = float32(40)
-	narrowStatusHeight = float32(40)
+	listMinWidth       = float32(240)
+	listMaxWidth       = float32(460)
+	topBarHeight       = float32(56)
+	statusHeight       = float32(34)
+	narrowStatusHeight = float32(38)
 	narrowWidth        = float32(1024)
-	rowHeight          = float32(56)
+	rowHeight          = float32(34)
 	contentPad         = float32(20)
+	cardGap            = float32(8)
 	radiusControl      = float32(6)
 	radiusSmall        = float32(4)
-	radiusPanel        = float32(8)
+	radiusPanel        = float32(9)
+	radiusCard         = float32(11)
 )
 
 // Motion runs only in response to interaction and respects reduced motion.
@@ -210,16 +220,19 @@ func designTheme() *ui.Theme {
 	t.Radius = radiusControl
 	t.Spacing = 4
 	t.FontSize = sizeUI
-	t.Font = fontSans
+	t.Font = fontUI
 	return t
 }
 
-// listTheme keeps selection as a sage tint with readable ink text.
+// listTheme keeps ui.List's outer row wrapper transparent so noteRow's own
+// chosenPill and bulk-selection styling control the visual state without a
+// duplicate outer selection box.
 func listTheme() *ui.Theme {
 	t := designTheme()
-	t.Accent = paper.Mix(violet, 0.10)
-	t.AccentHover = paper.Mix(violet, 0.14)
-	t.AccentPressed = paper.Mix(violet, 0.18)
+	t.SurfaceHover = ui.Transparent
+	t.Accent = ui.Transparent
+	t.AccentHover = ui.Transparent
+	t.AccentPressed = ui.Transparent
 	t.AccentText = inkNavy
 	return t
 }
@@ -291,6 +304,286 @@ func toolbarButton(c *ui.Context, label, tip string) ui.Element {
 	return btn
 }
 
+// washSpec defines a Kero-style multi-stop Oklab gradient wash and its corner glow.
+type washSpec struct {
+	light     []string
+	lightGlow ui.Color
+	dark      []string
+	darkGlow  ui.Color
+}
+
+// washTable holds Oklab backdrop washes. The default "sage" wash harmonizes
+// with Field Notes' botanical sage mark, forest-green ink, and warm cream
+// paper, transitioning from misty sage-eucalyptus at the top through soft
+// celadon and herbal linen into warm sunlit parchment at the bottom.
+var washTable = map[string]washSpec{
+	"sage": {
+		light:     []string{"#d7e6d8", "#e3ede0", "#efefe2", "#f5efd6"},
+		lightGlow: ui.RGBA(206, 228, 204, 0.80),
+		dark:      []string{"#141d16", "#19221a", "#1f221a"},
+		darkGlow:  ui.RGBA(86, 122, 82, 0.28),
+	},
+	"linen": {
+		light:     []string{"#e5e2d7", "#edeae0", "#f4f1e6", "#f8f4e3"},
+		lightGlow: ui.RGBA(238, 232, 214, 0.80),
+		dark:      []string{"#191b17", "#1d1f1a", "#22211b"},
+		darkGlow:  ui.RGBA(115, 112, 92, 0.24),
+	},
+	"mist": {
+		light:     []string{"#d4e5e3", "#e2eeeb", "#efefe5", "#f5efe0"},
+		lightGlow: ui.RGBA(204, 232, 228, 0.78),
+		dark:      []string{"#131c1c", "#172120", "#1c211c"},
+		darkGlow:  ui.RGBA(74, 124, 118, 0.26),
+	},
+	"kero": {
+		light:     []string{"#ded8f3", "#ebe5f0", "#f6ede3", "#f6efcf"},
+		lightGlow: ui.RGBA(247, 220, 241, 0.85),
+		dark:      []string{"#171622", "#1a1720", "#1c1916"},
+		darkGlow:  ui.RGBA(110, 75, 115, 0.28),
+	},
+}
+
+// washOptions lists the user-selectable backdrop gradient presets in order.
+var washOptions = []struct {
+	id    string
+	label string
+}{
+	{id: "sage", label: "Sage"},
+	{id: "linen", label: "Linen"},
+	{id: "mist", label: "Mist"},
+	{id: "kero", label: "Kero"},
+}
+
+// washes returns the two Oklab linear gradients of a Kero-style backdrop: the
+// vertical multi-stop wash and the diagonal top-right corner glow.
+func washes(id string, dark bool) (base, glow ui.LinearGradient) {
+	spec, ok := washTable[id]
+	if !ok {
+		spec = washTable["sage"]
+	}
+	hexes, g := spec.light, spec.lightGlow
+	if dark {
+		hexes, g = spec.dark, spec.darkGlow
+	}
+	stops := make([]ui.GradientStop, len(hexes))
+	for i, h := range hexes {
+		at := float32(0)
+		if len(hexes) > 1 {
+			at = float32(i) / float32(len(hexes)-1)
+		}
+		stops[i] = ui.GradientStop{Color: ui.Hex(h), At: at}
+	}
+	base = ui.LinearGradient{Angle: 180, Oklab: true, Stops: stops}
+	glow = ui.LinearGradient{
+		Angle: 225,
+		Oklab: true,
+		Stops: []ui.GradientStop{
+			{Color: g, At: 0},
+			{Color: g.Alpha(0), At: 0.55},
+		},
+	}
+	return base, glow
+}
+
+// backdrop paints the two-layer Oklab gradient wash on the window root and the
+// workspace container, letting macOS window vibrancy breathe through when active.
+func backdrop(c *ui.Context, root ui.Element) {
+	id := activeWash
+	if id == "" {
+		id = "sage"
+	}
+	base, glow := washes(id, darkPalette)
+	if c.Vibrancy() {
+		for i := range base.Stops {
+			base.Stops[i].Color = base.Stops[i].Color.Alpha(0.95)
+		}
+	}
+	c.Root().LinearGradient(base)
+	root.LinearGradient(glow)
+}
+
+// iconButton renders a quiet borderless 28×28 native icon button that reveals
+// a refractive Liquid Glass lens on hover/press while keeping an accessible
+// Label for tests and screen readers.
+func iconButton(c *ui.Context, key string, icon *ui.SVG, label, tip string) ui.Element {
+	btn := ui.ButtonBase(c.Key(key)).
+		Size(28, 28).
+		Radius(14).
+		AlignItems(ui.Center).
+		Justify(ui.Center).
+		Label(label).
+		Tooltip(tip)
+	if btn.Pressed() || btn.Hovered() {
+		tint := routeBlueSoft.Alpha(0.18)
+		if btn.Pressed() {
+			tint = routeBlue.Alpha(0.26)
+		}
+		btn.Background(tint).Material(glass.Glass{
+			Style:       glass.Regular,
+			Tint:        tint,
+			Interactive: true,
+		})
+	}
+	fg := inkSoft
+	if btn.Hovered() || btn.Pressed() {
+		fg = inkNavy
+	}
+	btn.Children(func() {
+		ui.Icon(c, icon).Size(15, 15).TextColor(fg)
+	})
+	return btn
+}
+
+// toolbarIconButton renders a compact capsule button with an embedded 14×14 SVG
+// icon, visible text label, and interactive Liquid Glass optics (specular rim,
+// edge refraction, and press expansion).
+func toolbarIconButton(c *ui.Context, key string, icon *ui.SVG, text, label, tip string) ui.Element {
+	btn := ui.ButtonBase(c.Key(key)).
+		Height(28).
+		Padding(4, 11).
+		Gap(5).
+		Radius(14).
+		AlignItems(ui.Center).
+		Label(label).
+		Tooltip(tip)
+	base := routeBlueSoft.Alpha(0.16)
+	if btn.Pressed() {
+		base = routeBlue.Alpha(0.28)
+	} else if btn.Hovered() {
+		base = routeBlueSoft.Alpha(0.26)
+	}
+	tint := btn.AnimateColor("bg", base, motionHover)
+	btn.Background(tint).Material(glass.Glass{
+		Style:       glass.Regular,
+		Tint:        tint,
+		Interactive: true,
+	})
+	btn.Children(func() {
+		ui.Icon(c, icon).Size(13, 13).TextColor(inkSoft)
+		ui.Text(c, text).FontSize(sizeSmall).TextColor(inkNavy).SingleLine()
+	})
+	return btn
+}
+
+// elevateCard styles the floating primary workspace card with a subtle border
+// (or top-lit linear gradient in dark mode) and soft ambient shadow, matching
+// Kero's raised card treatment over the Oklab gradient backdrop.
+func elevateCard(p ui.Element) ui.Element {
+	fill := paperRaised.Alpha(0.92)
+	if darkPalette {
+		fill = paperRaised.Alpha(0.90)
+	}
+	p = p.Background(fill).Radius(radiusCard).Clip()
+	if darkPalette {
+		return p.Border(1, hairline).
+			BorderLinearGradient(ui.LinearGradient{
+				From:  ui.Hex("#FFFFFF").Alpha(0.09),
+				To:    hairline.Alpha(0.85),
+				Angle: 180,
+			}).
+			Shadow(0, 4, 16, 0, ui.RGBA(0, 0, 0, 0.34))
+	}
+	return p.Border(1, ui.RGBA(15, 29, 20, 0.08)).
+		Shadow(0, 1, 2, 0, ui.RGBA(15, 29, 20, 0.05)).
+		Shadow(0, 4, 14, 0, ui.RGBA(15, 29, 20, 0.06))
+}
+
+// elevateSurface styles transient popovers, menus, and floating palettes with
+// Liquid Glass refraction, backdrop blur, dual-layer shadows in light mode,
+// and a top-lit border highlight in dark mode.
+func elevateSurface(p ui.Element, r float32) ui.Element {
+	tint := paperRaised.Alpha(0.28)
+	if darkPalette {
+		tint = paperRaised.Alpha(0.22)
+	}
+	p = p.Background(tint).Radius(r).Material(glass.Glass{
+		Style: glass.Regular,
+		Tint:  tint,
+	})
+	if darkPalette {
+		return p.Border(1, hairline).
+			BorderLinearGradient(ui.LinearGradient{
+				From:  ui.Hex("#FFFFFF").Alpha(0.14),
+				To:    hairline.Alpha(0.9),
+				Angle: 180,
+			}).
+			Shadow(0, 8, 24, 0, shadowPopover)
+	}
+	return p.Shadow(0, 2, 5, 0, ui.RGBA(15, 29, 20, 0.06)).
+		Shadow(0, 8, 22, 0, shadowPopover)
+}
+
+// chosenPill styles a sidebar row as a high-contrast rounded Liquid Glass pill
+// on top of the gradient wash so the active notebook, tag, or note is unmistakable.
+func chosenPill(row ui.Element, chosen, hovered bool) ui.Element {
+	if chosen {
+		tint := violet.Alpha(0.24)
+		if darkPalette {
+			tint = violet.Alpha(0.28)
+		}
+		row.Background(tint).
+			Material(glass.Glass{
+				Style: glass.Regular,
+				Tint:  tint,
+			}).
+			Border(1, violet.Alpha(0.38))
+		return row
+	}
+	base := ui.Color{}
+	if hovered {
+		if darkPalette {
+			base = ui.RGBA(255, 255, 255, 0.06)
+		} else {
+			base = ui.RGBA(15, 29, 20, 0.055)
+		}
+	}
+	row.Background(row.AnimateColor("bg", base, motionHover))
+	return row
+}
+
+// segmentedControl renders a sunken pill track whose selected segment uses a
+// high-contrast accent fill and bold text so the active option stands out clearly.
+func segmentedControl(c *ui.Context, groupLabel string, selected *int, labels ...string) bool {
+	changed := false
+	track := ui.Row(c.Key("seg-track:" + groupLabel)).FillWidth().AlignItems(ui.Stretch).
+		Padding(3).Gap(4).Radius(radiusControl + 2).
+		Background(paperSunken).Border(1, hairline).Label(groupLabel)
+	track.Children(func() {
+		for i, text := range labels {
+			i, text := i, text
+			active := selected != nil && i == *selected
+			seg := ui.ButtonBase(c.Key("seg:" + groupLabel + ":" + text)).
+				Label(text).
+				Grow(1).
+				Justify(ui.Center).
+				AlignItems(ui.Center).
+				Padding(5, 10).
+				Radius(radiusControl)
+			if active {
+				seg.Background(violet).Border(1, violet).
+					Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.18))
+			} else if seg.Hovered() {
+				seg.Background(paperRaised.Alpha(0.65))
+			}
+			if seg.Clicked() && selected != nil && *selected != i {
+				*selected = i
+				changed = true
+			}
+			seg.Children(func() {
+				lbl := ui.Text(c, text).FontSize(sizeSmall).SingleLine()
+				if active {
+					lbl.FontWeight(600).TextColor(paperRaised)
+				} else if seg.Hovered() {
+					lbl.TextColor(inkNavy)
+				} else {
+					lbl.TextColor(inkSoft)
+				}
+			})
+		}
+	})
+	return changed
+}
+
 // label renders a quiet 11px sentence-case section heading (DESIGN.md).
 func label(c *ui.Context, text string) ui.Element {
 	return labelOn(c, text, inkSoft)
@@ -339,14 +632,10 @@ func panelIn(p ui.Element, key string, run uint64) ui.Element {
 }
 
 // panelStyle is the one floating surface of the depth system: paper-raised
-// over the chrome, an 8px radius, a hairline edge and the single popover
+// over the chrome, a 9px radius, a hairline/top-lit edge and the popover
 // shadow (DESIGN.md's Shadow Vocabulary).
 func panelStyle(p ui.Element, width float32) ui.Element {
-	p = p.Background(paperRaised).
-		Border(1, hairline).
-		Radius(radiusPanel).
-		Shadow(0, 6, 18, 0, shadowPopover).
-		Gap(2)
+	p = elevateSurface(p, radiusPanel).Gap(2)
 	if width > 0 {
 		p = p.Width(width)
 	}

@@ -212,7 +212,9 @@ connection is retried by the loop itself (45 s and 30 s), and the footer says
 when ("retrying at 15:05"); failures that need the user wait for the ten-minute
 pass or **Sync now**.
 
-**Settings** edits the sync target (off, file system folder, or Joplin Server
+**Settings** chooses the appearance (`Light` or `Dark`) and Oklab gradient
+backdrop (`Sage`, `Linen`, `Mist`, or `Kero`), and edits the sync target (off,
+file system folder, or Joplin Server
 URL/email/password), the E2EE master password and the clipper API token
 (**Regenerate** mints a new one). Values are stored in the vault's local
 `key_values` table — never in the config file, which may be Joplin desktop's
@@ -225,8 +227,10 @@ when Settings opens; **Show passwords** reveals them for the current dialog.
 Dropbox and S3 targets still come from
 the config file and are kept (shown read-only) by the dialog.
 
-Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+K (or Cmd/Ctrl+F) search, Cmd/Ctrl+S save now,
-Cmd/Ctrl+E edit/preview, and back/forward: Alt+Left/Right, or Cmd+[ / Cmd+]
+Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+K (or Cmd/Ctrl+F) search, Cmd/Ctrl+P
+command and note palette, Cmd/Ctrl+\ toggle notebooks rail, Cmd/Ctrl+, settings,
+Cmd/Ctrl+S save now, Cmd/Ctrl+E edit/preview, F2 (or Return on macOS) inline
+rename, and back/forward: Alt+Left/Right, or Cmd+[ / Cmd+]
 on macOS, where the focused editor keeps Alt and an arrow for word movement.
 Edits are flushed
 when switching notes, leaving the editor and closing the window.

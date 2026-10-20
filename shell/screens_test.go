@@ -193,9 +193,14 @@ func TestCaptureReadme(t *testing.T) {
 	registerFonts()
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
+	var everydayID string
 	for _, title := range []string{"Everyday", "Reading", "Ideas"} {
-		if err := svc.CreateNotebook(&models.Folder{Title: title}); err != nil {
+		nb := &models.Folder{Title: title}
+		if err := svc.CreateNotebook(nb); err != nil {
 			t.Fatal(err)
+		}
+		if title == "Everyday" {
+			everydayID = nb.ID
 		}
 	}
 	var selected *models.Note
@@ -206,9 +211,23 @@ func TestCaptureReadme(t *testing.T) {
 		{"Favourite walks", "The long way home, along the water."},
 		{"A slower Saturday", "## Leave the afternoon open\n\nA walk by the water, a small notebook, and no particular hurry.\n\n### Take along\n\n- [x] A thermos of coffee\n- [ ] The book from the bedside table\n- [ ] Something to write with\n\n> Make room for the things you notice."},
 	} {
-		selected = addTestNote(t, svc, "", entry.title, entry.body)
+		selected = addTestNote(t, svc, everydayID, entry.title, entry.body)
+	}
+	for _, name := range []string{"weekend", "outdoors"} {
+		tag := &models.Tag{Title: name}
+		if err := svc.CreateTag(tag); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.AddTag(selected.ID, tag.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.UpdateNote(selected); err != nil {
+		t.Fatal(err)
 	}
 	app.reloadNotebooks()
+	app.reloadTags()
+	app.selectedID = selected.ID
 	app.reloadNotes()
 	app.showNote(selected.ID)
 	tt := ui.NewTester(app.view, 1280, 900)
@@ -307,15 +326,15 @@ func TestCaptureScreens(t *testing.T) {
 	app.selectedID = long.ID
 	app.reloadNotes()
 	app.showNote(long.ID)
-	click(t, tt, "Tags")
+	click(t, tt, "Note tags")
 	tt.Advance(220 * time.Millisecond)
 	capture(t, dir, "11-note-tags-menu", tt)
-	click(t, tt, "Tags")
+	click(t, tt, "Note tags")
 
-	click(t, tt, "Move")
+	click(t, tt, "Move note")
 	tt.Advance(220 * time.Millisecond)
 	capture(t, dir, "12-move-menu", tt)
-	click(t, tt, "Move")
+	click(t, tt, "Move note")
 
 	app.openNewNotebook()
 	tt.Advance(220 * time.Millisecond)
@@ -332,7 +351,7 @@ func TestCaptureScreens(t *testing.T) {
 	capture(t, dir, "15-new-tag", tt)
 	app.tagOpen = false
 
-	click(t, tt, "Delete…")
+	click(t, tt, "Delete note")
 	tt.Advance(220 * time.Millisecond)
 	capture(t, dir, "16-delete-note", tt)
 	click(t, tt, "Cancel")

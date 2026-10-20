@@ -26,23 +26,37 @@ const demoFPS = 30
 // demo writes one PNG per frame at 30 frames a second, so holds and the few
 // transitions a screen has read at real speed.
 type demo struct {
-	t   *testing.T
-	tt  *ui.Tester
-	dir string
-	n   int
+	t        *testing.T
+	tt       *ui.Tester
+	dir      string
+	n        int
+	extraDir string
+	extraN   int
 }
 
 func (d *demo) frame() {
 	d.tt.Advance(time.Second / demoFPS)
 	d.tt.Frame()
 	d.n++
+	img := d.tt.Image()
 	f, err := os.Create(filepath.Join(d.dir, fmt.Sprintf("%04d.png", d.n)))
 	if err != nil {
 		d.t.Fatalf("create frame %d: %v", d.n, err)
 	}
 	defer f.Close()
-	if err := png.Encode(f, d.tt.Image()); err != nil {
+	if err := png.Encode(f, img); err != nil {
 		d.t.Fatalf("encode frame %d: %v", d.n, err)
+	}
+	if d.extraDir != "" {
+		d.extraN++
+		ef, err := os.Create(filepath.Join(d.extraDir, fmt.Sprintf("%04d.png", d.extraN)))
+		if err != nil {
+			d.t.Fatalf("create extra frame %d: %v", d.extraN, err)
+		}
+		defer ef.Close()
+		if err := png.Encode(ef, img); err != nil {
+			d.t.Fatalf("encode extra frame %d: %v", d.extraN, err)
+		}
 	}
 }
 
@@ -67,11 +81,14 @@ func (d *demo) click(s string) {
 func TestCaptureDemo(t *testing.T) {
 	root := captureDir(t)
 	frames := filepath.Join(root, "demo")
-	if err := os.RemoveAll(frames); err != nil {
-		t.Fatalf("clear demo frames: %v", err)
-	}
-	if err := os.MkdirAll(frames, 0o755); err != nil {
-		t.Fatalf("mkdir demo: %v", err)
+	writingFrames := filepath.Join(root, "writing-demo")
+	for _, p := range []string{frames, writingFrames} {
+		if err := os.RemoveAll(p); err != nil {
+			t.Fatalf("clear demo frames: %v", err)
+		}
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("mkdir demo: %v", err)
+		}
 	}
 	registerFonts()
 
@@ -98,17 +115,25 @@ func TestCaptureDemo(t *testing.T) {
 	// Existing notes start in preview; show the editor and return to reading.
 	d.hold(1.2)
 	tt.Key(ui.Cmd, ui.KeyE)
-	d.hold(2.0)
+	d.hold(1.8)
 	tt.Key(ui.Cmd, ui.KeyE)
 	d.hold(0.5)
 
-	// The whole library, and another note in it.
+	// Open the notebooks rail, browse all notes, and close the rail.
 	d.click("Open notebooks")
-	d.click("All notes")
-	d.click("Close notebooks")
-	d.hold(0.9)
-	d.click("Meeting 12 Oct")
 	d.hold(1.0)
+	d.click("All notes")
+	d.hold(0.6)
+	d.click("Close notebooks")
+	d.hold(0.7)
+	d.click("Meeting 12 Oct")
+	d.hold(0.9)
+
+	// Command palette (⌘K) and search.
+	d.click("Command palette")
+	d.hold(1.1)
+	app.paletteOpen = false
+	d.hold(0.3)
 
 	// Search the vault and clear it.
 	d.click("Search notes")
@@ -116,56 +141,59 @@ func TestCaptureDemo(t *testing.T) {
 		tt.Type(chunk)
 		d.hold(0.25)
 	}
-	d.hold(1.1)
+	d.hold(1.0)
 	d.click("Clear search")
 	d.hold(0.4)
 
 	// Write a note: body first (the new note focuses it), then its title.
+	d.extraDir = writingFrames
+	d.hold(0.5)
 	tt.Key(ui.Cmd, ui.KeyN)
-	d.hold(0.4)
+	d.hold(0.5)
 	tt.Type("## Along the waterfront")
-	d.hold(0.3)
+	d.hold(0.35)
 	tt.Type("\n\nTake the long way home.")
 	d.hold(0.5)
 	tt.Type("\n\n- Stop for coffee\n- Bring a book")
-	d.hold(0.5)
+	d.hold(0.6)
 	d.click("Note title")
 	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("Sunday plans")
 	d.hold(0.9)
 	tt.Key(ui.Cmd, ui.KeyE)
-	d.hold(1.6)
+	d.hold(1.8)
 	tt.Key(ui.Cmd, ui.KeyE)
-	d.hold(0.4)
+	d.hold(0.5)
+	d.extraDir = ""
 
 	// The tag menu, then settings.
 	d.click("Tags")
-	d.hold(1.3)
+	d.hold(1.2)
 	d.click("Tags")
 	d.click("Settings")
-	d.hold(1.9)
+	d.hold(1.8)
 	d.click("Cancel")
 	d.hold(0.4)
 
 	// The narrow shell: list, drawer, editor.
 	tt.SetSize(900, 640)
 	app.narrowEditor = false
-	d.hold(1.0)
+	d.hold(0.9)
 	app.railOpen = true
-	d.hold(1.5)
+	d.hold(1.3)
 	d.click("Close notebooks")
 	app.narrowEditor = true
-	d.hold(1.5)
+	d.hold(1.3)
 	tt.SetSize(1280, 800)
 	app.narrowEditor = false
-	d.hold(0.6)
+	d.hold(0.5)
 
 	// Compare conflicting versions without discarding either one.
 	app.selectedNotebook = conflictsRail
 	app.reloadNotes()
 	d.hold(0.4)
 	d.click("Resolve conflict")
-	d.hold(2.0)
+	d.hold(1.8)
 	d.click("Cancel")
 
 	// Finish in a quiet reading view, in both appearances.
@@ -179,5 +207,7 @@ func TestCaptureDemo(t *testing.T) {
 	app.dark = false
 	d.hold(1.5)
 
-	t.Logf("demo: %d frames in %s (%.1fs at %d fps)", d.n, frames, float64(d.n)/demoFPS, demoFPS)
+	t.Logf("demo: %d frames in %s (%.1fs at %d fps), writing: %d frames in %s (%.1fs)",
+		d.n, frames, float64(d.n)/demoFPS, demoFPS,
+		d.extraN, writingFrames, float64(d.extraN)/demoFPS)
 }

@@ -216,7 +216,7 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 
 	// Delete opens a confirmation dialog; the note is gone only after the
 	// dialog's Delete is chosen.
-	if err := tt.Click("Delete…"); err != nil {
+	if err := tt.Click("Delete note"); err != nil {
 		t.Fatalf("click Delete: %v", err)
 	}
 	if !app.confirmDelete {
@@ -274,19 +274,6 @@ func TestNativeHistoryAndMove(t *testing.T) {
 		t.Fatalf("after click = %#v, want alpha", app.note)
 	}
 
-	if err := tt.Click("Back"); err != nil {
-		t.Fatalf("click Back: %v", err)
-	}
-	if app.note == nil || app.note.ID != beta.ID {
-		t.Fatalf("after Back = %#v, want beta", app.note)
-	}
-	if err := tt.Click("Forward"); err != nil {
-		t.Fatalf("click Forward: %v", err)
-	}
-	if app.note == nil || app.note.ID != alpha.ID {
-		t.Fatalf("after Forward = %#v, want alpha", app.note)
-	}
-
 	// The keyboard equivalents. The note editor owns Alt and an arrow on
 	// macOS, where that moves the caret by words in every native text field,
 	// so the binding from inside a note is Cmd+[ / Cmd+] there, as in a
@@ -317,8 +304,8 @@ func TestNativeHistoryAndMove(t *testing.T) {
 	}
 
 	// Moving Alpha out of Work leaves Beta as the selected row.
-	if err := tt.Click("Move"); err != nil {
-		t.Fatalf("click Move: %v", err)
+	if err := tt.Click("Move note"); err != nil {
+		t.Fatalf("click Move note: %v", err)
 	}
 	if !app.moveOpen {
 		t.Fatal("Move did not open the notebook menu")
@@ -341,9 +328,7 @@ func TestNativeHistoryAndMove(t *testing.T) {
 	}
 
 	// Back reaches the moved note, dropping the Work filter to show it.
-	if err := tt.Click("Back"); err != nil {
-		t.Fatalf("click Back after move: %v", err)
-	}
+	tt.Key(backMods, backKey)
 	if app.note == nil || app.note.ID != alpha.ID {
 		t.Fatalf("after Back = %#v, want alpha", app.note)
 	}
@@ -2030,6 +2015,125 @@ func TestNativeEditorAttachAndPaste(t *testing.T) {
 	linked, err = db.GetResourcesByNote(note.ID)
 	if err != nil || len(linked) != 3 {
 		t.Fatalf("GetResourcesByNote after paste = %#v, err %v", linked, err)
+	}
+}
+
+func TestNativeContextMenusInlineRenameAndPalette(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+
+	work := &models.Folder{Title: "Work"}
+	archive := &models.Folder{Title: "Archive"}
+	for _, nb := range []*models.Folder{work, archive} {
+		if err := svc.CreateNotebook(nb); err != nil {
+			t.Fatalf("CreateNotebook: %v", err)
+		}
+	}
+	alpha := addTestNote(t, svc, work.ID, "Alpha plan", "First body")
+	beta := addTestNote(t, svc, work.ID, "Beta launch", "Second body")
+
+	app = newNativeApp(db)
+	if app.appMenu() == nil || app.dockMenu() == nil {
+		t.Fatal("expected native OS appMenu and dockMenu to be constructed")
+	}
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	tt.SetTitleBar(ui.TitleBar{Height: 44, Left: 76})
+	tt.SetVibrancy(true)
+	tt.Frame()
+
+	// Open the notebooks sidebar and test double-click inline rename.
+	click(t, tt, "Open notebooks")
+	if err := tt.Click("Work"); err != nil {
+		t.Fatalf("first click Work: %v", err)
+	}
+	if err := tt.Click("Work"); err != nil {
+		t.Fatalf("second click Work (double-click): %v", err)
+	}
+	if _, ok := tt.Find("Inline rename"); !ok {
+		t.Fatal("expected Inline rename input after double-clicking notebook")
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("Field Work")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if !tt.HasText("Field Work") {
+		t.Fatalf("expected notebook to be renamed to Field Work; texts = %v", tt.Texts())
+	}
+
+	// Test right-click context menu on a note row to move it to Archive.
+	if err := tt.RightClick("Alpha plan"); err != nil {
+		t.Fatalf("RightClick Alpha plan: %v", err)
+	}
+	if len(tt.Menu()) == 0 {
+		t.Fatal("expected note context menu to open")
+	}
+	if err := tt.ChooseMenuItem("Move to notebook", "Archive"); err != nil {
+		t.Fatalf("ChooseMenuItem Move to notebook -> Archive: %v", err)
+	}
+	moved, err := svc.GetNote(alpha.ID)
+	if err != nil || moved.ParentID != archive.ID {
+		t.Fatalf("expected Alpha plan to move to Archive (%s), got %#v (err %v)", archive.ID, moved, err)
+	}
+
+	// Test Command & Note Palette (Cmd+P) to jump to Beta launch and run a command.
+	tt.Key(ui.Cmd, ui.KeyP)
+	tt.Frame()
+	if _, ok := tt.Find("Command palette search"); !ok {
+		t.Fatal("expected Command palette search input to open on Cmd+P")
+	}
+	tt.Type("Alpha plan")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if app.note == nil || app.note.ID != alpha.ID {
+		t.Fatalf("expected palette to switch to Alpha plan (%s), got %#v", alpha.ID, app.note)
+	}
+
+	// Click the ⌘K / Command palette badge to run Toggle Dark Mode.
+	click(t, tt, "Command palette")
+	tt.Type("Toggle Dark Mode")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if !app.dark {
+		t.Fatal("expected Toggle Dark Mode command in palette to enable dark mode")
+	}
+	_ = beta
+}
+
+func TestNativeLoadMoreScrollsToNewlyLoadedNotes(t *testing.T) {
+	_, db := openNativeTestApp(t)
+	svc := service.New(db)
+	nb := &models.Folder{Title: "Journal"}
+	if err := svc.CreateNotebook(nb); err != nil {
+		t.Fatalf("CreateNotebook: %v", err)
+	}
+	for i := 0; i < 105; i++ {
+		addTestNote(t, svc, nb.ID, fmt.Sprintf("Entry %03d", i), "body")
+	}
+
+	app := newNativeApp(db)
+	tt := ui.NewTester(app.view, 1280, 800)
+	tt.Frame()
+
+	if !app.hasMore || len(app.notes) != 100 {
+		t.Fatalf("expected initial page of 100 notes with hasMore=true, got len=%d hasMore=%v", len(app.notes), app.hasMore)
+	}
+
+	click(t, tt, "Load more")
+	tt.Frame()
+
+	if len(app.notes) != 105 || app.hasMore {
+		t.Fatalf("expected 105 notes and hasMore=false after Load more, got len=%d hasMore=%v", len(app.notes), app.hasMore)
+	}
+	if app.selectedNote != 100 || app.loadedFrom != 100 || app.lastLoadedCount != 5 {
+		t.Fatalf("expected selectedNote=100 loadedFrom=100 lastLoadedCount=5, got selected=%d loadedFrom=%d count=%d", app.selectedNote, app.loadedFrom, app.lastLoadedCount)
+	}
+	first, last := app.list.Visible()
+	if first > 100 || last <= 100 {
+		t.Fatalf("expected newly loaded note at index 100 to be scrolled into view, got visible=[%d, %d)", first, last)
+	}
+	if !tt.HasText("+5 loaded · all 105 shown") {
+		t.Fatalf("expected load more feedback badge, texts=%v", tt.Texts())
 	}
 }
 

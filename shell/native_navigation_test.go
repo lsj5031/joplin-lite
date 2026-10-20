@@ -206,14 +206,10 @@ func TestNativeConflictComparisonNavigation(t *testing.T) {
 			if app.note.ID != original.ID || app.selectedNotebook != "" {
 				t.Fatal("View original did not navigate to original")
 			}
-			if app.narrow {
-				if runtime.GOOS == "darwin" {
-					tt.Key(ui.Cmd, ui.KeyBracketLeft)
-				} else {
-					tt.Key(ui.Alt, ui.KeyLeft)
-				}
+			if runtime.GOOS == "darwin" {
+				tt.Key(ui.Cmd, ui.KeyBracketLeft)
 			} else {
-				click(t, tt, "Back")
+				tt.Key(ui.Alt, ui.KeyLeft)
 			}
 			if app.note.ID != conflict.ID {
 				t.Fatalf("Back returned %s instead of exact conflict", app.note.Title)

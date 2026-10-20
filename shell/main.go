@@ -46,6 +46,12 @@ func main() {
 			win.Focus()
 		}
 	})
+	mygo.App.OnActivate(func(hasVisibleWindows bool) {
+		if win != nil {
+			win.Show()
+			win.Focus()
+		}
+	})
 
 	mygo.App.WhenReady(func() {
 		var err error

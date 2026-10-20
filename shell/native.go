@@ -150,6 +150,28 @@ type nativeApp struct {
 	narrow       bool
 	narrowEditor bool
 	railOpen     bool
+	railW        float32
+	listW        float32
+
+	// Inline double-click / context-menu rename state for sidebar rows.
+	inlineRenameKind  string
+	inlineRenameID    string
+	inlineRenameTitle string
+
+	// Pagination feedback when loading additional pages in the note list.
+	loadedFrom         int
+	lastLoadedCount    int
+	loadMoreRun        uint64
+	hasPendingScroll   bool
+	pendingScrollRow   int
+	pendingScrollAlign ui.Align
+	inlineRenameFocus bool
+
+	// Spotlight-style command & quick-open palette state.
+	paletteOpen  bool
+	paletteQuery string
+	paletteIndex int
+	paletteFocus bool
 
 	// surfaces carries the entrance state of the menus and dialogs, so a panel
 	// animates in once per open and never at rest.
@@ -182,7 +204,15 @@ func (a *nativeApp) targetLabel() string {
 
 func newNativeApp(db *store.DB) *nativeApp {
 	dark := loadDarkSetting(db)
-	app := &nativeApp{svc: service.New(db), db: db, dark: dark, savedDark: dark, selectedNote: -1}
+	app := &nativeApp{
+		svc:          service.New(db),
+		db:           db,
+		dark:         dark,
+		savedDark:    dark,
+		selectedNote: -1,
+		railW:        railWidth,
+		listW:        listWidth,
+	}
 	// Screenshot attachments can decode to hundreds of MB; load one at a time.
 	var imageMu sync.Mutex
 	app.md = &markdown.Options{LoadImage: func(ref string) (ui.ImageSource, error) {
@@ -496,6 +526,9 @@ func (a *nativeApp) reloadNotes() {
 	}
 	a.notes = page.Notes
 	a.hasMore, a.cursor = page.HasMore, page.NextCursor
+	a.loadedFrom = 0
+	a.lastLoadedCount = 0
+	a.hasPendingScroll = false
 	if a.selectedNotebook == conflictsRail && a.query == "" {
 		a.conflictCount = len(a.notes)
 	}
@@ -541,7 +574,8 @@ func (a *nativeApp) pruneSelection() {
 	}
 }
 
-// loadMore appends the next keyset page without disturbing the selection.
+// loadMore appends the next keyset page, scrolls to the first newly loaded
+// note, selects it, and triggers entrance feedback for the new batch.
 func (a *nativeApp) loadMore() {
 	if !a.hasMore || a.cursor == "" {
 		return
@@ -551,8 +585,20 @@ func (a *nativeApp) loadMore() {
 		a.saveErr = err.Error()
 		return
 	}
+	firstNew := len(a.notes)
 	a.notes = append(a.notes, page.Notes...)
 	a.hasMore, a.cursor = page.HasMore, page.NextCursor
+	if len(page.Notes) > 0 {
+		a.loadedFrom = firstNew
+		a.lastLoadedCount = len(page.Notes)
+		a.loadMoreRun++
+		a.selectedNote = firstNew
+		a.selection.Clear()
+		a.pendingScrollRow = firstNew
+		a.pendingScrollAlign = ui.Start
+		a.hasPendingScroll = true
+		a.loadNote()
+	}
 }
 
 // loadNote flushes pending edits before switching, then loads the selected
@@ -1594,88 +1640,113 @@ func (a *nativeApp) submitSettings() {
 }
 
 // settingsDialog is the native settings form: sync target and its fields, the
-// E2EE master password, and the clipper token.
+// E2EE master password, and the clipper token, organized in grouped cards.
 func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 	if !a.settingsOpen {
 		return
 	}
 	ui.Modal(c, &a.settingsOpen, func() {
-		ui.Text(c, "Settings").FontSize(17).Bold()
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, iconSettings).Size(16, 16).TextColor(routeBlue)
+			ui.Text(c, "Settings").FontSize(17).Bold()
+		})
 		ui.Text(c, "Sync and the web clipper, without editing a config file.").
 			FontSize(12).TextColor(t.TextMuted)
 
 		_, height := c.Size()
 		ui.Scroll(c.Key("settings-fields")).Width(420).MaxHeight(max(120, height-210)).Children(func() {
 			ui.Column(c).Gap(8).Children(func() {
-				appearancePick := 0
-				if a.settings.Dark {
-					appearancePick = 1
-				}
-				appSeg := ui.Segmented(c, &appearancePick, "Light", "Dark").Label("Appearance")
-				if appSeg.Changed() {
-					a.settings.Dark = appearancePick == 1
-					a.dark = a.settings.Dark
-				}
-
-				labels, targets := a.settingsTargets()
-				seg := ui.Segmented(c, &a.settingsPick, labels...).Label("Sync target")
-				if seg.Changed() {
-					a.settings.Target = targets[a.settingsPick]
-				}
-
-				switch a.settings.Target {
-				case targetFolder:
-					ui.Text(c, "Sync folder").FontSize(12).Bold()
-					ui.TextInput(c.Key("settings-folder"), &a.settings.LocalDir).
-						Placeholder("Folder Joplin's File system target uses").
-						Label("Sync folder path").Width(408)
-				case targetServer:
-					ui.Text(c, "Server URL").FontSize(12).Bold()
-					ui.TextInput(c.Key("settings-url"), &a.settings.ServerURL).
-						Placeholder("https://sync.example.com").
-						Label("Joplin Server URL").Width(408)
-					ui.Text(c, "Email").FontSize(12).Bold()
-					ui.TextInput(c.Key("settings-user"), &a.settings.Username).
-						Label("Server account email").Width(408)
-					ui.Text(c, "Password").FontSize(12).Bold()
-					password := ui.TextInput(c.Key("settings-pass"), &a.settings.Password).
-						Label("Server account password").Width(408)
-					if !a.settingsReveal {
-						password.Password()
+				// Group 1: Appearance & Sync Target
+				ui.Column(c).Width(416).Padding(8, 10).Gap(6).
+					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
+					appearancePick := 0
+					if a.settings.Dark {
+						appearancePick = 1
 					}
-				case 7, 8:
-					ui.Text(c, targetLabel(a.settings.Target)+" is configured in the config file; this dialog keeps it.").
-						FontSize(11).TextColor(t.TextMuted)
-				case targetOff:
-					ui.Text(c, "Notes stay on this device; nothing is sent anywhere.").
-						FontSize(11).TextColor(t.TextMuted)
-				}
+					if segmentedControl(c, "Appearance", &appearancePick, "Light", "Dark") {
+						a.settings.Dark = appearancePick == 1
+						a.dark = a.settings.Dark
+					}
 
-				ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
-				master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
-					Placeholder("Leave empty when E2EE is off").
-					Label("E2EE master password").Width(408)
-				if !a.settingsReveal {
-					master.Password()
-				}
-				ui.Checkbox(c, &a.settingsReveal, "Show passwords")
-				ui.Text(c, "Decrypts synced notes on this device. Stored locally in this vault and never sent anywhere.").
-					FontSize(11).TextColor(t.TextMuted)
-
-				ui.Text(c, "Clipper token").FontSize(12).Bold()
-				ui.Row(c).Width(408).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.TextInput(c.Key("settings-token"), &a.settings.APIToken).
-						Label("Clipper API token").Grow(1).MinWidth(0)
-					if ui.Button(c, "Regenerate").Tooltip("Replace the token with a fresh one").Clicked() {
-						if token, err := randomToken(); err == nil {
-							a.settings.APIToken = token
-						} else {
-							a.settingsErr = err.Error()
+					washPick := 0
+					washLabels := make([]string, len(washOptions))
+					for i, opt := range washOptions {
+						washLabels[i] = opt.label
+						if opt.id == activeWash {
+							washPick = i
 						}
 					}
+					if segmentedControl(c, "Backdrop", &washPick, washLabels...) {
+						activeWash = washOptions[washPick].id
+					}
+
+					labels, targets := a.settingsTargets()
+					if segmentedControl(c, "Sync target", &a.settingsPick, labels...) {
+						a.settings.Target = targets[a.settingsPick]
+					}
+
+					switch a.settings.Target {
+					case targetFolder:
+						ui.Text(c, "Sync folder").FontSize(12).Bold()
+						ui.TextInput(c.Key("settings-folder"), &a.settings.LocalDir).
+							Placeholder("Folder Joplin's File system target uses").
+							Label("Sync folder path").Width(394)
+					case targetServer:
+						ui.Text(c, "Server URL").FontSize(12).Bold()
+						ui.TextInput(c.Key("settings-url"), &a.settings.ServerURL).
+							Placeholder("https://sync.example.com").
+							Label("Joplin Server URL").Width(394)
+						ui.Text(c, "Email").FontSize(12).Bold()
+						ui.TextInput(c.Key("settings-user"), &a.settings.Username).
+							Label("Server account email").Width(394)
+						ui.Text(c, "Password").FontSize(12).Bold()
+						password := ui.TextInput(c.Key("settings-pass"), &a.settings.Password).
+							Label("Server account password").Width(394)
+						if !a.settingsReveal {
+							password.Password()
+						}
+					case 7, 8:
+						ui.Text(c, targetLabel(a.settings.Target)+" is configured in the config file; this dialog keeps it.").
+							FontSize(11).TextColor(t.TextMuted)
+					case targetOff:
+						ui.Text(c, "Notes stay on this device; nothing is sent anywhere.").
+							FontSize(11).TextColor(t.TextMuted)
+					}
 				})
-				ui.Text(c, "Paste this into the Joplin Web Clipper. Saving signs out any old token.").
-					FontSize(11).TextColor(t.TextMuted)
+
+				// Group 2: End-to-End Encryption
+				ui.Column(c).Width(416).Padding(8, 10).Gap(5).
+					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
+					ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
+					master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
+						Placeholder("Leave empty when E2EE is off").
+						Label("E2EE master password").Width(394)
+					if !a.settingsReveal {
+						master.Password()
+					}
+					ui.Checkbox(c, &a.settingsReveal, "Show passwords")
+					ui.Text(c, "Decrypts synced notes on this device. Stored locally in this vault and never sent anywhere.").
+						FontSize(11).TextColor(t.TextMuted)
+				})
+
+				// Group 3: Web Clipper Token
+				ui.Column(c).Width(416).Padding(8, 10).Gap(5).
+					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
+					ui.Text(c, "Clipper token").FontSize(12).Bold()
+					ui.Row(c).Width(394).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.TextInput(c.Key("settings-token"), &a.settings.APIToken).
+							Label("Clipper API token").Grow(1).MinWidth(0)
+						if ui.Button(c, "Regenerate").Tooltip("Replace the token with a fresh one").Clicked() {
+							if token, err := randomToken(); err == nil {
+								a.settings.APIToken = token
+							} else {
+								a.settingsErr = err.Error()
+							}
+						}
+					})
+					ui.Text(c, "Paste this into the Joplin Web Clipper. Saving signs out any old token.").
+						FontSize(11).TextColor(t.TextMuted)
+				})
 			})
 		})
 
@@ -1824,6 +1895,177 @@ func clip(s string, n int) string {
 	return s
 }
 
+// startInlineRename enters inline editing for a notebook or tag in the sidebar.
+func (a *nativeApp) startInlineRename(kind, id, title string) {
+	a.inlineRenameKind = kind
+	a.inlineRenameID = id
+	a.inlineRenameTitle = title
+	a.inlineRenameFocus = true
+}
+
+func (a *nativeApp) cancelInlineRename() {
+	a.inlineRenameKind = ""
+	a.inlineRenameID = ""
+	a.inlineRenameTitle = ""
+	a.inlineRenameFocus = false
+}
+
+func (a *nativeApp) commitInlineRename() {
+	kind, id := a.inlineRenameKind, a.inlineRenameID
+	title := strings.TrimSpace(a.inlineRenameTitle)
+	a.cancelInlineRename()
+	if title == "" || id == "" {
+		return
+	}
+	switch kind {
+	case "notebook":
+		nb := a.notebookByID(id)
+		if nb == nil || nb.Title == title {
+			return
+		}
+		updated := *nb
+		updated.Title = title
+		if err := a.svc.UpdateNotebook(&updated); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		a.reloadNotebooks()
+	case "tag":
+		tag := a.tagByID(id)
+		if tag == nil || tag.Title == title {
+			return
+		}
+		updated := *tag
+		updated.Title = title
+		if err := a.svc.UpdateTag(&updated); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		a.reloadTags()
+		a.reloadNoteTags()
+	}
+}
+
+// openPalette opens the Spotlight-style command and note switcher palette.
+func (a *nativeApp) openPalette() {
+	a.paletteQuery = ""
+	a.paletteIndex = 0
+	a.paletteFocus = true
+	a.paletteOpen = true
+}
+
+// appMenu builds the native OS menu bar for Joplin Lite.
+func (a *nativeApp) appMenu() *mygo.Menu {
+	do := func(fn func()) func(*mygo.MenuItem, *mygo.Window) {
+		return func(*mygo.MenuItem, *mygo.Window) {
+			fn()
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		}
+	}
+
+	var items []*mygo.MenuItem
+	if runtime.GOOS == "darwin" {
+		items = append(items, &mygo.MenuItem{
+			Label: "Joplin Lite",
+			Submenu: []*mygo.MenuItem{
+				{Role: mygo.RoleAbout},
+				mygo.Separator(),
+				{Label: "Settings…", Accelerator: "CmdOrCtrl+,", Click: do(a.openSettings)},
+				mygo.Separator(),
+				{Role: mygo.RoleServices},
+				mygo.Separator(),
+				{Role: mygo.RoleHide},
+				{Role: mygo.RoleHideOthers},
+				{Role: mygo.RoleUnhide},
+				mygo.Separator(),
+				{Role: mygo.RoleQuit},
+			},
+		})
+	}
+
+	fileItems := []*mygo.MenuItem{
+		{Label: "New Note", Accelerator: "CmdOrCtrl+N", Click: do(a.newNote)},
+		{Label: "New Notebook…", Accelerator: "CmdOrCtrl+Shift+N", Click: do(a.openNewNotebook)},
+		{Label: "New Tag…", Accelerator: "CmdOrCtrl+Shift+T", Click: do(a.openNewTag)},
+		mygo.Separator(),
+		{Label: "Save Note", Accelerator: "CmdOrCtrl+S", Click: do(a.flush)},
+		{Label: "Attach Files…", Click: do(a.promptAttachFiles)},
+		{Label: "Sync Now", Accelerator: "CmdOrCtrl+R", Click: do(a.syncNow)},
+		mygo.Separator(),
+	}
+	if runtime.GOOS != "darwin" {
+		fileItems = append(fileItems,
+			&mygo.MenuItem{Label: "Settings…", Accelerator: "CmdOrCtrl+,", Click: do(a.openSettings)},
+			mygo.Separator(),
+		)
+	}
+	fileItems = append(fileItems, &mygo.MenuItem{Role: mygo.RoleClose})
+
+	items = append(items,
+		&mygo.MenuItem{Label: "File", Submenu: fileItems},
+		&mygo.MenuItem{
+			Label: "Edit",
+			Submenu: []*mygo.MenuItem{
+				{Role: mygo.RoleUndo},
+				{Role: mygo.RoleRedo},
+				mygo.Separator(),
+				{Role: mygo.RoleCut},
+				{Role: mygo.RoleCopy},
+				{Role: mygo.RolePaste},
+				{Role: mygo.RoleSelectAll},
+				mygo.Separator(),
+				{Label: "Find in Notes…", Accelerator: "CmdOrCtrl+F", Click: do(func() {
+					a.focusSearch = true
+					a.focusBody = false
+				})},
+				{Label: "Command Palette…", Accelerator: "CmdOrCtrl+P", Click: do(a.openPalette)},
+			},
+		},
+		&mygo.MenuItem{
+			Label: "View",
+			Submenu: []*mygo.MenuItem{
+				{Label: "Toggle Edit / Preview", Accelerator: "CmdOrCtrl+E", Click: do(a.toggleEdit)},
+				{Label: "Toggle Notebooks Sidebar", Accelerator: "CmdOrCtrl+\\", Click: do(func() {
+					a.railOpen = !a.railOpen
+				})},
+				mygo.Separator(),
+				{Label: "Back", Accelerator: "CmdOrCtrl+[", Click: do(func() { a.goHistory(-1) })},
+				{Label: "Forward", Accelerator: "CmdOrCtrl+]", Click: do(func() { a.goHistory(1) })},
+				mygo.Separator(),
+				{Label: "Toggle Dark Appearance", Click: do(func() {
+					a.dark = !a.dark
+					a.savedDark = a.dark
+					_ = saveDarkSetting(a.db, a.dark)
+				})},
+				mygo.Separator(),
+				{Role: mygo.RoleToggleFullScreen},
+			},
+		},
+		&mygo.MenuItem{Role: mygo.RoleWindowMenu},
+	)
+	return mygo.NewMenu(items)
+}
+
+// dockMenu builds the macOS Dock icon menu.
+func (a *nativeApp) dockMenu() *mygo.Menu {
+	return mygo.NewMenu([]*mygo.MenuItem{
+		{Label: "New Note", Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.newNote()
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		}},
+		{Label: "Sync Now", Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.syncNow()
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		}},
+	})
+}
+
 // openNativeWindow opens the native workspace. It returns the window so the
 // caller keeps the same lifecycle handling as the webview shell.
 func openNativeWindow(be *backend) *mygo.Window {
@@ -1832,7 +2074,11 @@ func openNativeWindow(be *backend) *mygo.Window {
 	app.loadSettings = be.Settings
 	app.applySettings = be.ApplySettings
 	app.target, app.targetSet = be.Settings().Target, true
-	win := mygo.NewWindow(mygo.WindowOptions{
+	mygo.App.SetMenu(app.appMenu())
+	if runtime.GOOS == "darwin" {
+		mygo.App.Dock.SetMenu(app.dockMenu())
+	}
+	opts := mygo.WindowOptions{
 		Title:     "Joplin Lite",
 		Width:     1280,
 		Height:    800,
@@ -1840,7 +2086,14 @@ func openNativeWindow(be *backend) *mygo.Window {
 		MinHeight: 600,
 		StateKey:  "native-main",
 		Content:   ui.View(app.view),
-	})
+	}
+	if runtime.GOOS == "darwin" {
+		opts.TitleBarStyle = mygo.TitleBarHiddenInset
+		opts.TitleBarHeight = 44
+		opts.TrafficLightPosition = &mygo.Point{X: 16, Y: 16}
+		opts.Vibrancy = mygo.VibrancySidebar
+	}
+	win := mygo.NewWindow(opts)
 	win.OnClosed(func() {
 		if app.be != nil {
 			app.be.setNotify(nil)

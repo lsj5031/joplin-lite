@@ -186,7 +186,7 @@ func (a *nativeApp) savedSearchMenu(c *ui.Context, t *ui.Theme) {
 							apply.Children(func() {
 								ui.Text(c, s.Name).Grow(1).MinWidth(0).SingleLine().Tooltip(s.Query)
 							})
-							if ui.Button(c, "×").Label("Delete saved search " + s.Name).Clicked() {
+							if iconButton(c, "delete-saved-search:"+s.Name, iconClose, "Delete saved search "+s.Name, "Delete saved search").Clicked() {
 								a.savedMenuOpen = false
 								a.savedDelete = s.Name
 							}

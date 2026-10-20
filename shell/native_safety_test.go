@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -384,7 +385,11 @@ func TestNativeHistoryClearsUnrelatedTag(t *testing.T) {
 	tt := ui.NewTester(app.view, 1280, 800)
 	click(t, tt, "Open notebooks")
 	click(t, tt, "Only beta")
-	click(t, tt, "Back")
+	if runtime.GOOS == "darwin" {
+		tt.Key(ui.Cmd, ui.KeyBracketLeft)
+	} else {
+		tt.Key(ui.Alt, ui.KeyLeft)
+	}
 	if app.selectedTag != "" || app.selectedID != alpha.ID || app.selectedNote < 0 || !tt.HasText("Alpha") {
 		t.Fatalf("history retained incompatible filter: tag %q, selected %q, row %d", app.selectedTag, app.selectedID, app.selectedNote)
 	}

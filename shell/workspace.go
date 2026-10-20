@@ -6,12 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
+	"github.com/lsj5031/joplin-lite/service"
 )
 
 // Field Notes workspace: sage navigation beside a paper editor, with notebook
@@ -40,9 +42,24 @@ func (a *nativeApp) view(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyN) {
 		a.newNote()
 	}
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyN) {
+		a.openNewNotebook()
+	}
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyT) {
+		a.openNewTag()
+	}
 	if c.Shortcut(ui.Cmd, ui.KeyK) || c.Shortcut(ui.Cmd, ui.KeyF) {
 		a.focusSearch = true
 		a.focusBody = false
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyP) || c.Shortcut(ui.Cmd|ui.Shift, ui.KeyP) {
+		a.openPalette()
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyBackslash) {
+		a.railOpen = !a.railOpen
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyComma) {
+		a.openSettings()
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyS) {
 		a.flush()
@@ -59,6 +76,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.settingsDialog(c, t)
 	a.savedSearchDialog(c, t)
 	a.conflictDialog(c, t)
+	a.commandPalette(c, t)
 
 	if a.confirmDelete {
 		if confirmDialog(c, dangerTheme, &a.confirmDelete, "Delete note?",
@@ -79,13 +97,15 @@ func (a *nativeApp) view(c *ui.Context) {
 
 	width, height := c.Size()
 	a.narrow = width < narrowWidth
-	// The grid is sized explicitly — chrome top and bottom, work between
-	// them — so a tall pane can never push the status strip off the window.
-	strip := statusHeight
-	if a.narrow {
-		strip = narrowStatusHeight
+	if a.railW <= 0 {
+		a.railW = railWidth
 	}
-	body := height - strip
+	if a.listW <= 0 {
+		a.listW = listWidth
+	}
+	// The workspace fills the window height cleanly so the floating editor card
+	// reaches the bottom edge without a full-width footer bar cutting across.
+	body := height
 	if a.narrow {
 		body -= topBarHeight
 	}
@@ -101,69 +121,114 @@ func (a *nativeApp) view(c *ui.Context) {
 			TextColor(signalRed).Background(paperRaised).SingleLine().Tooltip(a.statusText())
 		body = max(0, body-36)
 	}
-	ui.Row(c).Height(body).Shrink(0).AlignItems(ui.Stretch).Clip().Children(func() {
+	mainRow := ui.Row(c).Height(body).Shrink(0).AlignItems(ui.Stretch).Clip()
+	backdrop(c, mainRow)
+	mainRow.Children(func() {
 		switch {
 		case !a.narrow:
 			if a.railOpen {
 				a.railPane(c, t)
+				a.paneSplitter(c, "rail", &a.railW, railWidth, railMinWidth, railMaxWidth, true)
 			}
-			ui.Column(c).Width(listWidth).Shrink(0).Background(paperSunken).Children(func() {
+			ui.Column(c).Width(a.listW).Shrink(0).Children(func() {
 				a.topBar(c, t)
 				a.notesPane(c, t)
 			})
-			a.editorPane(c, t)
+			a.paneSplitter(c, "list", &a.listW, listWidth, listMinWidth, listMaxWidth, false)
+			ui.Column(c).Grow(1).MinWidth(0).Padding(cardGap, cardGap, cardGap, 0).Children(func() {
+				a.editorPane(c, t)
+			})
 		case a.narrowEditor:
 			a.editorPane(c, t)
 		default:
 			a.notesPane(c, t)
 		}
 	})
-	a.statusStrip(c, t)
 	if a.narrow && a.railOpen {
 		a.railOverlay(c, t)
 	}
 }
 
+// paneSplitter draws an interactive vertical resize handle between columns.
+// Double-clicking resets the column width to its default.
+func (a *nativeApp) paneSplitter(c *ui.Context, key string, w *float32, def, minW, maxW float32, drawLine bool) {
+	width := float32(cardGap)
+	if drawLine {
+		width = 4
+	}
+	split := ui.Column(c.Key("splitter:" + key)).Width(width).Shrink(0).
+		Cursor(ui.CursorResizeColumn)
+	if drawLine {
+		split.BorderStartWidth(1).BorderColor(hairline)
+	}
+	if dx, _, ok := split.Dragged(); ok {
+		*w = min(max(*w+dx, minW), maxW)
+	}
+	if split.DoubleClicked() {
+		*w = def
+	}
+	if split.Hovered() || split.Pressed() {
+		split.Background(routeBlue.Alpha(0.24))
+	}
+}
+
 // --- Chrome -----------------------------------------------------------------
 
-// topBar is the upper chrome bar: the wordmark, the search field that filters
-// the note list, and the three controls that are always available.
+// topBar is the upper chrome bar: a Kero-style 44px titlebar row aligned with
+// the window traffic lights (sidebar toggle, new note, settings) and a spacious
+// search field directly below it.
 func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
+	bar := c.TitleBar()
 	if !a.narrow {
-		ui.Column(c).Padding(24, 18, 12, 18).Gap(18).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				mark(c)
-				ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(25).Grow(1)
-				if chromeButton(c, "⚙").Label("Settings").Clicked() {
+		leftPad := float32(12)
+		if !a.railOpen && bar.Left > 0 {
+			leftPad = max(12, bar.Left+6)
+		}
+		headerH := float32(44)
+		if bar.Height > headerH {
+			headerH = bar.Height
+		}
+		ui.Column(c).Padding(0, 0, 4, 0).Gap(4).Children(func() {
+			ui.Row(c).Height(headerH).Padding(0, 12, 0, leftPad).Gap(4).
+				AlignItems(ui.Center).DragWindow().Children(func() {
+				if !a.railOpen && bar.Left == 0 {
+					mark(c)
+					ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(19).TextColor(inkNavy)
+				}
+				ui.Spacer(c)
+				if !a.railOpen {
+					if iconButton(c, "top-open-notebooks", iconSidebar, "Open notebooks", "Toggle notebooks sidebar (Cmd/Ctrl+\\)").Clicked() {
+						a.railOpen = true
+					}
+				}
+				if iconButton(c, "top-new-note", iconPlus, "New note", "Create a new note (Cmd/Ctrl+N)").Clicked() {
+					a.newNote()
+				}
+				if iconButton(c, "top-settings", iconSettings, "Settings", "Sync target, master password and clipper token (Cmd/Ctrl+,)").Clicked() {
 					a.openSettings()
 				}
 			})
-			ui.Row(c).Height(36).Children(func() { a.searchField(c, t) })
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if chromeButton(c, "+ New note").Label("New note").Clicked() {
-					a.newNote()
-				}
-				ui.Spacer(c)
-				if chromeButton(c, "Notebooks").Label("Open notebooks").Tooltip("Notebooks and tags").Clicked() {
-					a.railOpen = !a.railOpen
-				}
+			ui.Row(c).Padding(0, 12).Height(36).Children(func() {
+				a.searchField(c, t)
 			})
 		})
 		return
 	}
-	ui.Row(c).Height(topBarHeight).Shrink(0).AlignItems(ui.Center).Gap(12).Padding(0, 14).
+	leftPad := float32(14)
+	if bar.Left > 0 {
+		leftPad = max(14, bar.Left+8)
+	}
+	ui.Row(c).Height(topBarHeight).Shrink(0).AlignItems(ui.Center).Gap(10).
+		Padding(0, 14, 0, leftPad).DragWindow().
 		Background(navyDeep).Children(func() {
 		if a.narrow {
-			btn := chromeButton(c, "Notebooks")
-			btn.Label("Open notebooks")
-			btn.Tooltip("Notebooks and tags")
-			if btn.Clicked() {
+			if iconButton(c, "narrow-open-notebooks", iconSidebar, "Open notebooks", "Notebooks and tags").Clicked() {
 				a.railOpen = !a.railOpen
 			}
 		}
 		mark(c)
 		ui.Column(c).Gap(0).Shrink(0).Children(func() {
-			ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(22).TextColor(inkNavy)
+			ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(20).TextColor(inkNavy)
 		})
 		a.searchField(c, t)
 		primary := primaryAction(c, "New note")
@@ -173,11 +238,7 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		if primary.Clicked() {
 			a.newNote()
 		}
-		settings := chromeButton(c, "")
-		settings.Label("Settings").Tooltip("Sync target, master password and clipper token")
-		settings.Padding(0, 8).MinWidth(34)
-		settings.Children(func() { chromeGlyph(c, "⚙", 16) })
-		if settings.Clicked() {
+		if iconButton(c, "narrow-settings", iconSettings, "Settings", "Sync target, master password and clipper token").Clicked() {
 			a.openSettings()
 		}
 	})
@@ -222,23 +283,32 @@ func chromeGlyph(c *ui.Context, glyph string, size float32) ui.Element {
 	return ui.Text(c, glyph).FontSize(size).TextColor(navyText).MinWidth(size)
 }
 
-// searchField is the compact paper search input, themed so
-// its placeholder, caret and selection read on the chrome, with the mono kbd
-// hint at its end.
+// searchField is the compact Liquid Glass search input, themed so its
+// placeholder, caret, selection, and Kero-style focus glow read on the gradient
+// backdrop, with the mono kbd hint at its end.
 func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 	field := designTheme()
 	field.Text = inkNavy
 	field.TextMuted = navyText
-	field.Surface = navyDeep
-	field.Accent = routeBlueSoft
+	field.Surface = ui.Transparent
+	field.Accent = ui.Transparent
+	field.Focus = ui.Transparent
 	field.Selection = routeBlueSoft.Alpha(0.35)
-	field.Border = navyLine
+	field.Border = ui.Transparent
 
-	ui.Box(c).Height(34).Grow(1).MaxWidth(420).Background(navyDeep).
-		Border(1, navyLine).Radius(radiusControl).Children(func() {
+	fill := paperRaised.Alpha(0.24)
+	stroke := ui.RGBA(15, 29, 20, 0.13)
+	if darkPalette {
+		fill = ui.RGBA(255, 255, 255, 0.06)
+		stroke = ui.RGBA(255, 255, 255, 0.14)
+	}
+	var focused bool
+	box := ui.Box(c).Height(34).Grow(1).MaxWidth(420).Background(fill).
+		Material(glass.Glass{Style: glass.Regular, Tint: fill}).
+		Radius(12)
+	box.Children(func() {
 		ui.Row(c).Fill().AlignItems(ui.Center).Gap(8).Padding(0, 10).Children(func() {
-			icon := ui.Box(c).Size(15, 15).Shrink(0)
-			icon.Draw(func(p *ui.Painter, r ui.Rect) { magnifier(p, r, navyText) })
+			ui.Icon(c, iconSearch).Size(14, 14).TextColor(navyText).Shrink(0)
 			underTheme(c, func() *ui.Theme { return field }, func() ui.Element {
 				in := ui.TextInput(c.Key("search"), &a.query).
 					Placeholder("Search all notes…").
@@ -246,12 +316,14 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 					TextColor(inkNavy).
 					SelectionColor(routeBlueSoft.Alpha(0.35)).
 					Background(ui.Transparent).
-					Padding(0).
+					Border(0, ui.Transparent).
+					Padding(4, 2).
 					Grow(1)
 				if a.focusSearch {
 					in.Focus()
 					a.focusSearch = false
 				}
+				focused = in.Focused()
 				if in.Changed() {
 					a.reloadNotes()
 					// A narrowed query can drop the open note from the rows,
@@ -260,70 +332,84 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 					// character after the first would land in its body.
 					a.focusBody = false
 				}
+				if in.Focused() && len(a.notes) > 0 {
+					if c.Shortcut(0, ui.KeyDown) {
+						next := min(max(a.selectedNote+1, 0), len(a.notes)-1)
+						if next != a.selectedNote {
+							a.selectedNote = next
+							a.loadNote()
+							a.focusBody = false
+						}
+					} else if c.Shortcut(0, ui.KeyUp) {
+						prev := min(max(a.selectedNote-1, 0), len(a.notes)-1)
+						if prev != a.selectedNote {
+							a.selectedNote = prev
+							a.loadNote()
+							a.focusBody = false
+						}
+					}
+				}
 				return in
 			})
 			if a.query != "" {
-				clear := chromeButton(c, "×")
-				clear.Label("Clear search").Tooltip("Clear search")
-				clear.Padding(0, 4).MinWidth(20)
-				if clear.Clicked() {
+				if iconButton(c, "search-clear", iconClose, "Clear search", "Clear search").Clicked() {
 					a.query = ""
 					a.reloadNotes()
 				}
 			}
-			kbd := ui.Row(c).Shrink(0).Height(20).Radius(radiusSmall).Border(1, navyLine).
-				Padding(0, 6).AlignItems(ui.Center)
+			saved := iconButton(c, "saved-searches", iconBookmark, "Saved searches", "Saved searches")
+			if saved.Clicked() {
+				a.savedMenuOpen = !a.savedMenuOpen
+			}
+			a.menu(c, saved, &a.savedMenuOpen, "saved", 250, func() { a.savedSearchMenu(c, t) })
+			kbd := ui.Row(c.Key("search-kbd")).Shrink(0).Height(20).Radius(radiusSmall).Border(1, stroke).
+				Padding(0, 6).AlignItems(ui.Center).
+				Label("Command palette").
+				Tooltip("Command palette & quick switcher (Cmd/Ctrl+P)")
+			if kbd.Hovered() {
+				kbd.Background(paperSunken.Alpha(0.75))
+			}
+			if kbd.Clicked() {
+				a.openPalette()
+			}
 			kbd.Children(func() {
 				label := "⌘K"
 				if runtime.GOOS != "darwin" {
 					label = "Ctrl+K"
 				}
-				ui.Text(c, label).Font(fontMono).FontSize(sizeMonoSm).TextColor(navyText)
+				ui.Text(c, label).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).TextColor(navyText)
 			})
 		})
 	})
+	glow := box.Animate("glow", boolF(focused), 120*time.Millisecond)
+	if glow > 0 {
+		box.Shadow(0, 0, 0, 3.5*glow, routeBlue.Alpha(0.28*glow)).
+			Border(1, routeBlue.Alpha(0.70*glow))
+	}
 }
 
-// statusStrip is the lower chrome bar: the sync line, what the last pass did,
-// the counts a machine produced, and the sync controls.
-func (a *nativeApp) statusStrip(c *ui.Context, t *ui.Theme) {
+// sidebarFooter is the quiet status line tucked at the bottom of the left note
+// column: sync state on the left and a compact sync trigger on the right.
+func (a *nativeApp) sidebarFooter(c *ui.Context, t *ui.Theme) {
 	st := a.syncState()
 	notice := a.syncNotice()
 
-	state := func() {
+	ui.Row(c).Height(32).Shrink(0).AlignItems(ui.Center).Gap(8).Padding(0, 12).
+		BorderWidth(1, 0, 0, 0).BorderColor(hairline.Alpha(0.65)).Children(func() {
 		dot := ui.Box(c).Size(7, 7).Radius(3.5).Shrink(0)
 		dot.Background(statusDotColor(st, notice))
-		ui.Text(c, notice.Line).FontSize(sizeSmall).TextColor(inkSoft)
+		line := ui.Text(c, notice.Line).FontSize(sizeSmall).TextColor(inkSoft).SingleLine().MinWidth(0).Grow(1)
 		if notice.Hint != "" {
-			ui.Text(c, notice.Hint).FontSize(sizeMonoSm).TextColor(navyText).SingleLine().MinWidth(0).Tooltip(notice.Hint)
+			dot.Label(notice.Hint).Tooltip(notice.Hint)
+			line.Tooltip(notice.Hint)
 		}
-	}
-	controls := func() {
 		if !st.Enabled {
-			// Sync now has nothing to do on a vault without a target, so the
-			// first button leads to the dialog that sets one up.
 			if chromeButton(c, "Set up sync").Tooltip("Choose a sync target").Clicked() {
 				a.openSettings()
 			}
-		} else if chromeButton(c, "Sync now").Disabled(st.Running || st.Pending).Clicked() {
+		} else if iconButton(c, "footer-sync-now", iconSync, "Sync now", "Synchronize now (Cmd/Ctrl+R)").Disabled(st.Running || st.Pending).Clicked() {
 			a.syncNow()
 		}
-		ui.Text(c, noteCountLabel(len(a.notes), a.hasMore)).Font(fontMono).FontSize(sizeMonoSm).
-			TextColor(navyText)
-		if !a.narrow {
-			ui.Text(c, "·").Font(fontMono).FontSize(sizeMonoSm).TextColor(navyLine)
-			ui.Text(c, notebookCountLabel(len(a.notebooks))).Font(fontMono).
-				FontSize(sizeMonoSm).TextColor(navyText)
-		}
-	}
-
-	ui.Row(c).Height(statusHeight).Shrink(0).AlignItems(ui.Center).Gap(12).Padding(0, 14).
-		Background(navyDeep).Children(func() {
-		ui.Row(c).Grow(1).AlignItems(ui.Center).Gap(10).MinWidth(0).Children(func() {
-			state()
-			ui.Spacer(c)
-			controls()
-		})
 	})
 }
 
@@ -360,27 +446,55 @@ func (a *nativeApp) chosenRail() string {
 // railPane is the notebook rail: every notebook as a tree, its tags below, and
 // the counts in mono at the end of each row.
 func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
-	pane := ui.Column(c).Width(railWidth).Background(paperSunken)
+	w := a.railW
+	if w <= 0 || a.narrow {
+		w = railWidth
+	}
+	pane := ui.Column(c).Width(w)
 	if a.narrow {
 		pane.Grow(1)
 	} else {
-		pane.FillHeight().Shrink(0)
+		tint := paperRaised.Alpha(0.24)
+		if darkPalette {
+			tint = ui.RGBA(0, 0, 0, 0.16)
+		}
+		pane.FillHeight().Shrink(0).Background(tint).
+			Material(glass.Glass{Style: glass.Clear, Tint: tint})
+	}
+	bar := c.TitleBar()
+	headerH := float32(44)
+	if bar.Height > headerH {
+		headerH = bar.Height
+	}
+	leftPad := float32(14)
+	if !a.narrow && bar.Left > 0 {
+		leftPad = max(14, bar.Left+6)
 	}
 	pane.Children(func() {
-		ui.Row(c).Padding(12, 14, 8, 14).Gap(6).AlignItems(ui.Center).Children(func() {
+		if !a.narrow {
+			ui.Row(c).Height(headerH).Padding(0, 10, 0, leftPad).AlignItems(ui.Center).DragWindow().Children(func() {
+				if bar.Left == 0 {
+					mark(c)
+					ui.Spacer(c).Width(6)
+					ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(18).TextColor(inkNavy)
+				}
+				ui.Spacer(c)
+				if iconButton(c, "close-notebooks", iconSidebar, "Close notebooks", "Hide notebooks sidebar (Cmd/Ctrl+\\)").Clicked() {
+					a.railOpen = false
+				}
+			})
+		}
+		hdr := ui.Row(c).Padding(6, 10, 6, 14).Gap(4).AlignItems(ui.Center)
+		hdr.Children(func() {
 			label(c, "Notebooks")
-			ui.Text(c, fmt.Sprintf("%d", len(a.notebooks))).Font(fontMono).
+			ui.Text(c, fmt.Sprintf("%d", len(a.notebooks))).Font(fontMono).FontFeatures("tnum").
 				FontSize(sizeMonoSm).TextColor(inkSoft)
 			ui.Spacer(c)
-			add := ui.Button(c, "+").Label("New notebook").Tooltip("New notebook")
-			add.Padding(2, 6).MinWidth(24)
-			if add.Clicked() {
+			if iconButton(c, "new-notebook", iconPlus, "New notebook", "New notebook").Clicked() {
 				a.openNewNotebook()
 			}
 			if a.notebookByID(a.selectedNotebook) != nil {
-				actions := ui.Button(c, "…").Label("Notebook actions").
-					Tooltip("Rename or delete this notebook")
-				actions.Padding(2, 6).MinWidth(24)
+				actions := iconButton(c, "notebook-actions", iconMore, "Notebook actions", "Rename or delete this notebook")
 				if actions.Clicked() {
 					a.notebookActions = !a.notebookActions
 				}
@@ -388,34 +502,29 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 					a.notebookMenu(c, t)
 				})
 			}
-			close := ui.Button(c, "×").Label("Close notebooks").Tooltip("Close")
-			close.Padding(2, 6).MinWidth(24)
-			if close.Clicked() {
-				a.railOpen = false
+			if a.narrow {
+				if iconButton(c, "close-notebooks", iconClose, "Close notebooks", "Close").Clicked() {
+					a.railOpen = false
+				}
 			}
 		})
 		a.notebookRows(c, t)
 		hairlineRule(c)
-		ui.Row(c).Padding(8, 14).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Padding(8, 12, 8, 14).Gap(4).AlignItems(ui.Center).Children(func() {
 			label(c, "Tags")
 			ui.Spacer(c)
-			add := ui.Button(c, "+").Label("New tag").Tooltip("New tag")
-			add.Padding(2, 6).MinWidth(24)
-			if add.Clicked() {
+			if iconButton(c, "new-tag", iconPlus, "New tag", "New tag").Clicked() {
 				a.openNewTag()
 			}
 			if a.selectedTag != "" {
-				actions := ui.Button(c, "…").Label("Tag actions").Tooltip("Rename or delete this tag")
-				actions.Padding(2, 6).MinWidth(24)
+				actions := iconButton(c, "tag-actions", iconMore, "Tag actions", "Rename or delete this tag")
 				if actions.Clicked() {
 					a.tagActions = !a.tagActions
 				}
 				a.menu(c, actions, &a.tagActions, "tag-actions", 170, func() {
 					a.tagActionsMenu(c, t)
 				})
-				clear := ui.Button(c, "×").Label("Clear tag").Tooltip("Clear the tag filter")
-				clear.Padding(2, 6).MinWidth(24)
-				if clear.Clicked() {
+				if iconButton(c, "clear-tag", iconClose, "Clear tag", "Clear the tag filter").Clicked() {
 					a.selectedTag, a.selectedID = "", ""
 					a.reloadNotes()
 				}
@@ -475,16 +584,18 @@ func (a *nativeApp) tagRows(c *ui.Context, t *ui.Theme) {
 // notes); count is drawn in mono at its end.
 func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag string, count, depth int) {
 	chosen := a.chosenRail() == id || (id == "" && key == "all" && a.chosenRail() == "")
+	isTag := strings.HasPrefix(key, "tag:")
+	tagID := strings.TrimPrefix(key, "tag:")
+	isNotebook := id != "" && id != conflictsRail && !isTag
+	renaming := (isNotebook && a.inlineRenameKind == "notebook" && a.inlineRenameID == id) ||
+		(isTag && a.inlineRenameKind == "tag" && a.inlineRenameID == tagID)
+
 	row := ui.Row(c.Key("rail:" + key)).Height(navRowHeight).MinHeight(navRowHeight).
 		Radius(radiusControl).AlignItems(ui.Center).Gap(6).Shrink(0).
 		PaddingStart(8 + float32(depth)*14).PaddingEnd(8)
 	hover := row.Animate("hover", boolF(row.Hovered()), motionHover.Duration)
-	switch {
-	case chosen:
-		row.Background(violet.Alpha(0.12)).Border(1, violet)
-	case hover > 0.002:
-		row.Background(paperSunken.Mix(paperRaised, 1-hover).Alpha(0.92 * hover))
-	}
+	chosenPill(row, chosen, hover > 0.002)
+
 	if depth > 0 {
 		// The tree's hairline spine.
 		row.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -498,9 +609,88 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 	if ids, ok := ui.Drop[[]string](row); ok {
 		a.moveNotes(ids, id)
 	}
-	row.Label(text)
-	clicked := row.Clicked()
+	if isNotebook {
+		row.ContextMenu(func(m *ui.Menu) {
+			if m.Item("New note here").Chosen() {
+				a.selectedTag, a.selectedNotebook, a.selectedID = "", id, ""
+				a.reloadNotes()
+				a.newNote()
+			}
+			if m.Item("New sub-notebook…").Chosen() {
+				a.selectedTag, a.selectedNotebook = "", id
+				a.openNewNotebook()
+			}
+			if m.Item("Rename notebook…").Chosen() {
+				a.selectedTag, a.selectedNotebook = "", id
+				a.openRenameNotebook()
+			}
+			m.Separator()
+			if m.Item("Delete notebook…").Chosen() {
+				a.selectedTag, a.selectedNotebook = "", id
+				a.confirmDeleteNotebook = true
+			}
+		})
+	} else if isTag && tagID != "" {
+		row.ContextMenu(func(m *ui.Menu) {
+			if m.Item("Rename tag…").Chosen() {
+				a.selectedNotebook, a.selectedTag = "", tagID
+				a.openRenameTag()
+			}
+			if a.selectedTag == tagID {
+				if m.Item("Clear tag filter").Chosen() {
+					a.selectedTag, a.selectedID = "", ""
+					a.reloadNotes()
+				}
+			}
+			m.Separator()
+			if m.Item("Delete tag…").Chosen() {
+				a.selectedNotebook, a.selectedTag = "", tagID
+				a.confirmDeleteTag = true
+			}
+		})
+	}
+	if !renaming {
+		row.Label(text)
+	}
+	doubleClicked := !renaming && row.DoubleClicked()
+	clicked := !renaming && row.Clicked()
 	row.Children(func() {
+		var rowIcon *ui.SVG
+		switch {
+		case key == "all":
+			rowIcon = iconNotes
+		case key == "conflicts":
+			rowIcon = iconAlert
+		case flag == "#":
+			rowIcon = iconTag
+		default:
+			rowIcon = iconFolder
+		}
+		iconColor := inkSoft
+		if key == "conflicts" && count > 0 {
+			iconColor = amberInk
+		} else if chosen {
+			iconColor = inkNavy
+		}
+		ui.Icon(c, rowIcon).Size(13, 13).TextColor(iconColor).Shrink(0)
+		if renaming {
+			in := ui.TextInput(c.Key("inline-rename:"+key), &a.inlineRenameTitle).
+				Label("Inline rename").
+				FontSize(sizeUI).
+				Padding(2, 6).
+				Grow(1).
+				AutoFocus()
+			if a.inlineRenameFocus {
+				in.Focus()
+				a.inlineRenameFocus = false
+			}
+			if in.Submitted() {
+				a.commitInlineRename()
+			} else if c.Shortcut(0, ui.KeyEscape) {
+				a.cancelInlineRename()
+			}
+			return
+		}
 		if flag == "#" {
 			ui.Text(c, "#").FontSize(sizeSmall).TextColor(inkSoft)
 		}
@@ -513,9 +703,22 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 			if key == "conflicts" {
 				countColor = amberInk
 			}
-			ui.Text(c, fmt.Sprintf("%d", count)).Font(fontMono).FontSize(sizeMonoSm).TextColor(countColor)
+			ui.Text(c, fmt.Sprintf("%d", count)).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).TextColor(countColor)
 		}
 	})
+	if doubleClicked {
+		if isNotebook {
+			a.selectedTag, a.selectedNotebook, a.selectedID = "", id, ""
+			a.reloadNotes()
+			a.startInlineRename("notebook", id, text)
+			return
+		} else if isTag && tagID != "" {
+			a.selectedNotebook, a.selectedTag, a.selectedID = "", tagID, ""
+			a.reloadNotes()
+			a.startInlineRename("tag", tagID, text)
+			return
+		}
+	}
 	if clicked {
 		switch {
 		case key == "conflicts":
@@ -551,7 +754,9 @@ func (a *nativeApp) railOverlay(c *ui.Context, t *ui.Theme) {
 			Background(ui.Transparent).Radius(0)
 		panel.Children(func() {
 			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-				rail := ui.Column(c).Width(railWidth).Shrink(0).Background(paperSunken).
+				tint := paperSunken.Alpha(0.84)
+				rail := ui.Column(c).Width(railWidth).Shrink(0).Background(tint).
+					Material(glass.Glass{Style: glass.Regular, Tint: tint}).
 					Translate((v-1)*railWidth, 0)
 				rail.Children(func() {
 					a.railPane(c, t)
@@ -571,67 +776,34 @@ func (a *nativeApp) railOverlay(c *ui.Context, t *ui.Theme) {
 // notesPane is the middle pane: the list's toolbar, the bulk-action bar while
 // rows are chosen, and the rows themselves.
 func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
-	width := listWidth
+	width := a.listW
+	if width <= 0 {
+		width = listWidth
+	}
 	if a.narrow {
 		width = 0
 	}
-	pane := ui.Column(c).Grow(1).MinHeight(0).Background(paperSunken)
+	pane := ui.Column(c).Grow(1).MinHeight(0)
 	if width > 0 {
 		pane.Width(width)
 	} else {
 		pane.Grow(1)
 	}
 	pane.Children(func() {
-		ui.Row(c).Padding(10, 14, 6, 14).Gap(6).AlignItems(ui.Center).Children(func() {
-			if !a.narrow {
-				back := toolbarButton(c, "<", historyHint(false))
-				back.Label("Back")
-				back.Disabled(!a.canBack())
-				if back.Clicked() {
-					a.goHistory(-1)
-				}
-				forward := toolbarButton(c, ">", historyHint(true))
-				forward.Label("Forward")
-				forward.Disabled(!a.canForward())
-				if forward.Clicked() {
-					a.goHistory(1)
-				}
-			}
-			title := ui.Text(c, a.listTitle()).FontSize(sizeBody).Bold().Grow(1).SingleLine()
-			_ = title
-			ui.Text(c, fmtCount(len(a.notes), a.hasMore)).Font(fontMono).
+		ui.Row(c).Padding(4, 10, 4, 14).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, a.listTitle()).FontSize(sizeSmall).Bold().TextColor(inkSoft).SingleLine()
+			ui.Text(c, fmtCount(len(a.notes), a.hasMore)).Font(fontMono).FontFeatures("tnum").
 				FontSize(sizeMonoSm).TextColor(inkSoft)
-			sortButton := ui.Button(c, "Sort").Label("Sort notes").Tooltip("Sort the note list")
-			sortButton.Padding(4, 8)
+			ui.Spacer(c)
+			sortButton := iconButton(c, "sort-notes", iconSort, "Sort", "Sort the note list")
 			if sortButton.Clicked() {
 				a.sortOpen = !a.sortOpen
 			}
 			a.menu(c, sortButton, &a.sortOpen, "sort", 190, func() { a.sortMenu(c, t) })
 		})
-		ui.Row(c).Padding(0, 14, 8, 14).Gap(6).AlignItems(ui.Center).Children(func() {
-			saved := ui.Button(c, "Saved searches").Label("Saved searches").Tooltip("Saved searches")
-			saved.Padding(4, 8).FontSize(sizeMonoSm)
-			if saved.Clicked() {
-				a.savedMenuOpen = !a.savedMenuOpen
-			}
-			a.menu(c, saved, &a.savedMenuOpen, "saved", 250, func() { a.savedSearchMenu(c, t) })
-			if a.query != "" {
-				chip := ui.Row(c).Gap(6).AlignItems(ui.Center).Radius(999).
-					Border(1, hairlineStrong).Padding(2, 8).Shrink(0)
-				chip.Children(func() {
-					ui.Text(c, clip(a.query, 28)).FontSize(sizeMonoSm).TextColor(inkSoft)
-					clear := ui.Button(c, "×").Label("Clear search")
-					clear.Padding(0, 4).MinWidth(18)
-					if clear.Clicked() {
-						a.query = ""
-						a.reloadNotes()
-					}
-				})
-			}
-		})
-		if n := a.selection.Len(); n > 0 {
-			ui.Row(c).Key("bulk-bar").Padding(2, 14, 6, 14).Gap(4).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, fmt.Sprintf("%d selected", n)).Font(fontMono).FontSize(sizeMonoSm).
+		if n := a.selection.Len(); n > 1 {
+			ui.Row(c).Key("bulk-bar").Padding(2, 12, 6, 12).Gap(4).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, fmt.Sprintf("%d selected", n)).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).
 					TextColor(violet).Grow(1)
 				move := ui.Button(c, "Move…").Label("Move selected notes").
 					Tooltip("Move the selected notes")
@@ -654,8 +826,8 @@ func (a *nativeApp) notesPane(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		}
-		hairlineRule(c)
 		a.noteRows(c, t)
+		a.sidebarFooter(c, t)
 	})
 }
 
@@ -690,20 +862,40 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 	}
 	a.list.Selected = &a.selectedNote
 	a.list.Selection = &a.selection
-	a.list.Key = func(i int) any { return a.notes[i].ID }
-	a.list.Label = func(i int) string { return noteRowTitle(a.notes[i]) }
+	a.list.Key = func(i int) any {
+		if i < 0 || i >= len(a.notes) {
+			return i
+		}
+		return a.notes[i].ID
+	}
+	a.list.Label = func(i int) string {
+		if i < 0 || i >= len(a.notes) {
+			return ""
+		}
+		return noteRowTitle(a.notes[i])
+	}
 	// Dragging a chosen row drags the whole choice; an unchosen row drags
 	// only itself. The drag starts on the row's grip: making the whole row
 	// a drag source would take the press from the list, and a click would
 	// stop choosing a row.
 	dragIDs := a.selectedIDs()
+	var postListAction func()
+	if a.hasPendingScroll {
+		a.list.ScrollTo(a.pendingScrollRow, a.pendingScrollAlign)
+		a.hasPendingScroll = false
+	}
 	// The list chooses rows with the theme's accent, so it is built under the
 	// row theme: a violet tint, not a solid fill (DESIGN.md's chosen row).
 	list := underTheme(c, listTheme, func() ui.Element {
 		return ui.List(c.Key("note-list"), &a.list, len(a.notes), func(i int) {
-			a.noteRow(c, t, i, dragIDs)
-		})
+			if i >= 0 && i < len(a.notes) {
+				a.noteRow(c, t, i, dragIDs, &postListAction)
+			}
+		}).Padding(2, 8)
 	}).Grow(1)
+	if postListAction != nil {
+		postListAction()
+	}
 	if list.Changed() {
 		if a.narrow && c.Modifiers()&(ui.Cmd|ui.Shift) == 0 {
 			a.narrowEditor = true
@@ -713,12 +905,39 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 			a.focusBody = false
 		}
 	}
-	if a.hasMore {
-		ui.Row(c).Padding(6, 14).Children(func() {
-			more := ui.Button(c, "Load more").Label("Load more notes")
-			more.Padding(4, 8)
-			if more.Clicked() {
-				a.loadMore()
+	if a.hasMore || a.lastLoadedCount > 0 {
+		bar := ui.Row(c).Padding(6, 12).Gap(8).AlignItems(ui.Center).Shrink(0)
+		if a.loadMoreRun > 0 {
+			pulse := bar.Keyframes("load-more-bar", []ui.Keyframe{
+				{At: 0, Value: 1},
+				{At: 550 * time.Millisecond, Value: 0, Ease: ui.EaseOut},
+			}, ui.KeyframeOptions{Run: a.loadMoreRun})
+			if pulse > 0.01 {
+				bar.Background(violet.Alpha(0.10 * pulse)).Radius(radiusControl)
+			}
+		}
+		bar.Children(func() {
+			if a.hasMore {
+				moreTint := routeBlueSoft.Alpha(0.18)
+				more := ui.Button(c, "Load more").Label("Load more notes").Radius(13).Padding(5, 11).
+					Material(glass.Glass{Style: glass.Regular, Tint: moreTint, Interactive: true})
+				if more.Clicked() {
+					a.loadMore()
+				}
+			}
+			if a.lastLoadedCount > 0 {
+				msg := fmt.Sprintf("+%d loaded", a.lastLoadedCount)
+				if !a.hasMore {
+					msg = fmt.Sprintf("+%d loaded · all %d shown", a.lastLoadedCount, len(a.notes))
+				}
+				badge := ui.Text(c, msg).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).TextColor(inkSoft)
+				if a.loadMoreRun > 0 {
+					appear := badge.Keyframes("load-more-badge", []ui.Keyframe{
+						{At: 0, Value: 0},
+						{At: 220 * time.Millisecond, Value: 1, Ease: ui.EaseOut},
+					}, ui.KeyframeOptions{Run: a.loadMoreRun})
+					badge.Opacity(0.2 + 0.8*appear).Translate(0, (1-appear)*4)
+				}
 			}
 		})
 	}
@@ -728,68 +947,123 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 // and date header with the excerpt below, and, for the note the editor
 // follows, the sage tint and left accent bar that mark a choice (MyGO's own
 // List paints only its multi-selection, so the current row is drawn here).
-func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string) {
+func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string, postListAction *func()) {
 	n := a.notes[i]
 	title := noteRowTitle(n)
 	current := a.note != nil && i == a.selectedNote
 	bulk := a.selection.Has(n.ID)
 	row := ui.Row(c).Padding(6, 14).Gap(8).AlignItems(ui.Center).MinHeight(rowHeight).Key(n.ID)
-	hover := row.Animate("hover", boolF(row.Hovered()), motionHover.Duration)
-	switch {
-	case current:
-		row.Background(violet.Alpha(0.15 + 0.05*hover))
-	case bulk:
-		row.Background(violet.Alpha(0.09 + 0.04*hover))
-	case hover > 0.002:
-		row.Background(paperRaised.Alpha(0.65 * hover))
-	}
-	row.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		// The rule between rows (the Hairline Rule), then the chosen row's
-		// accent edge over it.
-		p.Line(r.X, r.Y+r.H-0.5, r.X+r.W, r.Y+r.H-0.5, 1, hairline)
-		switch {
-		case current:
-			p.Line(r.X+1, r.Y, r.X+1, r.Y+r.H, 2.5, violet)
-		case bulk:
-			p.Line(r.X+0.5, r.Y+4, r.X+0.5, r.Y+r.H-4, 2, hairlineStrong)
+	row.ContextMenu(func(m *ui.Menu) {
+		selectNote := func() {
+			if a.selectedNote != i || a.note == nil || a.note.ID != n.ID {
+				a.selectedNote = i
+				a.selection.Clear()
+				a.loadNote()
+			}
+		}
+		editLabel := "Edit note"
+		if current && a.editing {
+			editLabel = "Preview note"
+		}
+		if m.Item(editLabel).Chosen() {
+			*postListAction = func() {
+				selectNote()
+				a.toggleEdit()
+			}
+		}
+		todoLabel := "Mark as Todo"
+		if n.IsTodo != 0 {
+			todoLabel = "Convert to regular note"
+		}
+		if m.Item(todoLabel).Chosen() {
+			*postListAction = func() {
+				selectNote()
+				a.setTodo(n.IsTodo == 0)
+			}
+		}
+		if len(a.notebooks) > 0 {
+			m.Submenu("Move to notebook", func(sub *ui.Menu) {
+				for _, nb := range a.notebooks {
+					nb := nb
+					if sub.Item(nb.Title).Checked(nb.ID == n.ParentID).Chosen() {
+						*postListAction = func() {
+							a.moveNotes([]string{n.ID}, nb.ID)
+						}
+					}
+				}
+			})
+		}
+		if len(a.tags) > 0 {
+			m.Submenu("Tags", func(sub *ui.Menu) {
+				for _, tag := range a.tags {
+					tag := tag
+					checked := current && a.hasNoteTag(tag.ID)
+					if sub.Item("#" + tag.Title).Checked(checked).Chosen() {
+						*postListAction = func() {
+							selectNote()
+							a.toggleTag(tag.ID)
+						}
+					}
+				}
+			})
+		}
+		m.Separator()
+		if m.Item("Delete note…").Chosen() {
+			*postListAction = func() {
+				selectNote()
+				a.confirmDelete = true
+			}
 		}
 	})
+	hover := row.Animate("hover", boolF(row.Hovered()), motionHover.Duration)
+	row.Radius(radiusControl).Padding(0, 10, 0, 8)
+	var loadFlash float32
+	if a.loadedFrom > 0 && i >= a.loadedFrom && a.loadMoreRun > 0 {
+		stagger := time.Duration(min(i-a.loadedFrom, 10)) * 20 * time.Millisecond
+		enter := row.Keyframes("load-enter", []ui.Keyframe{
+			{At: 0, Value: 0},
+			{At: 260 * time.Millisecond, Value: 1, Ease: ui.EaseOut},
+		}, ui.KeyframeOptions{Run: a.loadMoreRun, Delay: stagger})
+		loadFlash = row.Keyframes("load-flash", []ui.Keyframe{
+			{At: 0, Value: 1},
+			{At: 650 * time.Millisecond, Value: 0, Ease: ui.EaseOut},
+		}, ui.KeyframeOptions{Run: a.loadMoreRun, Delay: stagger})
+		row.Translate(0, (1-enter)*8).Opacity(0.25 + 0.75*enter)
+	}
+	if bulk && !current {
+		row.Background(violet.Alpha(0.11 + 0.04*hover))
+	} else {
+		chosenPill(row, current, hover > 0.002)
+		if !current && loadFlash > 0.01 {
+			row.Background(violet.Alpha(0.10 * loadFlash))
+		}
+	}
 
 	row.Children(func() {
-		// The grip appears as the pointer rests on the row, so the list reads
-		// as a list until it is a drag.
-		grip := ui.Text(c, "⣿").FontSize(sizeMonoSm).TextColor(hairlineStrong).Shrink(0)
-		grip.Label("Drag note " + title).Tooltip("Drag to a notebook")
-		if a.selection.Has(n.ID) && len(dragIDs) > 0 {
-			grip.Drag(dragIDs)
-		} else {
-			grip.Drag([]string{n.ID})
-		}
-		opacity := float32(0)
-		if hover > 0.5 {
-			opacity = 0.15 + 0.85*hover
-		}
-		grip.Opacity(opacity)
-
-		ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
-			ui.Row(c).Gap(6).AlignItems(ui.Center).MinWidth(0).Children(func() {
-				if n.IsConflict != 0 {
-					ui.Text(c, "!").FontSize(sizeSmall).Bold().TextColor(signalRed).Label("Conflict").Shrink(0)
-				}
-				name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
-				if current || bulk {
-					name.FontWeight(600)
-				}
-				ui.Text(c, time.UnixMilli(n.UpdatedTime).Format("02 Jan")).
-					Font(fontMono).FontSize(sizeMonoSm).TextColor(inkSoft).Shrink(0)
-			})
-			meta := n.Excerpt
-			if meta == "" {
-				meta = "Empty note"
+		if a.railOpen {
+			grip := ui.Text(c, "⣿").FontSize(sizeMonoSm).TextColor(hairlineStrong).Shrink(0)
+			grip.Label("Drag note " + title).Tooltip("Drag to a notebook")
+			if a.selection.Has(n.ID) && len(dragIDs) > 0 {
+				grip.Drag(dragIDs)
+			} else {
+				grip.Drag([]string{n.ID})
 			}
-			ui.Text(c, excerpt(meta)).FontSize(sizeLabel).LineHeight(1.25).
-				TextColor(inkSoft).SingleLine()
-		})
+			opacity := float32(0.25)
+			if hover > 0.2 {
+				opacity = 0.35 + 0.65*hover
+			}
+			grip.Opacity(opacity)
+		}
+
+		if n.IsConflict != 0 {
+			ui.Text(c, "!").FontSize(sizeSmall).Bold().TextColor(signalRed).Label("Conflict").Shrink(0)
+		}
+		name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
+		if current || bulk {
+			name.FontWeight(600).TextColor(inkNavy)
+		} else {
+			name.TextColor(inkNavy.Alpha(0.86))
+		}
 	})
 }
 
@@ -825,6 +1099,9 @@ func (a *nativeApp) emptyList(c *ui.Context, t *ui.Theme) {
 // the Markdown editor or the rendered preview of its body.
 func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 	pane := ui.Column(c).Grow(1).MinWidth(0).Background(paperRaised)
+	if !a.narrow {
+		elevateCard(pane)
+	}
 	if a.note != nil {
 		if files := pane.DroppedFiles(); len(files) > 0 {
 			a.attachFiles(files)
@@ -835,7 +1112,6 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 	}
 	pane.Children(func() {
 		a.editorHeader(c, t)
-		hairlineRule(c)
 		if a.note == nil {
 			a.emptyEditor(c, t)
 			return
@@ -849,7 +1125,7 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 				Font(fontSans).
 				FontSize(sizeBody).
 				LineHeight(1.9).
-				Padding(32, 48).
+				Padding(18, 48, 32, 48).
 				Background(paperRaised).
 				Border(0, ui.Transparent).
 				FillWidth().
@@ -893,41 +1169,114 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 			}
 			return
 		}
-		ui.Scroll(c).Grow(1).Padding(48, 48).Children(func() {
-			ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-				ui.Column(c).Grow(1).MaxWidth(700).Gap(20).Children(func() {
-					if a.body == "" {
-						ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
-						return
-					}
-					a.md.Theme = &markdown.Theme{Font: fontSans, FontSize: sizeBody, LineHeight: 1.9, CodeFont: fontMono}
-					markdown.View(c, a.body, a.md)
+		ui.Box(c.Key("preview-box")).Grow(1).MinHeight(0).Children(func() {
+			ui.Scroll(c).Fill().Padding(20, 48, 48, 48).Children(func() {
+				ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+					ui.Column(c).Grow(1).MaxWidth(700).Gap(20).Children(func() {
+						if a.body == "" {
+							ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
+							return
+						}
+						a.md.Theme = &markdown.Theme{Font: fontSans, FontSize: sizeBody, LineHeight: 1.9, CodeFont: fontMono}
+						markdown.View(c, a.body, a.md)
+					})
 				})
 			})
+			ui.Box(c.Key("preview-edge")).Absolute().Top(0).Left(0).Right(0).Height(18).PassThrough().
+				Material(glass.ScrollEdge{Background: paperRaised})
 		})
 	})
 }
 
-// editorHeader is the note's own chrome: the title field and the mode at the
-// top, the note's state and its actions beneath.
+// editorHeader is the note's quiet 2-row chrome: a compact top context/action
+// bar and the borderless Optima title directly above the note body.
 func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Shrink(0).Children(func() {
-		ui.Row(c).Padding(12, contentPad, 6, contentPad).Gap(10).AlignItems(ui.Center).Children(func() {
+		if a.note == nil {
+			ui.Row(c).Padding(16, 48, 8, 48).Gap(10).AlignItems(ui.Center).Children(func() {
+				if a.narrow {
+					if iconButton(c, "narrow-back-notes", iconChevronLeft, "Back to notes", "Back to the note list").Clicked() {
+						a.flush()
+						a.narrowEditor = false
+						a.selectedNote = -1
+					}
+				}
+				ui.Text(c, "No note selected").FontSize(sizeTitle).Bold().Grow(1)
+			})
+			return
+		}
+
+		// Row 1: Quiet interactive context breadcrumb on the left, compact icon actions on the right.
+		ui.Row(c).Padding(12, 24, 4, 44).Gap(6).AlignItems(ui.Center).Children(func() {
 			if a.narrow {
-				back := toolbarButton(c, "<", "Back to the note list")
-				back.Label("Back to notes")
-				if back.Clicked() {
+				if iconButton(c, "narrow-back-notes", iconChevronLeft, "Back to notes", "Back to the note list").Clicked() {
 					a.flush()
 					a.narrowEditor = false
 					a.selectedNote = -1
 				}
 			}
-			if a.note == nil {
-				ui.Text(c, "No note selected").FontSize(sizeTitle).Bold().Grow(1)
-				return
+			nbName := "Unfiled"
+			if nb := a.notebookByID(a.note.ParentID); nb != nil {
+				nbName = clip(nb.Title, 22)
 			}
-			// A borderless title field (DESIGN.md's editor title): the text
-			// sits on the surface, the caret is the only ornament.
+			move := toolbarIconButton(c, "hdr-move", iconFolder, nbName, "Move note", "Move to another notebook")
+			if move.Clicked() {
+				a.moveFilter = ""
+				a.moveOpen = !a.moveOpen
+			}
+			a.menu(c, move, &a.moveOpen, "move", 240, func() { a.moveMenu(c, t) })
+
+			tagLabel := "Tags"
+			if len(a.noteTags) == 1 {
+				tagLabel = clip(a.noteTags[0].Title, 18)
+			} else if len(a.noteTags) == 2 {
+				tagLabel = clip(a.noteTags[0].Title, 12) + " · " + clip(a.noteTags[1].Title, 12)
+			} else if len(a.noteTags) > 2 {
+				tagLabel = fmt.Sprintf("%s +%d", clip(a.noteTags[0].Title, 14), len(a.noteTags)-1)
+			}
+			tags := toolbarIconButton(c, "hdr-tags", iconTag, tagLabel, "Note tags", "Tags on this note")
+			if tags.Clicked() {
+				a.tagFilter = ""
+				a.tagMenuOpen = !a.tagMenuOpen
+			}
+			a.menu(c, tags, &a.tagMenuOpen, "note-tags", 240, func() { a.tagMenu(c, t) })
+
+			words := len(strings.Fields(a.body))
+			metaText := fmt.Sprintf("%s  ·  %d words", time.UnixMilli(a.note.UpdatedTime).Format("02 Jan 2006 15:04"), words)
+			ui.Text(c, metaText).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).
+				TextColor(inkSoft).SingleLine().MinWidth(0).Grow(1)
+
+			todoBtn := iconButton(c, "hdr-todo", iconCheck, "Todo", "Mark as Todo")
+			if a.todo {
+				todoBtn.Background(violet.Alpha(0.20)).Border(1, violet.Alpha(0.38))
+			}
+			if todoBtn.Clicked() {
+				a.setTodo(!a.todo)
+			}
+
+			if iconButton(c, "hdr-attach", iconPaperclip, "Attach file", "Attach an image or file to this note").Clicked() {
+				a.promptAttachFiles()
+			}
+
+			modeIcon := iconEdit
+			if a.editing {
+				modeIcon = iconEye
+			}
+			if iconButton(c, "hdr-mode", modeIcon, a.modeLabel(), "Edit/Preview (Cmd/Ctrl+E)").Clicked() {
+				a.toggleEdit()
+			}
+
+			del := iconButton(c, "hdr-delete", iconTrash, "Delete note", "Delete note")
+			if del.Hovered() {
+				del.Background(signalRedSoft)
+			}
+			if del.Clicked() {
+				a.confirmDelete = true
+			}
+		})
+
+		// Row 2: Borderless Optima title sitting directly above the note body.
+		ui.Row(c).Padding(12, 48, 4, 48).AlignItems(ui.Center).Children(func() {
 			title := ui.TextInput(c.Key("title:"+a.note.ID), &a.title).
 				Placeholder("Untitled").
 				Label("Note title").
@@ -940,35 +1289,10 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 			if title.Changed() {
 				a.markDirty()
 			}
-			todo := ui.Checkbox(c, &a.todo, "Todo")
-			if todo.Changed() {
-				a.setTodo(a.todo)
-			}
-			mode := ui.Button(c, a.modeLabel()).Tooltip("Edit/Preview (Cmd/Ctrl+E)")
-			mode.Padding(4, 10)
-			if mode.Clicked() {
-				a.toggleEdit()
-			}
 		})
-		if a.note == nil {
-			return
-		}
-		ui.Row(c).Padding(0, contentPad, 8, contentPad).Gap(6).AlignItems(ui.Center).Children(func() {
-			meta := a.noteMeta()
-			ui.Text(c, meta).Font(fontMono).FontSize(sizeMonoSm).TextColor(inkSoft).SingleLine().MinWidth(0).Grow(1)
-		})
-		if len(a.noteTags) > 0 {
-			ui.Row(c).Padding(0, contentPad, 8, contentPad).Children(func() {
-				names := make([]string, 0, len(a.noteTags))
-				for _, tag := range a.noteTags {
-					names = append(names, tag.Title)
-				}
-				ui.Text(c, strings.Join(names, " · ")).FontSize(sizeMonoSm).TextColor(inkSoft).
-					SingleLine().MinWidth(0).Grow(1).Tooltip(strings.Join(names, ", "))
-			})
-		}
+
 		if a.note.IsConflict != 0 {
-			ui.Row(c).Padding(0, contentPad, 8, contentPad).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Padding(4, 48, 4, 48).Gap(6).AlignItems(ui.Center).Children(func() {
 				chip := ui.Row(c).Gap(4).AlignItems(ui.Center).Radius(radiusControl).
 					Border(1, amberInk).Padding(2, 8).Shrink(0)
 				chip.Children(func() {
@@ -1000,35 +1324,6 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		}
-		ui.Row(c).Padding(0, contentPad, 8, contentPad).Gap(6).AlignItems(ui.Center).Children(func() {
-			tags := ui.Button(c, "Tags").Label("Note tags").Tooltip("Tags on this note")
-			tags.Padding(4, 8)
-			if tags.Clicked() {
-				a.tagFilter = ""
-				a.tagMenuOpen = !a.tagMenuOpen
-			}
-			a.menu(c, tags, &a.tagMenuOpen, "note-tags", 240, func() { a.tagMenu(c, t) })
-
-			move := ui.Button(c, "Move").Label("Move note").Tooltip("Move to another notebook")
-			move.Padding(4, 8)
-			if move.Clicked() {
-				a.moveFilter = ""
-				a.moveOpen = !a.moveOpen
-			}
-			a.menu(c, move, &a.moveOpen, "move", 240, func() { a.moveMenu(c, t) })
-
-			attach := ui.Button(c, "Attach…").Label("Attach file").Tooltip("Attach an image or file to this note")
-			attach.Padding(4, 8)
-			if attach.Clicked() {
-				a.promptAttachFiles()
-			}
-
-			del := ui.Button(c, "Delete…").Label("Delete note").Tooltip("Delete note")
-			del.Padding(4, 8)
-			if del.Clicked() {
-				a.confirmDelete = true
-			}
-		})
 	})
 }
 
@@ -1291,4 +1586,178 @@ func menuItem(c *ui.Context, key, text string, chosen bool) bool {
 		}
 	})
 	return clicked
+}
+
+// commandPalette renders the Spotlight/Kero-style quick switcher and command
+// palette modal (Cmd/Ctrl+P or clicking the ⌘K badge).
+func (a *nativeApp) commandPalette(c *ui.Context, t *ui.Theme) {
+	if !a.paletteOpen {
+		return
+	}
+	type paletteEntry struct {
+		key      string
+		title    string
+		subtitle string
+		shortcut string
+		icon     *ui.SVG
+		run      func()
+	}
+
+	buildEntries := func() []paletteEntry {
+		q := strings.ToLower(strings.TrimSpace(a.paletteQuery))
+		var entries []paletteEntry
+		match := func(text string) bool {
+			return q == "" || strings.Contains(strings.ToLower(text), q)
+		}
+
+		notes := a.notes
+		if page, err := a.svc.ListNoteSummaries(service.NoteFilter{Page: service.Page{Limit: 100}, Sort: a.sort}); err == nil && len(page.Notes) > 0 {
+			notes = page.Notes
+		}
+		for _, n := range notes {
+			n := n
+			title := noteRowTitle(n)
+			nbTitle := "Notes"
+			if nb := a.notebookByID(n.ParentID); nb != nil {
+				nbTitle = nb.Title
+			}
+			if match(title + " " + nbTitle + " " + n.Excerpt) {
+				entries = append(entries, paletteEntry{
+					key:      "note:" + n.ID,
+					title:    title,
+					subtitle: nbTitle,
+					icon:     iconNotes,
+					run: func() {
+						a.paletteOpen = false
+						if a.selectedNotebook != "" && a.selectedNotebook != n.ParentID {
+							a.selectedNotebook = n.ParentID
+							a.selectedID = n.ID
+							a.reloadNotes()
+						}
+						a.showNote(n.ID)
+						a.remember(n.ID)
+					},
+				})
+			}
+			if len(entries) >= 12 {
+				break
+			}
+		}
+
+		mod := "⌘"
+		if runtime.GOOS != "darwin" {
+			mod = "Ctrl+"
+		}
+		cmds := []paletteEntry{
+			{
+				key: "cmd:new-note", title: "New Note", subtitle: "Command", shortcut: mod + "N", icon: iconPlus,
+				run: func() { a.paletteOpen = false; a.newNote() },
+			},
+			{
+				key: "cmd:new-notebook", title: "New Notebook…", subtitle: "Command", shortcut: mod + "⇧N", icon: iconFolder,
+				run: func() { a.paletteOpen = false; a.openNewNotebook() },
+			},
+			{
+				key: "cmd:new-tag", title: "New Tag…", subtitle: "Command", shortcut: mod + "⇧T", icon: iconTag,
+				run: func() { a.paletteOpen = false; a.openNewTag() },
+			},
+			{
+				key: "cmd:toggle-edit", title: "Toggle Edit / Preview", subtitle: "Command", shortcut: mod + "E", icon: iconEdit,
+				run: func() { a.paletteOpen = false; a.toggleEdit() },
+			},
+			{
+				key: "cmd:toggle-sidebar", title: "Toggle Notebooks Sidebar", subtitle: "Command", shortcut: mod + "\\", icon: iconSidebar,
+				run: func() { a.paletteOpen = false; a.railOpen = !a.railOpen },
+			},
+			{
+				key: "cmd:toggle-dark", title: "Toggle Dark Mode", subtitle: "Appearance", icon: iconEye,
+				run: func() { a.paletteOpen = false; a.dark = !a.dark },
+			},
+			{
+				key: "cmd:sync-now", title: "Sync Now", subtitle: "Sync", shortcut: mod + "R", icon: iconSync,
+				run: func() { a.paletteOpen = false; a.syncNow() },
+			},
+			{
+				key: "cmd:settings", title: "Open Settings…", subtitle: "Preferences", shortcut: mod + ",", icon: iconSettings,
+				run: func() { a.paletteOpen = false; a.openSettings() },
+			},
+		}
+		for _, cmd := range cmds {
+			if match(cmd.title + " " + cmd.subtitle) {
+				entries = append(entries, cmd)
+			}
+		}
+		return entries
+	}
+
+	ui.Modal(c, &a.paletteOpen, func() {
+		var entries []paletteEntry
+		ui.Column(c).Width(480).Gap(8).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(8).Padding(4, 8).
+				Background(paperSunken).Border(1, hairlineStrong).Radius(radiusControl).Children(func() {
+				ui.Icon(c, iconSearch).Size(15, 15).TextColor(inkSoft).Shrink(0)
+				in := ui.TextInput(c.Key("palette-input"), &a.paletteQuery).
+					Placeholder("Type a note title or command…").
+					Label("Command palette search").
+					Background(ui.Transparent).
+					Padding(4, 2).
+					Grow(1).
+					AutoFocus()
+				if a.paletteFocus {
+					in.Focus()
+					a.paletteFocus = false
+				}
+				if in.Changed() {
+					a.paletteIndex = 0
+				}
+				entries = buildEntries()
+				if a.paletteIndex >= len(entries) {
+					a.paletteIndex = max(0, len(entries)-1)
+				}
+				if c.Shortcut(0, ui.KeyDown) && len(entries) > 0 {
+					a.paletteIndex = min(a.paletteIndex+1, len(entries)-1)
+				} else if c.Shortcut(0, ui.KeyUp) && len(entries) > 0 {
+					a.paletteIndex = max(a.paletteIndex-1, 0)
+				}
+				if in.Submitted() && a.paletteIndex >= 0 && a.paletteIndex < len(entries) {
+					entries[a.paletteIndex].run()
+				}
+			})
+
+			ui.Scroll(c.Key("palette-results")).MaxHeight(320).Children(func() {
+				ui.Column(c).Gap(2).Children(func() {
+					if len(entries) == 0 {
+						ui.Text(c, "No matching notes or commands").Padding(12, 10).FontSize(sizeSmall).TextColor(inkSoft)
+						return
+					}
+					for idx, item := range entries {
+						idx, item := idx, item
+						chosen := idx == a.paletteIndex
+						row := ui.Row(c.Key("palette:"+item.key)).AlignItems(ui.Center).Gap(8).
+							Padding(7, 10).Radius(radiusControl).Cursor(ui.CursorPointer).
+							Label(item.title)
+						chosenPill(row, chosen, row.Hovered())
+						if row.Hovered() {
+							a.paletteIndex = idx
+						}
+						if row.Clicked() {
+							item.run()
+						}
+						row.Children(func() {
+							ui.Icon(c, item.icon).Size(14, 14).TextColor(inkSoft).Shrink(0)
+							lbl := ui.Text(c, item.title).FontSize(sizeUI).TextColor(inkNavy).SingleLine().Grow(1).MinWidth(0)
+							if chosen {
+								lbl.Bold()
+							}
+							ui.Text(c, item.subtitle).FontSize(sizeSmall).TextColor(inkSoft).Shrink(0)
+							if item.shortcut != "" {
+								ui.Text(c, item.shortcut).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).
+									TextColor(navyText).Shrink(0)
+							}
+						})
+					}
+				})
+			})
+		})
+	})
 }

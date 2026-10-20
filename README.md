@@ -2,167 +2,148 @@
 
 # Joplin Lite
 
-A quiet place for your Joplin notes. A native desktop app with warm paper colors,
-a simple Markdown editor, and light and dark appearances.
+**A quiet, native desktop home for your Joplin notes.**
 
-**[Download the alpha](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.2)** ·
-**[Watch the demo](https://github.com/lsj5031/joplin-lite/releases/download/v0.1.0-alpha.2/Joplin-Lite-workspace-demo.mp4)** ·
-[Desktop guide](shell/README.md)
+Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a single lightweight native app (~120 MB RAM, no Electron or embedded browser) with warm Field Notes paper tones, Liquid Glass surfaces, and a fast, distraction-free Markdown editor.
+
+**[Download v0.1.0-alpha.3](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)** ·
+**[Watch the 29s workspace tour](https://github.com/lsj5031/joplin-lite/releases/download/v0.1.0-alpha.3/Joplin-Lite-workspace-demo.mp4)** ·
+**[Watch the writing demo](https://github.com/lsj5031/joplin-lite/releases/download/v0.1.0-alpha.3/Joplin-Lite-writing-demo.mp4)** ·
+**[Technical & desktop guide](shell/README.md)**
 
 ![Reading a note in Joplin Lite](docs/screenshots/native-workspace.png)
 
-Joplin Lite is an independent client, built in Go with
-[MyGO](https://github.com/egoist/mygo). It runs as one native app process without
-Electron or an embedded browser. This is **alpha software**, being used daily
-with a real encrypted Dropbox library on macOS and Windows. Back up your notes
-before connecting an existing library. It does not yet cover every official
-Joplin feature.
+> **Alpha note:** Joplin Lite is an independent client used daily on macOS and Windows with encrypted Dropbox libraries. Because it is still in alpha and does not cover every official Joplin feature, **always back up your notes** before connecting an existing library.
 
-## Get started
+---
 
-Download and unzip the package for your computer from the
-[release page](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.2).
+## Quick start
 
-| Your computer | Package | Open |
+### 1. Download and open
+
+Grab the latest package for your computer from the **[Releases page](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)**:
+
+| Platform | Package | How to run |
 | --- | --- | --- |
-| Mac with Apple silicon | `macos-arm64.zip` | Drag **Joplin Lite.app** to Applications |
-| Windows 64-bit | `windows-amd64.zip` | Extract the whole folder, then run **gojoplin-desktop.exe** |
+| **macOS** (Apple silicon) | `Joplin-Lite-0.1.0-alpha.3-macos-arm64.zip` | Unzip and drag **Joplin Lite.app** to **Applications** |
+| **Windows** (64-bit, portable) | `Joplin-Lite-0.1.0-alpha.3-windows-amd64.zip` | Extract the whole folder and run **gojoplin-desktop.exe** |
 
-The Mac app is ad-hoc signed, not notarized; Windows is not publisher-signed.
-Your operating system may ask you to approve opening it. There is no automatic
-updater. To update, quit Lite and replace its app or executable; your notes live
-separately from the downloaded package.
+* **First launch:** The macOS app is ad-hoc signed (not notarized) and the Windows executable is not publisher-signed, so your OS may ask you to confirm opening it the first time.
+* **Updating:** There is no background auto-updater. To update, quit Joplin Lite and replace the app or folder—your notes and settings live separately in your user profile directory.
 
-### Try it without sync
+### 2. Try it safely in a local sandbox (no sync required)
 
-For a first look, start with a separate local notebook collection. These commands
-use a fresh Lite profile and do not contact a sync service.
+Want to explore the interface before connecting your real notes? Launch Joplin Lite with a separate local trial folder that never touches a sync server:
 
-**Mac — Terminal:**
+**macOS (Terminal):**
 
 ```sh
 "/Applications/Joplin Lite.app/Contents/MacOS/Joplin Lite" -no-sync -data-dir "$HOME/Library/Application Support/joplin-lite/try-notes"
 ```
 
-**Windows — PowerShell, from the extracted folder:**
+**Windows (PowerShell, inside the extracted folder):**
 
 ```powershell
 .\gojoplin-desktop.exe -no-sync -data-dir "$env:LOCALAPPDATA\JoplinLite\try-notes"
 ```
 
-Keep these flags when reopening the trial collection. If the local API port is
-already in use, add `-addr 127.0.0.1:41984` or another unused port.
+Keep those same flags whenever you want to reopen your trial notebook collection. *(If the local Clipper API port is already taken by another app, pass `-addr 127.0.0.1:41984`.)*
 
-## Make room for your notes
+---
 
-- **Read first.** Existing notes open in Preview. Choose Edit to write; new notes
-  are ready to type into, and changes save automatically.
-- **Find things quickly.** Browse notebooks and tags, search, save a search, or
-  sort your notes by title or date.
-- **Keep things together.** Move notes, manage tags, use todos, or select several
-  notes to move or delete them together.
-- **Add attachments.** Attach a file, drag one into the editor, or paste an image.
-- **Compare conflicts.** Read both complete versions before deciding which to keep.
-- **Settle in.** Choose Light or Dark in Settings. The workspace adapts to narrower
-  windows, and Back/Forward returns to notes you visited.
+## Made for everyday reading and writing
+
+- **Read first, write when ready.** Existing notes open in a clean, typeset Preview with interactive checklists. Press `Cmd/Ctrl+E` (or click the pencil icon) to edit in Markdown—new notes start ready to type, and your changes save automatically after 500 ms.
+- **Jump anywhere from the keyboard.** Press `Cmd/Ctrl+P` (or click `⌘K` in the search bar) to open the **Command & Note Palette**, switch notes instantaneously, toggle appearances, or trigger sync.
+- **Stay organized without clutter.** Keep the sidebar focused on your note titles, or open the translucent **Notebooks & Tags** rail (`Cmd/Ctrl+\`) when you want to browse folders, filter by tag, rename inline (`F2` / `Return`), or drag notes into another notebook. Select multiple notes (`Cmd/Ctrl+Click` or `Shift+Click`) to move or delete them in bulk.
+- **Attach files & images effortlessly.** Click the paperclip button, drag files straight into the editor, or paste images from your clipboard.
+- **Resolve sync conflicts safely.** When two devices edit the same note, Joplin Lite shows a side-by-side comparison of both complete versions so you never lose work blindly.
+- **Make the space yours.** Open **Settings** (`Cmd/Ctrl+,`) to switch between **Light** and **Dark** appearances and choose from four Oklab gradient backdrops (**Sage**, **Linen**, **Mist**, and **Kero**).
 
 ![Writing with Markdown and autosave](docs/screenshots/native-writing.png)
 
-| Action | Mac | Windows |
+### Keyboard shortcuts
+
+| Action | macOS | Windows / Linux |
 | --- | --- | --- |
-| New note | Cmd+N | Ctrl+N |
-| Search | Cmd+K | Ctrl+K |
-| Write / Preview | Cmd+E | Ctrl+E |
-| Save now | Cmd+S | Ctrl+S |
+| New note | `Cmd+N` | `Ctrl+N` |
+| Search notes | `Cmd+K` or `Cmd+F` | `Ctrl+K` or `Ctrl+F` |
+| Command & note palette | `Cmd+P` | `Ctrl+P` |
+| Toggle Edit / Preview | `Cmd+E` | `Ctrl+E` |
+| Toggle Notebooks rail | `Cmd+\` | `Ctrl+\` |
+| Save immediately | `Cmd+S` | `Ctrl+S` |
+| Back / Forward in history | `Cmd+[` / `Cmd+]` | `Alt+Left` / `Alt+Right` |
+| Inline rename selected item | `Return` or `F2` | `F2` |
+| Settings | `Cmd+,` | `Ctrl+,` |
 
-[Watch the writing demo](https://github.com/lsj5031/joplin-lite/releases/download/v0.1.0-alpha.2/Joplin-Lite-writing-demo.mp4).
+![Dark appearance with the Sage Oklab backdrop](docs/screenshots/native-dark.png)
 
-![Dark appearance](docs/screenshots/native-dark.png)
+![Responsive layout in a narrower window](docs/screenshots/native-narrow.png)
 
-![A narrower workspace](docs/screenshots/native-narrow.png)
+*All screenshots and demo videos are rendered directly from the native UI using synthetic sample notes.*
 
-Screenshots and demo videos use synthetic notes rendered through the current
-native UI. They contain no personal library data and do not simulate a real sync.
+---
 
-## Bring your existing Joplin library
+## Connect your existing Joplin library
 
-Lite can open an official desktop profile directly, including its notes and
-adjacent attachment files. **This edits the original database.**
+Joplin Lite can open an official Joplin Desktop profile directly (`database.sqlite` and its `resources/` folder) or sync from scratch into its own profile.
 
-1. Close official Joplin and back up its entire profile, including `resources`.
-2. Start Lite with `-data-dir` pointing to that profile and `-no-sync` initially.
-3. Check your notes and attachments, then configure sync when you are ready.
+### Opening an existing profile in place
 
-Do not open the same profile in both desktop apps at once. Lite adds its own
-local history and saved-search tables. Opening a profile alone does not transfer
-all credentials or secure-storage access.
+> **Important:** Opening a profile directly edits that SQLite database and adds local history and saved-search tables. **Never run official Joplin and Joplin Lite against the same profile folder at the same time.**
 
-On macOS, a remembered launch file can reopen the same profile from Finder and
-reuse supported official Dropbox credentials and the encryption password through
-Keychain. This is an explicit setup step, documented in
-[remembered startup and Keychain reuse](shell/README.md#remembered-native-startup).
-Recovered secrets stay in memory. Outside that mode, passwords saved in Lite's
-Settings are stored unencrypted in its local database.
+1. **Quit official Joplin** completely and make a full backup copy of your profile folder (including `resources/`).
+2. **Start in local-only mode first** so you can inspect your notes and attachments before any sync runs:
+   - Point `-data-dir` to your profile directory and include `-no-sync`.
+3. **Enable sync when you are satisfied.** Configure your target in Settings (`Cmd/Ctrl+,`) or your config file.
 
-## Sync when you are ready
+On **macOS**, you can also configure a remembered Finder launch file (`~/Library/Application Support/joplin-lite/launch.json`) that reopens your chosen profile automatically and reads your existing official Dropbox token and E2EE master password directly from **macOS Keychain**—keeping recovered secrets in memory only. See **[Remembered native startup & Keychain reuse](shell/README.md#remembered-native-startup)** for setup details. *(Outside Keychain reuse mode, passwords saved in Joplin Lite's Settings dialog are stored unencrypted in its local SQLite table.)*
 
-| Service | Setup | Current coverage |
+---
+
+## Sync options
+
+| Sync target | Where to configure | Status & test coverage |
 | --- | --- | --- |
-| Dropbox | Configuration file / existing supported credentials | Real encrypted-library use on Mac and Windows; uploads received by official Joplin on a phone |
-| Joplin Server | Settings | Plaintext and encrypted integration tests |
-| Local folder | Settings | Plaintext and encrypted round-trip tests |
-| S3 | Configuration file; build with `-tags s3` | Integration tests; excluded from standard desktop packages |
+| **Dropbox** | Config file / existing credentials | Used daily on macOS & Windows with encrypted libraries; interoperates with official Joplin mobile & desktop |
+| **Joplin Server** | In-app Settings (`Cmd/Ctrl+,`) | Plaintext and end-to-end encrypted (E2EE) integration tests |
+| **Local folder** | In-app Settings (`Cmd/Ctrl+,`) | Plaintext and E2EE round-trip integration tests |
+| **Amazon S3 / S3-compatible** | Config file (build with `-tags s3`) | Integration-tested; omitted from standard prebuilt downloads to keep binaries small |
 
-OneDrive is not implemented. New Dropbox authorization uses your own OAuth app;
-that app may have a different folder from official Joplin's app. Review the
-[configuration example](config.yaml.example) and [desktop guide](shell/README.md)
-before connecting an existing target.
+*OneDrive is not currently supported. Authorizing a brand-new Dropbox connection uses your own Dropbox OAuth app key—see [`config.yaml.example`](config.yaml.example) and the [desktop guide](shell/README.md).*
 
-Normal sync sends edits, uploads and deletions to your configured target. Optional
-Dropbox deletion protection (`sync.dropbox.block_deletes: true` in YAML) blocks
-outgoing deletions and leaves them queued with an error. It is not read-only mode
-or a backup. Turn it off only when you intend local deletions to reach Dropbox.
+### Smart, safe Dropbox sync
 
-Dropbox remembers its change cursor across restarts. Later checks request changes
-rather than listing the entire library again. Existing metadata and attachments
-are reused when their exact bytes match Dropbox's content hash. A first sync,
-cursor reset, or encrypted metadata without a matching local copy can still need
-downloads. The footer shows the current stage and last successful sync time.
+- **Incremental delta sync:** Joplin Lite saves its Dropbox cursor across restarts, so subsequent syncs only fetch changed items instead of scanning your whole vault.
+- **Content-hash reuse:** Existing local metadata and attachments are verified against Dropbox's content hash and reused without re-downloading.
+- **Clear status in the sidebar footer:** Always see whether you are **Local only**, **Checking items**, **Synced**, **Offline**, or waiting on another device's sync lock, alongside the last successful sync time.
+- **Optional deletion guard:** Setting `sync.dropbox.block_deletes: true` in YAML prevents outgoing remote deletions while you test. Turn it off when you want local note deletions to sync to Dropbox.
 
-## A few things to know
+---
 
-- Keep backups during the alpha. Fresh-account setup, credential renewal,
-  accessibility, and broad device compatibility need more testing.
-- The app includes a Clipper/Data API, but actual browser-extension pairing
-  remains a validation gap.
-- Large libraries can take time on their first sync. See the
-  [sync performance notes](docs/dropbox-sync-review.md) for measured improvements
-  and remaining limits.
-- Logs are in `desktop.log` inside the active profile directory. Include the
-  error and app version when [reporting a problem](https://github.com/lsj5031/joplin-lite/issues).
-  Remove private note content, paths and credentials before sharing logs.
+## Good to know
 
-## Build and contribute
+- **Keep regular backups** while Joplin Lite is in alpha. Fresh-account onboarding, OAuth token renewal, screen-reader accessibility, and live browser-extension pairing for the built-in Clipper API still need broader testing.
+- **First sync on large vaults:** An initial sync or full cursor reset on a large library can take time; see the [Dropbox sync performance notes](docs/dropbox-sync-review.md).
+- **Troubleshooting & logs:** Diagnostic logs are written to `desktop.log` inside your active data directory (automatically rotated at 1 MiB). When [opening an issue](https://github.com/lsj5031/joplin-lite/issues), include the app version and relevant error lines with personal note titles, paths, and tokens removed.
 
-Go 1.27.1 is pinned by the desktop build. No frontend build is needed for the
-native app. Windows scripts use Git Bash.
+---
+
+## Build from source
+
+Requires **Go 1.27+** (`go1.27.1` is pinned and fetched automatically via `GOTOOLCHAIN=auto`). No Node.js or frontend build step is needed for the native desktop app.
 
 ```sh
 git clone https://github.com/lsj5031/joplin-lite.git
 cd joplin-lite
-bash shell/build.sh
+bash shell/build.sh          # builds tmp/gojoplin-desktop.exe
+bash shell/bundle.sh         # macOS: packages tmp/Joplin Lite.app
 go test ./...
 (cd shell && go test ./...)
 ```
 
-See the [desktop guide](shell/README.md) for packaging, reproducible screenshots
-and video capture, and the optional browser preview. Integration guides cover
-[local sync](docs/local-sync-test.md), [encryption](docs/e2ee-sync-rehearsal.md),
-[Joplin Server](docs/joplin-server-test.md), and [S3](docs/s3-test.md).
+See [`shell/README.md`](shell/README.md) for Windows portable packaging, headless UI screenshot/video generation, and the optional browser preview. Additional testing guides cover [local sync](docs/local-sync-test.md), [E2EE sync](docs/e2ee-sync-rehearsal.md), [Joplin Server](docs/joplin-server-test.md), and [S3](docs/s3-test.md).
 
 ## License
 
-AGPL-3.0-or-later. Forked from
-[jescarri/go-joplin](https://github.com/jescarri/go-joplin).
-See [LICENSE](LICENSE) and [NOTICE](NOTICE). Retain bundled font licenses when
-redistributing.
+[AGPL-3.0-or-later](LICENSE). Forked from [jescarri/go-joplin](https://github.com/jescarri/go-joplin); see [NOTICE](NOTICE) and retain bundled font licenses when redistributing.
