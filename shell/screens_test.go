@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -262,29 +263,263 @@ func seedReadme(t *testing.T, svc *service.Service) *models.Note {
 	return selected
 }
 
-// TestCaptureReadme uses short, synthetic everyday notes for public screenshots.
+// TestCaptureReadme uses short, synthetic everyday notes for public screenshots,
+// rendered at 2x Retina with macOS TitleBarHiddenInset traffic lights, window
+// vibrancy, rounded window corners, and WindowServer drop shadow.
 func TestCaptureReadme(t *testing.T) {
 	dir := captureDir(t)
 	registerFonts()
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
 	selected := seedReadme(t, svc)
+
+	st := &syncStatus{last: time.Date(2026, 10, 19, 14, 32, 0, 0, time.Local)}
+	st.finish(nil)
+	app.be = &backend{status: st, cfg: &config.Config{SyncTarget: 7}}
+
 	app.reloadNotebooks()
 	app.reloadTags()
 	app.selectedID = selected.ID
 	app.reloadNotes()
 	app.showNote(selected.ID)
-	tt := ui.NewTester(app.view, 1280, 900)
-	capture(t, dir, "native-workspace", tt)
+	app.railOpen = true
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	tt.SetSize(1280, 800)
+	tt.SetScale(2)
+	tt.SetVibrancy(true)
+	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 76})
+
+	captureMacWindow(t, dir, "native-workspace", tt, app.dark)
 	app.dark = true
-	capture(t, dir, "native-dark", tt)
+	captureMacWindow(t, dir, "native-dark", tt, app.dark)
 	app.dark = false
+	app.railOpen = false
 	click(t, tt, "Edit")
-	capture(t, dir, "native-writing", tt)
+	captureMacWindow(t, dir, "native-writing", tt, app.dark)
 	click(t, tt, "Preview")
 	app.narrowEditor = true
 	tt.SetSize(900, 700)
-	capture(t, dir, "native-narrow", tt)
+	captureMacWindow(t, dir, "native-narrow", tt, app.dark)
+}
+
+func captureMacWindow(t *testing.T, dir, name string, tt *ui.Tester, dark bool) {
+	t.Helper()
+	raw := screen(tt)
+	framed := macOSWindow(raw, dark)
+	writeCapture(t, dir, name, framed, tt)
+}
+
+// macOSWindow composites a 2x Retina window surface with the macOS
+// TitleBarHiddenInset traffic lights (at TrafficLightPosition{X: 16, Y: 16}),
+// rounded window corners (16 DIP / 32 px radius), 1px rim, and WindowServer
+// drop shadow on a transparent alpha border.
+func macOSWindow(src *image.RGBA, dark bool) *image.RGBA {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	win := image.NewRGBA(image.Rect(0, 0, w, h))
+	copy(win.Pix, src.Pix)
+	paintTrafficLights(win, dark)
+
+	const (
+		padX      = 88
+		padTop    = 60
+		padBottom = 116
+		radius    = 32.0
+	)
+	outW := w + padX*2
+	outH := h + padTop + padBottom
+	out := image.NewRGBA(image.Rect(0, 0, outW, outH))
+
+	hw := float64(w) * 0.5
+	hh := float64(h) * 0.5
+	cx := float64(padX) + hw
+	cy := float64(padTop) + hh
+
+	for y := 0; y < outH; y++ {
+		py := float64(y) + 0.5
+		for x := 0; x < outW; x++ {
+			px := float64(x) + 0.5
+			sd := sdRoundRect(px-cx, py-cy, hw, hh, radius)
+
+			// Compute WindowServer dual-layer drop shadow (contact umbra + offset penumbra).
+			sdContact := sdRoundRect(px-cx, (py-4.0)-cy, hw, hh, radius)
+			sdKey := sdRoundRect(px-cx, (py-22.0)-cy, hw, hh, radius)
+			var shadowA float64
+			if sdContact > -2.0 {
+				dc := math.Max(0, sdContact)
+				dk := math.Max(0, sdKey)
+				umbra := 0.18 * math.Exp(-dc/9.0)
+				penumbra := 0.26 * math.Exp(-(dk*dk)/(2.0*34.0*34.0))
+				shadowA = math.Min(1.0, umbra+penumbra)
+				// Crisp 1px outer frame hairline around the window edge.
+				if sd >= -0.5 && sd <= 1.2 {
+					edge := 1.0 - math.Abs(sd-0.35)/0.85
+					if edge > 0 {
+						rimA := 0.24 * edge
+						if dark {
+							rimA = 0.42 * edge
+						}
+						shadowA = math.Min(1.0, shadowA+rimA*(1.0-shadowA))
+					}
+				}
+			}
+
+			if sd >= 0.5 {
+				if shadowA > 0.001 {
+					a8 := uint8(math.Round(shadowA * 255.0))
+					i := out.PixOffset(x, y)
+					out.Pix[i+3] = a8
+				}
+				continue
+			}
+
+			cov := clamp01(0.5 - sd)
+			sx := clampInt(x-padX, 0, w-1)
+			sy := clampInt(y-padTop, 0, h-1)
+			si := win.PixOffset(sx, sy)
+			r := float64(win.Pix[si+0])
+			g := float64(win.Pix[si+1])
+			bl := float64(win.Pix[si+2])
+
+			// Subtle 1px inner specular highlight along the window perimeter.
+			if sd >= -2.2 && sd <= 0.0 {
+				inner := 1.0 - math.Abs(sd+1.0)/1.2
+				if inner > 0 {
+					topWeight := clamp01(1.0 - float64(sy)/90.0)
+					hl := 0.16 + 0.18*topWeight
+					if dark {
+						hl = 0.12 + 0.10*topWeight
+					}
+					t := inner * hl
+					r = r*(1.0-t) + 255.0*t
+					g = g*(1.0-t) + 255.0*t
+					bl = bl*(1.0-t) + 255.0*t
+				}
+			}
+
+			// Composite window pixel (with coverage cov) over the shadow pixel (0,0,0,shadowA).
+			outA := cov + shadowA*(1.0-cov)
+			if outA > 0 {
+				i := out.PixOffset(x, y)
+				out.Pix[i+0] = uint8(math.Round(clamp01((r/255.0)*cov) * 255.0))
+				out.Pix[i+1] = uint8(math.Round(clamp01((g/255.0)*cov) * 255.0))
+				out.Pix[i+2] = uint8(math.Round(clamp01((bl/255.0)*cov) * 255.0))
+				out.Pix[i+3] = uint8(math.Round(clamp01(outA) * 255.0))
+			}
+		}
+	}
+	return out
+}
+
+// paintTrafficLights draws the three macOS window controls at 2x Retina scale
+// matching TrafficLightPosition{X: 16, Y: 16} (centers at x=46, 92, 138 px,
+// y=45.5 px, radius=13.5 px).
+func paintTrafficLights(img *image.RGBA, dark bool) {
+	type light struct {
+		cx         float64
+		topR, topG float64
+		topB       float64
+		botR, botG float64
+		botB       float64
+		rimR, rimG float64
+		rimB       float64
+	}
+	lights := []light{
+		{
+			cx:   46.0,
+			topR: 255, topG: 99, topB: 91,
+			botR: 254, botG: 89, botB: 80,
+			rimR: 218, rimG: 67, rimB: 60,
+		},
+		{
+			cx:   92.0,
+			topR: 255, topG: 193, topB: 52,
+			botR: 253, botG: 184, botB: 42,
+			rimR: 216, rimG: 156, rimB: 34,
+		},
+		{
+			cx:   138.0,
+			topR: 46, topG: 206, topB: 68,
+			botR: 38, botG: 197, botB: 60,
+			rimR: 28, rimG: 168, rimB: 42,
+		},
+	}
+	const (
+		cy     = 45.5
+		radius = 13.5
+	)
+	for _, l := range lights {
+		minX := int(math.Floor(l.cx - radius - 2))
+		maxX := int(math.Ceil(l.cx + radius + 2))
+		minY := int(math.Floor(cy - radius - 2))
+		maxY := int(math.Ceil(cy + radius + 2))
+		for y := minY; y <= maxY; y++ {
+			for x := minX; x <= maxX; x++ {
+				if ! image.Pt(x, y).In(img.Bounds()) {
+					continue
+				}
+				dx := (float64(x) + 0.5) - l.cx
+				dy := (float64(y) + 0.5) - cy
+				dist := math.Hypot(dx, dy)
+				sd := dist - radius
+				cov := clamp01(0.5 - sd)
+				if cov <= 0 {
+					continue
+				}
+				v := clamp01((dy + radius) / (2.0 * radius))
+				fr := l.topR*(1.0-v) + l.botR*v
+				fg := l.topG*(1.0-v) + l.botG*v
+				fb := l.topB*(1.0-v) + l.botB*v
+
+				// 1.4px inner border stroke around the disc.
+				rimCov := clamp01(1.4 - math.Abs(sd+0.7))
+				if dark {
+					rimCov *= 0.55
+				}
+				cr := fr*(1.0-rimCov) + l.rimR*rimCov
+				cg := fg*(1.0-rimCov) + l.rimG*rimCov
+				cb := fb*(1.0-rimCov) + l.rimB*rimCov
+
+				i := img.PixOffset(x, y)
+				br := float64(img.Pix[i+0])
+				bg := float64(img.Pix[i+1])
+				bb := float64(img.Pix[i+2])
+				img.Pix[i+0] = uint8(math.Round(br*(1.0-cov) + cr*cov))
+				img.Pix[i+1] = uint8(math.Round(bg*(1.0-cov) + cg*cov))
+				img.Pix[i+2] = uint8(math.Round(bb*(1.0-cov) + cb*cov))
+				img.Pix[i+3] = 255
+			}
+		}
+	}
+}
+
+func sdRoundRect(px, py, hw, hh, r float64) float64 {
+	qx := math.Abs(px) - (hw - r)
+	qy := math.Abs(py) - (hh - r)
+	outX := math.Max(qx, 0)
+	outY := math.Max(qy, 0)
+	return math.Hypot(outX, outY) + math.Min(math.Max(qx, qy), 0) - r
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // TestCaptureScreens renders every screen state and writes it to CAPTURE_DIR.

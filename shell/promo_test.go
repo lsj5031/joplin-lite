@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/png"
 	"math"
 	"os"
@@ -61,6 +62,7 @@ type promoManifest struct {
 // pointer hover and click states through ui.Tester.
 type promoTour struct {
 	t        *testing.T
+	app      *nativeApp
 	tt       *ui.Tester
 	dir      string
 	n        int
@@ -85,7 +87,10 @@ func (p *promoTour) frame() {
 		Down:    p.down,
 		Opacity: math.Round(p.curAlpha*100) / 100,
 	})
-	img := p.tt.Image()
+	raw := p.tt.Image()
+	img := image.NewRGBA(raw.Bounds())
+	copy(img.Pix, raw.Pix)
+	paintTrafficLights(img, p.app != nil && p.app.dark)
 	f, err := os.Create(filepath.Join(p.dir, fmt.Sprintf("%04d.png", p.n)))
 	if err != nil {
 		p.t.Fatalf("create frame %d: %v", p.n, err)
@@ -231,6 +236,7 @@ func TestCapturePromo(t *testing.T) {
 	tt.SetSize(1280, 800)
 	tt.SetScale(2)
 	tt.SetVibrancy(true)
+	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 76})
 	// Settle initial entrance animations before recording frame 1.
 	tt.Frame()
 	tt.Advance(300 * time.Millisecond)
@@ -238,6 +244,7 @@ func TestCapturePromo(t *testing.T) {
 
 	p := &promoTour{
 		t:        t,
+		app:      app,
 		tt:       tt,
 		dir:      frames,
 		cur:      promoPoint{X: 680, Y: 360},

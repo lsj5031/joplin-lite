@@ -215,10 +215,14 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	leftPad := float32(14)
+	barH := topBarHeight
 	if bar.Left > 0 {
 		leftPad = max(14, bar.Left+8)
 	}
-	ui.Row(c).Height(topBarHeight).Shrink(0).AlignItems(ui.Center).Gap(10).
+	if bar.Height > 0 {
+		barH = bar.Height
+	}
+	ui.Row(c).Height(barH).Shrink(0).AlignItems(ui.Center).Gap(10).
 		Padding(0, 14, 0, leftPad).DragWindow().
 		Background(navyDeep).Children(func() {
 		if a.narrow {
@@ -226,11 +230,14 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 				a.railOpen = !a.railOpen
 			}
 		}
-		mark(c)
-		ui.Column(c).Gap(0).Shrink(0).Children(func() {
-			ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(20).TextColor(inkNavy)
-		})
+		if bar.Left == 0 {
+			mark(c)
+			ui.Column(c).Gap(0).Shrink(0).Children(func() {
+				ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(20).TextColor(inkNavy)
+			})
+		}
 		a.searchField(c, t)
+		ui.Spacer(c)
 		primary := primaryAction(c, "New note")
 		if a.narrow {
 			primary.Label("New note")
