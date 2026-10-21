@@ -165,7 +165,7 @@ type nativeApp struct {
 	hasPendingScroll   bool
 	pendingScrollRow   int
 	pendingScrollAlign ui.Align
-	inlineRenameFocus bool
+	inlineRenameFocus  bool
 
 	// Spotlight-style command & quick-open palette state.
 	paletteOpen  bool
@@ -2091,6 +2091,28 @@ func openNativeWindow(be *backend) *mygo.Window {
 	if runtime.GOOS == "darwin" {
 		mygo.App.Dock.SetMenu(app.dockMenu())
 	}
+	view := app.view
+	if windowsChrome {
+		appearance := mygo.ThemeLight
+		if app.dark {
+			appearance = mygo.ThemeDark
+		}
+		mygo.Theme.SetSource(appearance)
+		lastDark := app.dark
+		view = func(c *ui.Context) {
+			if app.dark != lastDark {
+				lastDark = app.dark
+				appearance := mygo.ThemeLight
+				if app.dark {
+					appearance = mygo.ThemeDark
+				}
+				// Applying appearance invalidates native content. Queue it
+				// outside the frame rather than re-entering its renderer.
+				go mygo.Theme.SetSource(appearance)
+			}
+			app.view(c)
+		}
+	}
 	opts := mygo.WindowOptions{
 		Title:     "Joplin Lite",
 		Width:     1280,
@@ -2098,13 +2120,18 @@ func openNativeWindow(be *backend) *mygo.Window {
 		MinWidth:  900,
 		MinHeight: 600,
 		StateKey:  "native-main",
-		Content:   ui.View(app.view),
+		Content:   ui.View(view),
 	}
 	if runtime.GOOS == "darwin" {
 		opts.TitleBarStyle = mygo.TitleBarHiddenInset
 		opts.TitleBarHeight = 44
 		opts.TrafficLightPosition = &mygo.Point{X: 16, Y: 16}
 		opts.Vibrancy = mygo.VibrancySidebar
+	} else if windowsChrome {
+		opts.TitleBarStyle = mygo.TitleBarHidden
+		opts.TitleBarHeight = 48
+		opts.Vibrancy = mygo.VibrancyMica
+		opts.AutoHideMenuBar = true
 	}
 	win := mygo.NewWindow(opts)
 	win.OnClosed(func() {

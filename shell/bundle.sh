@@ -7,7 +7,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="${APP:-$PWD/tmp/Joplin Lite.app}"
-BIN="$PWD/tmp/gojoplin-desktop.exe"
+BIN="${OUT:-../tmp/Joplin Lite.exe}"
+case "$BIN" in
+  /* | [A-Za-z]:[\\/]*) ;;
+  *) BIN="$PWD/shell/$BIN" ;;
+esac
 ICNS="$PWD/web/public/app-icon.icns"
 
 bash shell/build.sh

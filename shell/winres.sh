@@ -37,8 +37,8 @@ $WINRES simply \
   --product-name "Joplin Lite" \
   --product-version "$VERSION" \
   --file-version "$VERSION" \
-  --file-description "Joplin Lite native note app" \
-  --original-filename gojoplin-desktop.exe \
+  --file-description "Joplin Lite" \
+  --original-filename "Joplin Lite.exe" \
   --copyright "AGPL-3.0-or-later; see LICENSE and NOTICE"
 
 echo "wrote shell/rsrc_windows_amd64.syso ($VERSION)"

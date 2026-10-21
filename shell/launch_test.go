@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,9 +21,18 @@ const syntheticCiphertext = "djEwGJqrcG+VvCsWBUj6m5GjRyKwkgByKCAGiUbHTYR1JlA="
 const syntheticMaster = "synthetic master ☃"
 
 func TestRememberedLaunchPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("GOJOPLIN_CONFIG_PATH", "")
+	defaultConfig := ""
+	if runtime.GOOS == "windows" {
+		defaultConfig = filepath.Join(home, "AppData", "joplin-lite", "config.json")
+	}
 	path := filepath.Join(t.TempDir(), "launch.json")
-	want := launchSettings{Config: "/chosen/config.yaml", Profile: "/chosen/profile", Addr: "127.0.0.1:41984", ReuseOfficialKeychain: true, DropboxBlockDeletes: true}
+	want := launchSettings{Config: filepath.Join(home, "chosen", "config.yaml"), Profile: filepath.Join(home, "chosen", "profile"), Addr: "127.0.0.1:41984", ReuseOfficialKeychain: true, DropboxBlockDeletes: true}
 	raw, _ := json.Marshal(want)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
@@ -32,11 +42,11 @@ func TestRememberedLaunchPrecedence(t *testing.T) {
 		t.Fatalf("remembered launch not restored: %v", err)
 	}
 	got, err = resolveLaunch(path, "", "", "127.0.0.1:0")
-	if err != nil || got.Addr != "127.0.0.1:0" || got.Config != "" || got.Profile != "" || got.ReuseOfficialKeychain {
+	if err != nil || got.Addr != "127.0.0.1:0" || got.Config != defaultConfig || got.Profile != "" || got.ReuseOfficialKeychain {
 		t.Fatal("explicit address inherited remembered profile permissions")
 	}
 	got, err = resolveLaunch(path, "", "", "", true)
-	if err != nil || got.Config != "" || got.Profile != "" || got.ReuseOfficialKeychain {
+	if err != nil || got.Config != defaultConfig || got.Profile != "" || got.ReuseOfficialKeychain {
 		t.Fatal("explicit launch flag inherited remembered credentials")
 	}
 	got, err = resolveLaunch(path, "other.yaml", "other-profile", "127.0.0.1:0")
@@ -62,11 +72,11 @@ func TestRememberedLaunchPrecedence(t *testing.T) {
 		}
 	}
 	got, err = resolveLaunch(path, "", "/other-profile", "")
-	if err != nil || got.Profile != "/other-profile" || got.Config != "" || got.ReuseOfficialKeychain {
+	if err != nil || got.Profile != "/other-profile" || got.Config != defaultConfig || got.ReuseOfficialKeychain {
 		t.Fatal("data-dir alone did not preserve ordinary default-config semantics")
 	}
 	got, err = resolveLaunch(filepath.Join(t.TempDir(), "missing"), "", "", "")
-	if err != nil || got.Config != "" || got.Profile != "" || got.ReuseOfficialKeychain {
+	if err != nil || got.Config != defaultConfig || got.Profile != "" || got.ReuseOfficialKeychain {
 		t.Fatal("missing launch settings did not preserve ordinary defaults")
 	}
 }
@@ -100,6 +110,7 @@ func syntheticOfficialProfile(t *testing.T) string {
 func TestMissingLaunchAndDataDirOnlyUseDefaultConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("GOJOPLIN_CONFIG_PATH", "")
 	t.Setenv("GOJOPLIN_DATA_DIR", "")
 	configDir := filepath.Join(home, ".config", "go-joplin")

@@ -47,11 +47,19 @@ func resolveLaunch(path, cfgPath, dataDir, addr string, explicit ...bool) (launc
 		if cfgPath == "" {
 			cfgPath = os.Getenv("GOJOPLIN_CONFIG_PATH")
 		}
+		if cfgPath == "" {
+			var err error
+			cfgPath, err = defaultDesktopConfig()
+			if err != nil {
+				return launchSettings{}, err
+			}
+		}
 		return launchSettings{Config: cfgPath, Profile: dataDir, Addr: addr}, nil
 	}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return launchSettings{}, nil // Preserve the ordinary config-loader defaults.
+		cfgPath, err := defaultDesktopConfig()
+		return launchSettings{Config: cfgPath}, err
 	}
 	if err != nil {
 		return launchSettings{}, fmt.Errorf("read native launch settings at %s: %w", path, err)

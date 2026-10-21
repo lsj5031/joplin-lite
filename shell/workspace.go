@@ -106,14 +106,16 @@ func (a *nativeApp) view(c *ui.Context) {
 	// The workspace fills the window height cleanly so the floating editor card
 	// reaches the bottom edge without a full-width footer bar cutting across.
 	body := height
-	if a.narrow {
+	if windowsChrome {
+		body -= a.windowsTitleBar(c, t)
+	} else if a.narrow {
 		body -= topBarHeight
 	}
 	if body < 0 {
 		body = 0
 	}
 
-	if a.narrow {
+	if a.narrow && !windowsChrome {
 		a.topBar(c, t)
 	}
 	if a.saveErr != "" {
@@ -131,7 +133,9 @@ func (a *nativeApp) view(c *ui.Context) {
 				a.paneSplitter(c, "rail", &a.railW, railWidth, railMinWidth, railMaxWidth, true)
 			}
 			ui.Column(c).Width(a.listW).Shrink(0).Children(func() {
-				a.topBar(c, t)
+				if !windowsChrome {
+					a.topBar(c, t)
+				}
 				a.notesPane(c, t)
 			})
 			a.paneSplitter(c, "list", &a.listW, listWidth, listMinWidth, listMaxWidth, false)
@@ -311,8 +315,7 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 	}
 	var focused bool
 	box := ui.Box(c).Height(34).Grow(1).MaxWidth(420).Background(fill).
-		Material(glass.Glass{Style: glass.Regular, Tint: fill}).
-		Radius(12)
+		Material(glass.Glass{Style: glass.Regular, Tint: fill}).Radius(12)
 	box.Children(func() {
 		ui.Row(c).Fill().AlignItems(ui.Center).Gap(8).Padding(0, 10).Children(func() {
 			ui.Icon(c, iconSearch).Size(14, 14).TextColor(navyText).Shrink(0)
@@ -473,6 +476,9 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 	if bar.Height > headerH {
 		headerH = bar.Height
 	}
+	if windowsChrome {
+		headerH = 36
+	}
 	leftPad := float32(14)
 	if !a.narrow && bar.Left > 0 {
 		leftPad = max(14, bar.Left+6)
@@ -480,7 +486,9 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 	pane.Children(func() {
 		if !a.narrow {
 			ui.Row(c).Height(headerH).Padding(0, 10, 0, leftPad).AlignItems(ui.Center).DragWindow().Children(func() {
-				if bar.Left == 0 {
+				if windowsChrome {
+					ui.Text(c, "Notebooks").FontSize(sizeUI).Bold().TextColor(inkNavy)
+				} else if bar.Left == 0 {
 					mark(c)
 					ui.Spacer(c).Width(6)
 					ui.Text(c, "joplin-lite").Font(fontHeading).FontSize(18).TextColor(inkNavy)
@@ -950,7 +958,7 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 						{At: 0, Value: 0},
 						{At: 220 * time.Millisecond, Value: 1, Ease: ui.EaseOut},
 					}, ui.KeyframeOptions{Run: a.loadMoreRun})
-					badge.Opacity(0.2 + 0.8*appear).Translate(0, (1-appear)*4)
+					badge.Opacity(0.2+0.8*appear).Translate(0, (1-appear)*4)
 				}
 			}
 		})

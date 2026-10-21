@@ -25,9 +25,10 @@ Grab the latest package for your computer from the **[Releases page](https://git
 | Platform | Package | How to run |
 | --- | --- | --- |
 | **macOS** (Apple silicon) | `Joplin-Lite-0.1.0-alpha.3-macos-arm64.zip` | Unzip and drag **Joplin Lite.app** to **Applications** |
-| **Windows** (64-bit, portable) | `Joplin-Lite-0.1.0-alpha.3-windows-amd64.zip` | Extract the whole folder and run **gojoplin-desktop.exe** |
+| **Windows** (64-bit, portable) | `Joplin-Lite-0.1.0-alpha.3-windows-amd64.zip` | Extract the whole folder and run **Joplin Lite.exe** |
 
 * **First launch:** The macOS app is ad-hoc signed (not notarized) and the Windows executable is not publisher-signed, so your OS may ask you to confirm opening it the first time.
+* **Default profile:** On Windows, without an explicit config, remembered launch selection, `GOJOPLIN_CONFIG_PATH`, or an existing `~/.config/go-joplin/config.yaml`, the app creates its own empty `{}` config at `%AppData%\joplin-lite\config.json`. Select official Joplin's `settings.json` explicitly with `-config` when needed. macOS retains its existing defaults: go-joplin YAML first, then official Joplin settings. Notes still default to `~/.local/share/gojoplin`; existing explicit, environment and remembered selections still apply.
 * **Updating:** There is no background auto-updater. To update, quit Joplin Lite and replace the app or folder—your notes and settings live separately in your user profile directory.
 
 ### 2. Try it safely in a local sandbox (no sync required)
@@ -43,7 +44,7 @@ Want to explore the interface before connecting your real notes? Launch Joplin L
 **Windows (PowerShell, inside the extracted folder):**
 
 ```powershell
-.\gojoplin-desktop.exe -no-sync -data-dir "$env:LOCALAPPDATA\JoplinLite\try-notes"
+& ".\Joplin Lite.exe" -no-sync -data-dir "$env:LOCALAPPDATA\JoplinLite\try-notes"
 ```
 
 Keep those same flags whenever you want to reopen your trial notebook collection. *(If the local Clipper API port is already taken by another app, pass `-addr 127.0.0.1:41984`.)*
@@ -135,7 +136,7 @@ Requires **Go 1.27+** (`go1.27.1` is pinned and fetched automatically via `GOTOO
 ```sh
 git clone https://github.com/lsj5031/joplin-lite.git
 cd joplin-lite
-bash shell/build.sh          # builds tmp/gojoplin-desktop.exe
+bash shell/build.sh          # builds tmp/Joplin Lite.exe
 bash shell/bundle.sh         # macOS: packages tmp/Joplin Lite.app
 go test ./...
 (cd shell && go test ./...)

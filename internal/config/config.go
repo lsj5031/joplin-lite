@@ -163,6 +163,9 @@ type Overrides struct {
 	MasterPassword string
 	// NoSync disables the sync engine for this run (local-only serve).
 	NoSync bool
+	// AllowLocal accepts target 0 without forcing NoSync, so native settings
+	// can enable a saved sync target after the config file has been loaded.
+	AllowLocal bool
 }
 
 // Load reads the config file and returns a Config.
@@ -212,8 +215,10 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 		o = overrides[0]
 	}
 	applyOverridesAndEnv(cfg, o)
-	if err := validateConfig(cfg); err != nil {
-		return nil, err
+	if !o.AllowLocal || cfg.SyncTarget != 0 {
+		if err := validateConfig(cfg); err != nil {
+			return nil, err
+		}
 	}
 	applyRuntimeDefaults(cfg)
 	return cfg, nil

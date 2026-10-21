@@ -34,6 +34,23 @@ Browser stacks also allow Avenir/Candara before bundled Overpass and system fall
 
 ## Workspace
 
+### Windows
+
+Windows keeps the README's Field Notes light/dark palettes: sage navigation,
+warm paper, forest-green accents, and the bundled humanist reading families.
+Controls and window chrome use the system UI font. On supported Windows 11
+systems, Mica sits beneath the theme wash while the editor stays opaque for
+ClearType text rendering.
+
+Use one integrated 48 DIP toolbar, following the
+[Kero chrome pattern](https://github.com/egoist/kero/blob/main/platform.go).
+MyGO owns the caption buttons; reserve their reported title-bar insets, keep
+drag space around interactive controls, and expose menus through Alt or F10
+instead of a permanent menu row. Older Windows versions use an opaque Field Notes
+background. The shared MyGO glass effects remain on search, toolbar controls,
+hover states, selections, and transient surfaces on every platform.
+The integrated Windows chrome changes the window structure, not the product theme.
+
 Desktop has two panes by default: a 300px sage navigation/list column and a flexible paper
 editor. Brand, search, and primary actions live above the list. Notes retain a clear selected
 state and readable excerpts. The reading measure is capped at 700px with generous margins.

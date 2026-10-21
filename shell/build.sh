@@ -18,4 +18,4 @@ if [ "$(go env GOOS)" = "windows" ]; then
 fi
 
 CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.1}" go build -trimpath \
-  -ldflags="$LDFLAGS" -o "${OUT:-../tmp/gojoplin-desktop.exe}" .
+  -ldflags="$LDFLAGS" -o "${OUT:-../tmp/Joplin Lite.exe}" .

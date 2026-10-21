@@ -101,7 +101,7 @@ The row must have the plaintext body and `encryption_applied = 0`.
 1. Start the desktop app against the test config (no `-no-sync`):
 
    ```sh
-   ./tmp/gojoplin-desktop.exe -config tmp/e2ee-test.yaml
+   "./tmp/Joplin Lite.exe" -config tmp/e2ee-test.yaml
    ```
 
 2. Edit the test note and save it.

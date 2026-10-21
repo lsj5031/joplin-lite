@@ -219,7 +219,7 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string, lau
 	}
 	// Official settings.json omits secure credentials and the public app key.
 	// Defer remote validation until the explicit recovery below supplies them.
-	cfg, err := config.Load(cfgPath, config.Overrides{NoSync: noSync || launch.ReuseOfficialKeychain})
+	cfg, err := config.Load(cfgPath, config.Overrides{NoSync: noSync || launch.ReuseOfficialKeychain, AllowLocal: windowsChrome})
 	if err != nil {
 		return nil, err
 	}

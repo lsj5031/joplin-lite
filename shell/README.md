@@ -12,13 +12,14 @@ Requirements: Go 1.27+ (the module pins `go1.27.1`; `GOTOOLCHAIN=auto` fetches
 it). No frontend toolchain is needed for the app.
 
 ```sh
-bash shell/build.sh              # -> tmp/gojoplin-desktop.exe
+bash shell/build.sh              # -> tmp/Joplin Lite.exe
 ```
 
 The script only runs `go build` with `-trimpath` and `-s -w`, plus
 `-H=windowsgui` when the target is Windows so double-clicking the executable
 does not open a console window. There is no `npm` step and nothing is staged
-for `go:embed`.
+for `go:embed`. `OUT` overrides the build output path; relative paths are
+resolved from `shell/`. Packaging scripts use that same output path.
 
 ### macOS app bundle
 
@@ -37,7 +38,7 @@ The bundle is the package and supplies the icon; the Go code no longer calls
 bash shell/package-windows.sh   # -> tmp/Joplin-Lite-0.1.0-windows-amd64.zip
 ```
 
-The zip holds `gojoplin-desktop.exe` (GUI subsystem: double-clicking opens no
+The zip holds `Joplin Lite.exe` (GUI subsystem: double-clicking opens no
 console), `LICENSE`, `NOTICE`, `OFL.txt` and a short `README.txt`. The executable's icon
 and version block come from `shell/rsrc_windows_amd64.syso`, which `go build`
 embeds automatically; the icon is the same 512 px artwork the web preview and
@@ -54,15 +55,26 @@ would override that and blur the window on a scaled display.
 
 The zip is the intended Windows package: the app is portable by decision, with
 no installer, no registry entries and no uninstaller. Nothing is written next
-to the executable — the vault lives in `%USERPROFILE%\.local\share\gojoplin`
-and the settings come from `%USERPROFILE%\.config\joplin-desktop\settings.json`
-or `-config`.
+to the executable — the vault lives in `%USERPROFILE%\.local\share\gojoplin`.
+Without an explicit config, remembered launch selection, `GOJOPLIN_CONFIG_PATH`,
+or an existing `~/.config/go-joplin/config.yaml`, the app creates its own
+empty `{}` config at `os.UserConfigDir()/joplin-lite/config.json`
+(`%AppData%\joplin-lite\config.json` on Windows). Official Joplin's
+`settings.json` is selected only explicitly with `-config` or a remembered
+launch selection; it is no longer imported implicitly.
 
 ## Run
 
+macOS retains its existing configuration defaults: an existing
+`~/.config/go-joplin/config.yaml`, otherwise official Joplin's
+`~/.config/joplin-desktop/settings.json`. Explicit config, environment and
+remembered launch selections keep their previous precedence.
+
 ```sh
-./tmp/gojoplin-desktop.exe -config tmp/try-config.yaml -no-sync
+"./tmp/Joplin Lite.exe" -config tmp/try-config.yaml -no-sync
 ```
+
+In PowerShell, use `& ".\tmp\Joplin Lite.exe" -config tmp/try-config.yaml -no-sync`.
 
 The app logs to `<data dir>/desktop.log` (the data dir is
 `%USERPROFILE%\.local\share\gojoplin` by default) as well as to stderr, and
@@ -87,8 +99,10 @@ Finder launches read `joplin-lite/launch.json` inside Go's `os.UserConfigDir()`:
 `$XDG_CONFIG_HOME/joplin-lite/launch.json` (or `~/.config/joplin-lite/launch.json`)
 on Linux, and `%AppData%\joplin-lite\launch.json` on Windows. Create this file
 explicitly; the app never grants official credential reuse automatically.
-Without this file, prior startup behavior remains: Go Joplin YAML if present,
-otherwise Joplin's settings.json, with the usual Lite data directory default.
+Without this file, explicit config and environment selections still apply,
+then existing Go Joplin YAML if present, otherwise Lite's own empty JSON
+config, with the usual Lite data directory default. Official Joplin's
+settings.json is not imported implicitly.
 A malformed or unreadable existing launch file fails startup when selected.
 The file is one JSON object
 with exactly these supported fields (paths must be absolute; `~` is not expanded):

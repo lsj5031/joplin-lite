@@ -175,6 +175,9 @@ func registerFonts() {
 	if err := ui.RegisterFont(overpassMonoTTF, fontMono); err != nil {
 		slog.Warn("cannot register Overpass Mono; falling back to the system font", "error", err)
 	}
+	if windowsChrome {
+		return
+	}
 	// Use installed fonts without redistributing Apple's font files. Other
 	// platforms retain the bundled family rather than relying on a silent fallback.
 	for _, family := range ui.FontFamilies() {
@@ -220,6 +223,9 @@ func designTheme() *ui.Theme {
 	t.Radius = radiusControl
 	t.Spacing = 4
 	t.FontSize = sizeUI
+	if windowsChrome {
+		t.FontSize = 14
+	}
 	t.Font = fontUI
 	return t
 }
@@ -473,6 +479,9 @@ func elevateCard(p ui.Element) ui.Element {
 	if darkPalette {
 		fill = paperRaised.Alpha(0.90)
 	}
+	if windowsChrome {
+		fill = paperRaised
+	}
 	p = p.Background(fill).Radius(radiusCard).Clip()
 	if darkPalette {
 		return p.Border(1, hairline).
@@ -545,14 +554,14 @@ func chosenPill(row ui.Element, chosen, hovered bool) ui.Element {
 // high-contrast accent fill and bold text so the active option stands out clearly.
 func segmentedControl(c *ui.Context, groupLabel string, selected *int, labels ...string) bool {
 	changed := false
-	track := ui.Row(c.Key("seg-track:" + groupLabel)).FillWidth().AlignItems(ui.Stretch).
-		Padding(3).Gap(4).Radius(radiusControl + 2).
+	track := ui.Row(c.Key("seg-track:"+groupLabel)).FillWidth().AlignItems(ui.Stretch).
+		Padding(3).Gap(4).Radius(radiusControl+2).
 		Background(paperSunken).Border(1, hairline).Label(groupLabel)
 	track.Children(func() {
 		for i, text := range labels {
 			i, text := i, text
 			active := selected != nil && i == *selected
-			seg := ui.ButtonBase(c.Key("seg:" + groupLabel + ":" + text)).
+			seg := ui.ButtonBase(c.Key("seg:"+groupLabel+":"+text)).
 				Label(text).
 				Grow(1).
 				Justify(ui.Center).
