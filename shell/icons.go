@@ -20,8 +20,6 @@ var (
 
 	iconChevronLeft = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9.75 3.75 5.5 8 9.75 12.25"/></svg>`))
 
-	iconChevronRight = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6.25 3.75 10.5 8 6.25 12.25"/></svg>`))
-
 	iconSort = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v9M5 3.5L2.75 5.75M5 3.5l2.25 2.25"/><path d="M11 12.5v-9M11 12.5l-2.25-2.25M11 12.5l2.25-2.25"/></svg>`))
 
 	iconBookmark = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.75h8a1 1 0 0 1 1 1v9.75l-5-3-5 3V3.75a1 1 0 0 1 1-1z"/></svg>`))
@@ -45,6 +43,4 @@ var (
 	iconCheck = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.25 8.25 6.5 11.5 12.75 4.75"/></svg>`))
 
 	iconAlert = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M7.13 2.75a1 1 0 0 1 1.74 0l5.18 9a1 1 0 0 1-.87 1.5H2.82a1 1 0 0 1-.87-1.5z"/><line x1="8" y1="6.5" x2="8" y2="9.25"/><circle cx="8" cy="11.35" r="0.6" fill="currentColor"/></svg>`))
-
-	iconCommand = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 5.5V4a1.75 1.75 0 1 0-1.75 1.75H5.5zm0 0h5m-5 0v5m5-5V4a1.75 1.75 0 1 1 1.75 1.75H10.5zm0 0v5m0 0h1.75A1.75 1.75 0 1 1 10.5 12v-1.5zm0 0h-5m0 0V12a1.75 1.75 0 1 1-1.75-1.75H5.5z"/></svg>`))
 )

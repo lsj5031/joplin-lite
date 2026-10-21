@@ -123,6 +123,12 @@ func recoverOfficialCredentials(cfg *config.Config, keychain func() ([]byte, err
 		return errors.New("official credential reuse requires the explicitly configured Dropbox target")
 	}
 	path := filepath.Join(cfg.DataDir, "database.sqlite")
+	// A file URL needs forward slashes and a leading slash before a Windows
+	// drive letter; otherwise SQLite receives an encoded backslash path.
+	path = filepath.ToSlash(path)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {

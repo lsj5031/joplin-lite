@@ -436,7 +436,7 @@ func (b *backend) Settings() desktopSettings {
 		return desktopSettings{}
 	}
 	if b.cfg == nil {
-		return desktopSettings{APIToken: b.token, Dark: loadDarkSetting(b.db)}
+		return desktopSettings{APIToken: b.token, Dark: loadDarkSetting(b.db), Backdrop: loadBackdropSetting(b.db)}
 	}
 	b.syncMu.Lock()
 	cfg := *b.cfg
@@ -447,6 +447,7 @@ func (b *backend) Settings() desktopSettings {
 	b.syncMu.Unlock()
 	s := settingsFromConfig(&cfg)
 	s.Dark = loadDarkSetting(b.db)
+	s.Backdrop = loadBackdropSetting(b.db)
 	return s
 }
 

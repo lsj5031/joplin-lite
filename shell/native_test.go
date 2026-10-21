@@ -1750,6 +1750,49 @@ func TestNativeResourcePreview(t *testing.T) {
 	}
 }
 
+func TestNativeAttachmentLinkOpensNamedCopy(t *testing.T) {
+	registerFonts()
+	app, db := openNativeTestApp(t)
+	id := "dddddddddddddddddddddddddddddddd"
+	pdf := []byte("%PDF-1.4\n% synthetic")
+	if err := db.CreateResource(&models.Resource{ID: id, Title: "Field guide.pdf", Mime: "application/pdf", FileExtension: "pdf"}); err != nil {
+		t.Fatalf("CreateResource: %v", err)
+	}
+	if err := db.SaveResourceFile(id, pdf); err != nil {
+		t.Fatalf("SaveResourceFile: %v", err)
+	}
+	note := addTestNote(t, app.svc, "", "Reading list", "[Field guide](:/"+id+")")
+	app.reloadNotes()
+	app.showNote(note.ID)
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	tt.Frame()
+	r, ok := tt.Find("Field guide")
+	if !ok {
+		t.Fatal("preview did not show the attachment link")
+	}
+	tt.ClickAt(r.X+20, r.Y+r.H/2)
+	tt.Frame()
+	opened := tt.OpenedURLs()
+	if len(opened) != 1 {
+		t.Fatalf("opened URLs = %q, want the attachment once", opened)
+	}
+	if !strings.HasSuffix(opened[0], "/Field%20guide.pdf") {
+		t.Fatalf("opened %q, want a file URL with the original .pdf name", opened[0])
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatalf("UserCacheDir: %v", err)
+	}
+	copied, err := os.ReadFile(filepath.Join(cache, "joplin-lite", "attachments", id, "Field guide.pdf"))
+	if err != nil {
+		t.Fatalf("read opened copy: %v", err)
+	}
+	if !bytes.Equal(copied, pdf) {
+		t.Fatalf("opened copy = %q, want %q", copied, pdf)
+	}
+}
+
 func TestNativePopoverFiltersAndConflictCount(t *testing.T) {
 	registerFonts()
 	app, db := openNativeTestApp(t)
@@ -1902,7 +1945,7 @@ func TestNativeDarkAppearanceSetting(t *testing.T) {
 	registerFonts()
 	app, db := openNativeTestApp(t)
 	app.loadSettings = func() desktopSettings {
-		return desktopSettings{Target: targetOff, APIToken: "test-token", Dark: loadDarkSetting(db)}
+		return desktopSettings{Target: targetOff, APIToken: "test-token", Dark: loadDarkSetting(db), Backdrop: loadBackdropSetting(db)}
 	}
 	app.applySettings = func(s desktopSettings) error {
 		if err := s.validate(); err != nil {
@@ -1934,6 +1977,24 @@ func TestNativeDarkAppearanceSetting(t *testing.T) {
 		t.Fatal("cancelling settings should restore previous appearance")
 	}
 
+	// Preview Mist, then Cancel -> restores the previous backdrop.
+	app.openSettings()
+	tt.Frame()
+	if err := tt.Click("Mist"); err != nil {
+		t.Fatalf("click Mist segment: %v", err)
+	}
+	tt.Frame()
+	if activeWash != "mist" {
+		t.Fatalf("clicking Mist should preview it immediately, got %q", activeWash)
+	}
+	if err := tt.Click("Cancel settings"); err != nil {
+		t.Fatalf("click Cancel settings: %v", err)
+	}
+	tt.Frame()
+	if activeWash != "sage" {
+		t.Fatalf("cancelling settings should restore the previous backdrop, got %q", activeWash)
+	}
+
 	// Reopen Settings, choose Dark, Save -> persists in key_values.
 	app.openSettings()
 	tt.Frame()
@@ -1950,8 +2011,28 @@ func TestNativeDarkAppearanceSetting(t *testing.T) {
 	if fresh := newNativeApp(db); !fresh.dark {
 		t.Fatal("fresh app did not load persisted dark setting")
 	}
-	// Reset global palette for subsequent tests.
+	if !app.dark || loadBackdropSetting(db) != "sage" {
+		t.Fatal("saving appearance changed the default backdrop")
+	}
+	// Reopen Settings, choose Mist, Save -> persists in key_values.
+	app.openSettings()
+	tt.Frame()
+	if err := tt.Click("Mist"); err != nil {
+		t.Fatalf("click Mist segment: %v", err)
+	}
+	if err := tt.Click("Save settings"); err != nil {
+		t.Fatalf("click Save settings: %v", err)
+	}
+	tt.Frame()
+	if activeWash != "mist" || loadBackdropSetting(db) != "mist" {
+		t.Fatalf("saving Mist did not persist: active=%q stored=%q", activeWash, loadBackdropSetting(db))
+	}
+	if fresh := newNativeApp(db); activeWash != "mist" || !fresh.dark {
+		t.Fatalf("fresh app did not load the saved backdrop: %q", activeWash)
+	}
+	// Reset global palette and backdrop for subsequent tests.
 	applyPalette(false)
+	activeWash = "sage"
 }
 
 func TestNativeEditorAttachAndPaste(t *testing.T) {
@@ -2061,6 +2142,15 @@ func TestNativeContextMenusInlineRenameAndPalette(t *testing.T) {
 		t.Fatalf("expected notebook to be renamed to Field Work; texts = %v", tt.Texts())
 	}
 
+	// F2 renames the chosen sidebar item without a double click.
+	tt.Key(0, ui.KeyF2)
+	tt.Frame()
+	if _, ok := tt.Find("Inline rename"); !ok {
+		t.Fatal("expected F2 to start inline rename for the chosen notebook")
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+
 	// Test right-click context menu on a note row to move it to Archive.
 	if err := tt.RightClick("Alpha plan"); err != nil {
 		t.Fatalf("RightClick Alpha plan: %v", err)
@@ -2076,6 +2166,12 @@ func TestNativeContextMenusInlineRenameAndPalette(t *testing.T) {
 		t.Fatalf("expected Alpha plan to move to Archive (%s), got %#v (err %v)", archive.ID, moved, err)
 	}
 
+	// A list search that hides the chosen note must not keep the palette from
+	// opening it: the filter is cleared with the switch.
+	app.query = "nothing matches this"
+	app.reloadNotes()
+	tt.Frame()
+
 	// Test Command & Note Palette (Cmd+P) to jump to Beta launch and run a command.
 	tt.Key(ui.Cmd, ui.KeyP)
 	tt.Frame()
@@ -2088,14 +2184,17 @@ func TestNativeContextMenusInlineRenameAndPalette(t *testing.T) {
 	if app.note == nil || app.note.ID != alpha.ID {
 		t.Fatalf("expected palette to switch to Alpha plan (%s), got %#v", alpha.ID, app.note)
 	}
+	if app.query != "" || app.selectedTag != "" {
+		t.Fatalf("palette kept incompatible filters: query=%q tag=%q", app.query, app.selectedTag)
+	}
 
 	// Click the ⌘K / Command palette badge to run Toggle Dark Mode.
 	click(t, tt, "Command palette")
 	tt.Type("Toggle Dark Mode")
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
-	if !app.dark {
-		t.Fatal("expected Toggle Dark Mode command in palette to enable dark mode")
+	if !app.dark || !app.savedDark || !loadDarkSetting(db) {
+		t.Fatal("expected Toggle Dark Mode in the palette to persist the appearance")
 	}
 	_ = beta
 }

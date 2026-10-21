@@ -208,6 +208,7 @@ func (p *promoTour) end() {
 // TestCapturePromo renders the tour.
 func TestCapturePromo(t *testing.T) {
 	root := captureDir(t)
+	forceMacChrome(t)
 	frames := filepath.Join(root, "frames")
 	if err := os.RemoveAll(frames); err != nil {
 		t.Fatalf("clear promo frames: %v", err)

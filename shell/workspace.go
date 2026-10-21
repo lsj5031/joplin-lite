@@ -37,6 +37,10 @@ func (a *nativeApp) view(c *ui.Context) {
 	// DESIGN.md's palette and type scale, applied to every widget.
 	applyPalette(a.dark)
 	c.SetTheme(designTheme())
+	if a.pendingOpen != "" {
+		c.OpenURL(a.pendingOpen)
+		a.pendingOpen = ""
+	}
 	t := c.Theme()
 
 	if c.Shortcut(ui.Cmd, ui.KeyN) {
@@ -66,6 +70,9 @@ func (a *nativeApp) view(c *ui.Context) {
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyE) {
 		a.toggleEdit()
+	}
+	if c.Shortcut(0, ui.KeyF2) || (runtime.GOOS == "darwin" && c.Shortcut(0, ui.KeyEnter)) {
+		a.renameSelectedRail()
 	}
 	a.historyShortcuts(c)
 	a.tick()
@@ -288,12 +295,6 @@ func chromeButton(c *ui.Context, label string) ui.Element {
 	})
 }
 
-// chromeGlyph is an icon-sized label on the chrome, never below the 24px its
-// row leaves it.
-func chromeGlyph(c *ui.Context, glyph string, size float32) ui.Element {
-	return ui.Text(c, glyph).FontSize(size).TextColor(navyText).MinWidth(size)
-}
-
 // searchField is the compact Liquid Glass search input, themed so its
 // placeholder, caret, selection, and Kero-style focus glow read on the gradient
 // backdrop, with the mono kbd hint at its end.
@@ -348,6 +349,7 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 						if next != a.selectedNote {
 							a.selectedNote = next
 							a.loadNote()
+							a.list.ScrollIntoView(next)
 							a.focusBody = false
 						}
 					} else if c.Shortcut(0, ui.KeyUp) {
@@ -355,6 +357,7 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 						if prev != a.selectedNote {
 							a.selectedNote = prev
 							a.loadNote()
+							a.list.ScrollIntoView(prev)
 							a.focusBody = false
 						}
 					}
@@ -632,23 +635,27 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 				a.newNote()
 			}
 			if m.Item("New sub-notebook…").Chosen() {
-				a.selectedTag, a.selectedNotebook = "", id
+				a.selectedTag, a.selectedNotebook, a.selectedID = "", id, ""
+				a.reloadNotes()
 				a.openNewNotebook()
 			}
 			if m.Item("Rename notebook…").Chosen() {
-				a.selectedTag, a.selectedNotebook = "", id
+				a.selectedTag, a.selectedNotebook, a.selectedID = "", id, ""
+				a.reloadNotes()
 				a.openRenameNotebook()
 			}
 			m.Separator()
 			if m.Item("Delete notebook…").Chosen() {
-				a.selectedTag, a.selectedNotebook = "", id
+				a.selectedTag, a.selectedNotebook, a.selectedID = "", id, ""
+				a.reloadNotes()
 				a.confirmDeleteNotebook = true
 			}
 		})
 	} else if isTag && tagID != "" {
 		row.ContextMenu(func(m *ui.Menu) {
 			if m.Item("Rename tag…").Chosen() {
-				a.selectedNotebook, a.selectedTag = "", tagID
+				a.selectedNotebook, a.selectedTag, a.selectedID = "", tagID, ""
+				a.reloadNotes()
 				a.openRenameTag()
 			}
 			if a.selectedTag == tagID {
@@ -659,7 +666,8 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 			}
 			m.Separator()
 			if m.Item("Delete tag…").Chosen() {
-				a.selectedNotebook, a.selectedTag = "", tagID
+				a.selectedNotebook, a.selectedTag, a.selectedID = "", tagID, ""
+				a.reloadNotes()
 				a.confirmDeleteTag = true
 			}
 		})
@@ -903,7 +911,7 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 	dragIDs := a.selectedIDs()
 	var postListAction func()
 	if a.hasPendingScroll {
-		a.list.ScrollTo(a.pendingScrollRow, a.pendingScrollAlign)
+		a.list.ScrollTo(a.pendingScrollRow, ui.Start)
 		a.hasPendingScroll = false
 	}
 	// The list chooses rows with the theme's accent, so it is built under the
@@ -1080,12 +1088,19 @@ func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string,
 		if n.IsConflict != 0 {
 			ui.Text(c, "!").FontSize(sizeSmall).Bold().TextColor(signalRed).Label("Conflict").Shrink(0)
 		}
-		name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
-		if current || bulk {
-			name.FontWeight(600).TextColor(inkNavy)
-		} else {
-			name.TextColor(inkNavy.Alpha(0.86))
-		}
+		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+			name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine()
+			if current || bulk {
+				name.FontWeight(600).TextColor(inkNavy)
+			} else {
+				name.TextColor(inkNavy.Alpha(0.86))
+			}
+			preview := excerpt(n.Excerpt)
+			if preview == "" {
+				preview = "Empty note"
+			}
+			ui.Text(c, preview).FontSize(sizeLabel).LineHeight(1.25).TextColor(inkSoft).SingleLine()
+		})
 	})
 }
 
@@ -1200,6 +1215,10 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 							return
 						}
 						a.md.Theme = &markdown.Theme{Font: fontSans, FontSize: sizeBody, LineHeight: 1.9, CodeFont: fontMono}
+						a.md.OnLink = nil
+						if strings.Contains(a.body, "](:/") {
+							a.md.OnLink = a.openLink
+						}
 						markdown.View(c, a.body, a.md)
 					})
 				})
@@ -1210,8 +1229,8 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// editorHeader is the note's quiet 2-row chrome: a compact top context/action
-// bar and the borderless Optima title directly above the note body.
+// editorHeader separates context labels from actions so long notebook and tag
+// names cannot hide controls, with the title directly above the note body.
 func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Shrink(0).Children(func() {
 		if a.note == nil {
@@ -1228,8 +1247,9 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 			return
 		}
 
-		// Row 1: Quiet interactive context breadcrumb on the left, compact icon actions on the right.
-		ui.Row(c).Padding(12, 24, 4, 44).Gap(6).AlignItems(ui.Center).Children(func() {
+		// Context controls shrink independently of the separate action row.
+		var move, tags ui.Element
+		ui.Row(c).Padding(12, 24, 4, 24).Gap(6).AlignItems(ui.Center).Children(func() {
 			if a.narrow {
 				if iconButton(c, "narrow-back-notes", iconChevronLeft, "Back to notes", "Back to the note list").Clicked() {
 					a.flush()
@@ -1241,12 +1261,11 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 			if nb := a.notebookByID(a.note.ParentID); nb != nil {
 				nbName = clip(nb.Title, 22)
 			}
-			move := toolbarIconButton(c, "hdr-move", iconFolder, nbName, "Move note", "Move to another notebook")
+			move = toolbarIconButton(c, "hdr-move", iconFolder, nbName, "Move note", "Move to another notebook").Grow(1).Shrink(1).MinWidth(0)
 			if move.Clicked() {
 				a.moveFilter = ""
 				a.moveOpen = !a.moveOpen
 			}
-			a.menu(c, move, &a.moveOpen, "move", 240, func() { a.moveMenu(c, t) })
 
 			tagLabel := "Tags"
 			if len(a.noteTags) == 1 {
@@ -1256,13 +1275,13 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 			} else if len(a.noteTags) > 2 {
 				tagLabel = fmt.Sprintf("%s +%d", clip(a.noteTags[0].Title, 14), len(a.noteTags)-1)
 			}
-			tags := toolbarIconButton(c, "hdr-tags", iconTag, tagLabel, "Note tags", "Tags on this note")
+			tags = toolbarIconButton(c, "hdr-tags", iconTag, tagLabel, "Note tags", "Tags on this note").Grow(1).Shrink(1).MinWidth(0)
 			if tags.Clicked() {
 				a.tagFilter = ""
 				a.tagMenuOpen = !a.tagMenuOpen
 			}
-			a.menu(c, tags, &a.tagMenuOpen, "note-tags", 240, func() { a.tagMenu(c, t) })
-
+		})
+		ui.Row(c).Padding(0, 24, 4, 24).Gap(6).AlignItems(ui.Center).Children(func() {
 			words := len(strings.Fields(a.body))
 			metaText := fmt.Sprintf("%s  ·  %d words", time.UnixMilli(a.note.UpdatedTime).Format("02 Jan 2006 15:04"), words)
 			ui.Text(c, metaText).Font(fontMono).FontFeatures("tnum").FontSize(sizeMonoSm).
@@ -1346,24 +1365,10 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		}
+		// These actions may clear a.note. Build them after the last dereference.
+		a.menu(c, move, &a.moveOpen, "move", 240, func() { a.moveMenu(c, t) })
+		a.menu(c, tags, &a.tagMenuOpen, "note-tags", 240, func() { a.tagMenu(c, t) })
 	})
-}
-
-// noteMeta is the machine-made line under the title: the notebook, the updated
-// time and the size of the note, all in mono with tabular figures.
-func (a *nativeApp) noteMeta() string {
-	parts := []string{}
-	if a.note != nil {
-		if nb := a.notebookByID(a.note.ParentID); nb != nil {
-			parts = append(parts, nb.Title)
-		} else {
-			parts = append(parts, "Unfiled")
-		}
-		parts = append(parts, time.UnixMilli(a.note.UpdatedTime).Format("02 Jan 2006 15:04"))
-		words := len(strings.Fields(a.body))
-		parts = append(parts, fmt.Sprintf("%d words", words))
-	}
-	return strings.Join(parts, "  ·  ")
 }
 
 // emptyEditor is the editor with no note open.
@@ -1632,38 +1637,37 @@ func (a *nativeApp) commandPalette(c *ui.Context, t *ui.Theme) {
 			return q == "" || strings.Contains(strings.ToLower(text), q)
 		}
 
-		notes := a.notes
-		if page, err := a.svc.ListNoteSummaries(service.NoteFilter{Page: service.Page{Limit: 100}, Sort: a.sort}); err == nil && len(page.Notes) > 0 {
-			notes = page.Notes
-		}
-		for _, n := range notes {
-			n := n
-			title := noteRowTitle(n)
-			nbTitle := "Notes"
-			if nb := a.notebookByID(n.ParentID); nb != nil {
-				nbTitle = nb.Title
-			}
-			if match(title + " " + nbTitle + " " + n.Excerpt) {
-				entries = append(entries, paletteEntry{
-					key:      "note:" + n.ID,
-					title:    title,
-					subtitle: nbTitle,
-					icon:     iconNotes,
-					run: func() {
-						a.paletteOpen = false
-						if a.selectedNotebook != "" && a.selectedNotebook != n.ParentID {
-							a.selectedNotebook = n.ParentID
-							a.selectedID = n.ID
-							a.reloadNotes()
-						}
-						a.showNote(n.ID)
-						a.remember(n.ID)
-					},
-				})
-			}
-			if len(entries) >= 12 {
+		filter := service.NoteFilter{Page: service.Page{Limit: nativePageSize}, Sort: a.sort}
+		for {
+			page, err := a.svc.ListNoteSummaries(filter)
+			if err != nil {
+				a.saveErr = err.Error()
 				break
 			}
+			for _, n := range page.Notes {
+				n := n
+				title := noteRowTitle(n)
+				nbTitle := "Notes"
+				if nb := a.notebookByID(n.ParentID); nb != nil {
+					nbTitle = nb.Title
+				}
+				if match(title + " " + nbTitle + " " + n.Excerpt) {
+					entries = append(entries, paletteEntry{
+						key:      "note:" + n.ID,
+						title:    title,
+						subtitle: nbTitle,
+						icon:     iconNotes,
+						run:      func() { a.openPaletteNote(n) },
+					})
+				}
+				if len(entries) >= 12 {
+					break
+				}
+			}
+			if len(entries) >= 12 || !page.HasMore || page.NextCursor == "" {
+				break
+			}
+			filter.Cursor = page.NextCursor
 		}
 
 		mod := "⌘"
@@ -1693,7 +1697,10 @@ func (a *nativeApp) commandPalette(c *ui.Context, t *ui.Theme) {
 			},
 			{
 				key: "cmd:toggle-dark", title: "Toggle Dark Mode", subtitle: "Appearance", icon: iconEye,
-				run: func() { a.paletteOpen = false; a.dark = !a.dark },
+				run: func() {
+					a.paletteOpen = false
+					a.toggleDark()
+				},
 			},
 			{
 				key: "cmd:sync-now", title: "Sync Now", subtitle: "Sync", shortcut: mod + "R", icon: iconSync,

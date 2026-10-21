@@ -4,11 +4,21 @@
 
 ```sh
 # 1. Capture the native workspace tour at 30 fps (2x retina, 2560x1600).
-cd shell && CAPTURE_DIR=../tmp/promo go test -run TestCapturePromo .
+(cd shell && CAPTURE_DIR=../tmp/promo go test -run TestCapturePromo .)
 
-# 2. Compose the 1920x1080 film, poster, and review stills.
+# 2. Compose the 1920x1080 film and poster.
+node qa/promo/render.mjs
+
+# Optional: one review still per scene (no video encode).
 node qa/promo/render.mjs --stills
+
+# Check path handling without installing Chromium or ffmpeg.
+node --test qa/promo/render.test.mjs
 ```
+
+`PROMO_DIR` selects the captured frames and may point outside the checkout.
+`PROMO_OUT` selects the film output directory; `CHROME_PATH` and `FFMPEG`
+override the rendering executables.
 
 `shell/promo_test.go` drives the real `ui.Tester` through a continuous product tour—gliding the pointer with real hover states, opening the Liquid Glass notebooks & tags rail, creating and typing a Markdown note with live sidebar updates, toggling into typeset preview, opening the Command Palette (`⌘K · ⌘P`), and switching to the dark palette—writing numbered PNGs and cursor telemetry to `tmp/promo/`.
 

@@ -9,25 +9,20 @@
 // recording timing.
 import { createServer } from 'node:http'
 import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
-import { extname, join, normalize, resolve } from 'node:path'
+import { extname, join, normalize, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const ROOT = resolve(new URL('../..', import.meta.url).pathname)
+const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 
 async function loadChromium() {
-  for (const spec of [
-    'playwright-core',
-    join(ROOT, '.amp/in/harness/node_modules/playwright-core/index.mjs'),
-  ]) {
-    try {
-      const mod = await import(spec)
-      if (mod.chromium) return mod.chromium
-    } catch {}
-  }
-  throw new Error('playwright-core not found; install playwright-core or set NODE_PATH')
+  try {
+    const mod = await import('playwright-core')
+    if (mod.chromium) return mod.chromium
+  } catch {}
+  throw new Error('playwright-core not found; install it beside this script or set NODE_PATH')
 }
 
-const chromium = await loadChromium()
 const PROMO = process.env.PROMO_DIR ? resolve(process.env.PROMO_DIR) : join(ROOT, 'tmp/promo')
 const OUT = process.env.PROMO_OUT ? resolve(process.env.PROMO_OUT) : join(ROOT, 'docs/promo')
 const STILLS = join(PROMO, 'stills')
@@ -37,8 +32,15 @@ const FFMPEG = process.env.FFMPEG ?? (existsSync('/opt/homebrew/bin/ffmpeg') ? '
 const args = process.argv.slice(2)
 const W = 1920, H = 1080
 
-// The browser loads frames and fonts over the same server, by repo-relative path.
-const FRAME_PATH = PROMO.startsWith(ROOT) ? PROMO.slice(ROOT.length) : '/tmp/promo'
+// Captures may live outside the repository (tmp/, a scratch disk), so frames
+// are served under their own prefix instead of a path relative to ROOT.
+const FRAME_BASE = '/__promo'
+const FRAME_PREFIX = FRAME_BASE + '/'
+const FRAME_PATH = FRAME_BASE
+
+function within(root, path) {
+  return path === root || path.startsWith(root + sep)
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -49,11 +51,19 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 }
 
-function serve() {
+export function serve() {
   const server = createServer((req, res) => {
-    const url = decodeURIComponent((req.url || '/').split('?')[0])
-    const path = normalize(join(ROOT, url))
-    if (!path.startsWith(ROOT) || !existsSync(path) || !statSync(path).isFile()) {
+    let url
+    try {
+      url = decodeURIComponent((req.url || '/').split('?')[0])
+    } catch {
+      res.writeHead(400).end('invalid path')
+      return
+    }
+    const frames = url.startsWith(FRAME_PREFIX)
+    const root = frames ? PROMO : ROOT
+    const path = normalize(join(root, frames ? url.slice(FRAME_PREFIX.length) : url))
+    if (!within(root, path) || !existsSync(path) || !statSync(path).isFile()) {
       res.writeHead(404).end('not found')
       return
     }
@@ -153,21 +163,33 @@ async function renderPoster(browser) {
   return out
 }
 
-const server = await serve()
-const browser = await chromium.launch({ headless: true, executablePath: CHROME })
-try {
+let server
+async function main() {
+  const chromium = await loadChromium()
   if (existsSync(join(PROMO, 'promo.json'))) {
     console.log(`manifest: ${join(PROMO, 'promo.json')}`)
   } else {
     throw new Error(`no capture in ${PROMO}; run the capture test first`)
   }
-  mkdirSync(OUT, { recursive: true })
-  const out = await renderFilm(browser)
-  const { size } = statSync(out)
-  console.log(`film: ${(size / 1e6).toFixed(1)} MB`)
-  console.log(`poster: ${await renderPoster(browser)}`)
-  if (args.includes('--stills')) await renderStills(browser)
-} finally {
-  await browser.close()
-  server.close()
+  server = await serve()
+  let browser
+  try {
+    browser = await chromium.launch({ headless: true, executablePath: CHROME })
+    if (args.includes('--stills')) {
+      await renderStills(browser)
+    } else {
+      mkdirSync(OUT, { recursive: true })
+      const out = await renderFilm(browser)
+      const { size } = statSync(out)
+      console.log(`film: ${(size / 1e6).toFixed(1)} MB`)
+      console.log(`poster: ${await renderPoster(browser)}`)
+    }
+  } finally {
+    if (browser) await browser.close()
+    server.close()
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main()
 }

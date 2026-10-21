@@ -26,6 +26,7 @@ const (
 	settingMasterPassword = "desktop.e2ee.master_password"
 	settingAPIToken       = "desktop.api.token"
 	settingDark           = "desktop.dark"
+	settingBackdrop       = "desktop.backdrop"
 )
 
 // Sync targets the native dialog can configure. Dropbox (7) and S3 (8) need an
@@ -48,6 +49,7 @@ type desktopSettings struct {
 	MasterPassword string
 	APIToken       string
 	Dark           bool
+	Backdrop       string
 }
 
 // settingsFromConfig fills the dialog with the config that is actually in
@@ -73,6 +75,7 @@ func settingsFromConfig(cfg *config.Config) desktopSettings {
 // instead of silently disabling sync.
 func loadStoredSettings(db *store.DB) (desktopSettings, bool, error) {
 	var s desktopSettings
+	s.Backdrop = loadBackdropSetting(db)
 	raw, err := db.GetSetting(settingSyncTarget)
 	if err != nil {
 		return s, false, err
@@ -124,6 +127,19 @@ func saveDarkSetting(db *store.DB, dark bool) error {
 	return db.SetSetting(settingDark, val)
 }
 
+// loadBackdropSetting reads the backdrop preset, falling back to Sage when the
+// vault has none or holds a name this build does not know.
+func loadBackdropSetting(db *store.DB) string {
+	if db == nil {
+		return "sage"
+	}
+	v, err := db.GetSetting(settingBackdrop)
+	if err != nil {
+		return "sage"
+	}
+	return validWash(v)
+}
+
 // save writes every field, so the dialog is the single source of truth after
 // the first save and clearing a field really clears it.
 func (s desktopSettings) save(db *store.DB) error {
@@ -140,6 +156,7 @@ func (s desktopSettings) save(db *store.DB) error {
 		settingMasterPassword: s.MasterPassword,
 		settingAPIToken:       strings.TrimSpace(s.APIToken),
 		settingDark:           darkVal,
+		settingBackdrop:       validWash(s.Backdrop),
 	}
 	for key, value := range values {
 		if err := db.SetSetting(key, value); err != nil {

@@ -6,7 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const windowsChrome = runtime.GOOS == "windows"
+var windowsChrome = runtime.GOOS == "windows"
 
 // windowsTitleBar follows Kero's integrated, draggable chrome while retaining
 // the system caption buttons and the insets reported by MyGO.

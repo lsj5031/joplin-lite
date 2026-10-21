@@ -26,6 +26,7 @@ func TestDesktopSettingsRoundTrip(t *testing.T) {
 		Password:       "secret",
 		MasterPassword: "  spaced master  ",
 		APIToken:       "token-1",
+		Backdrop:       "mist",
 	}
 	if err := saved.save(db); err != nil {
 		t.Fatalf("save: %v", err)
@@ -51,6 +52,10 @@ func TestDesktopSettingsRoundTrip(t *testing.T) {
 	}
 	if got.Target != targetOff || got.ServerURL != "" || got.Password != "" || got.APIToken != "token-2" {
 		t.Fatalf("after clearing = %+v", got)
+	}
+	// An unset or unknown backdrop falls back to the default preset.
+	if got.Backdrop != "sage" {
+		t.Fatalf("default backdrop = %q, want sage", got.Backdrop)
 	}
 }
 

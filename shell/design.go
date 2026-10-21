@@ -114,7 +114,6 @@ func applyPalette(dark bool) {
 // Installed Humanist families with bundled Overpass fallbacks for reading and
 // brand headings, while chrome and controls use the native OS UI font.
 var (
-	fontUI      = ""
 	fontSans    = "Overpass"
 	fontHeading = "Overpass"
 )
@@ -135,23 +134,20 @@ const (
 
 // Two panes by default; notebook management opens on demand.
 const (
-	railWidth          = float32(260)
-	railMinWidth       = float32(200)
-	railMaxWidth       = float32(380)
-	listWidth          = float32(300)
-	listMinWidth       = float32(240)
-	listMaxWidth       = float32(460)
-	topBarHeight       = float32(56)
-	statusHeight       = float32(34)
-	narrowStatusHeight = float32(38)
-	narrowWidth        = float32(1024)
-	rowHeight          = float32(34)
-	contentPad         = float32(20)
-	cardGap            = float32(8)
-	radiusControl      = float32(6)
-	radiusSmall        = float32(4)
-	radiusPanel        = float32(9)
-	radiusCard         = float32(11)
+	railWidth     = float32(260)
+	railMinWidth  = float32(200)
+	railMaxWidth  = float32(380)
+	listWidth     = float32(300)
+	listMinWidth  = float32(240)
+	listMaxWidth  = float32(460)
+	topBarHeight  = float32(56)
+	narrowWidth   = float32(1024)
+	rowHeight     = float32(52)
+	cardGap       = float32(8)
+	radiusControl = float32(6)
+	radiusSmall   = float32(4)
+	radiusPanel   = float32(9)
+	radiusCard    = float32(11)
 )
 
 // Motion runs only in response to interaction and respects reduced motion.
@@ -226,7 +222,6 @@ func designTheme() *ui.Theme {
 	if windowsChrome {
 		t.FontSize = 14
 	}
-	t.Font = fontUI
 	return t
 }
 
@@ -303,45 +298,38 @@ func confirmDialog(c *ui.Context, theme func() *ui.Theme, open *bool, title, mes
 	return chosen
 }
 
-// toolbarButton keeps the toolbar chrome of a pane compact.
-func toolbarButton(c *ui.Context, label, tip string) ui.Element {
-	btn := ui.Button(c, label).Tooltip(tip)
-	btn.Padding(4, 8).MinWidth(26)
-	return btn
-}
-
-// washSpec defines a Kero-style multi-stop Oklab gradient wash and its corner glow.
-type washSpec struct {
+// washOptions owns both the ordered picker entries and their gradient colors.
+var washOptions = []struct {
+	id        string
+	label     string
 	light     []string
 	lightGlow ui.Color
 	dark      []string
 	darkGlow  ui.Color
-}
-
-// washTable holds Oklab backdrop washes. The default "sage" wash harmonizes
-// with Field Notes' botanical sage mark, forest-green ink, and warm cream
-// paper, transitioning from misty sage-eucalyptus at the top through soft
-// celadon and herbal linen into warm sunlit parchment at the bottom.
-var washTable = map[string]washSpec{
-	"sage": {
+}{
+	{
+		id: "sage", label: "Sage",
 		light:     []string{"#d7e6d8", "#e3ede0", "#efefe2", "#f5efd6"},
 		lightGlow: ui.RGBA(206, 228, 204, 0.80),
 		dark:      []string{"#141d16", "#19221a", "#1f221a"},
 		darkGlow:  ui.RGBA(86, 122, 82, 0.28),
 	},
-	"linen": {
+	{
+		id: "linen", label: "Linen",
 		light:     []string{"#e5e2d7", "#edeae0", "#f4f1e6", "#f8f4e3"},
 		lightGlow: ui.RGBA(238, 232, 214, 0.80),
 		dark:      []string{"#191b17", "#1d1f1a", "#22211b"},
 		darkGlow:  ui.RGBA(115, 112, 92, 0.24),
 	},
-	"mist": {
+	{
+		id: "mist", label: "Mist",
 		light:     []string{"#d4e5e3", "#e2eeeb", "#efefe5", "#f5efe0"},
 		lightGlow: ui.RGBA(204, 232, 228, 0.78),
 		dark:      []string{"#131c1c", "#172120", "#1c211c"},
 		darkGlow:  ui.RGBA(74, 124, 118, 0.26),
 	},
-	"kero": {
+	{
+		id: "kero", label: "Kero",
 		light:     []string{"#ded8f3", "#ebe5f0", "#f6ede3", "#f6efcf"},
 		lightGlow: ui.RGBA(247, 220, 241, 0.85),
 		dark:      []string{"#171622", "#1a1720", "#1c1916"},
@@ -349,23 +337,26 @@ var washTable = map[string]washSpec{
 	},
 }
 
-// washOptions lists the user-selectable backdrop gradient presets in order.
-var washOptions = []struct {
-	id    string
-	label string
-}{
-	{id: "sage", label: "Sage"},
-	{id: "linen", label: "Linen"},
-	{id: "mist", label: "Mist"},
-	{id: "kero", label: "Kero"},
+// validWash returns the named preset, or Sage when the name is empty or
+// unknown, so a stale or hand-edited setting cannot leave the window unwashed.
+func validWash(id string) string {
+	for _, opt := range washOptions {
+		if opt.id == id {
+			return id
+		}
+	}
+	return "sage"
 }
 
 // washes returns the two Oklab linear gradients of a Kero-style backdrop: the
 // vertical multi-stop wash and the diagonal top-right corner glow.
 func washes(id string, dark bool) (base, glow ui.LinearGradient) {
-	spec, ok := washTable[id]
-	if !ok {
-		spec = washTable["sage"]
+	spec := washOptions[0]
+	for _, opt := range washOptions {
+		if opt.id == id {
+			spec = opt
+			break
+		}
 	}
 	hexes, g := spec.light, spec.lightGlow
 	if dark {
@@ -465,8 +456,8 @@ func toolbarIconButton(c *ui.Context, key string, icon *ui.SVG, text, label, tip
 		Interactive: true,
 	})
 	btn.Children(func() {
-		ui.Icon(c, icon).Size(13, 13).TextColor(inkSoft)
-		ui.Text(c, text).FontSize(sizeSmall).TextColor(inkNavy).SingleLine()
+		ui.Icon(c, icon).Size(13, 13).Shrink(0).TextColor(inkSoft)
+		ui.Text(c, text).FontSize(sizeSmall).TextColor(inkNavy).SingleLine().MinWidth(0).Shrink(1)
 	})
 	return btn
 }
@@ -500,12 +491,12 @@ func elevateCard(p ui.Element) ui.Element {
 // elevateSurface styles transient popovers, menus, and floating palettes with
 // Liquid Glass refraction, backdrop blur, dual-layer shadows in light mode,
 // and a top-lit border highlight in dark mode.
-func elevateSurface(p ui.Element, r float32) ui.Element {
+func elevateSurface(p ui.Element) ui.Element {
 	tint := paperRaised.Alpha(0.28)
 	if darkPalette {
 		tint = paperRaised.Alpha(0.22)
 	}
-	p = p.Background(tint).Radius(r).Material(glass.Glass{
+	p = p.Background(tint).Radius(radiusPanel).Material(glass.Glass{
 		Style: glass.Regular,
 		Tint:  tint,
 	})
@@ -644,7 +635,7 @@ func panelIn(p ui.Element, key string, run uint64) ui.Element {
 // over the chrome, a 9px radius, a hairline/top-lit edge and the popover
 // shadow (DESIGN.md's Shadow Vocabulary).
 func panelStyle(p ui.Element, width float32) ui.Element {
-	p = elevateSurface(p, radiusPanel).Gap(2)
+	p = elevateSurface(p).Gap(2)
 	if width > 0 {
 		p = p.Width(width)
 	}
@@ -669,35 +660,6 @@ func menuRow(c *ui.Context, key string, chosen bool) ui.Element {
 		row.TextColor(violet)
 	}
 	return row
-}
-
-// magnifier draws the search glyph: a ring and its handle, coords given by the
-// box it is drawn in.
-func magnifier(p *ui.Painter, r ui.Rect, c ui.Color) {
-	s := min(r.W, r.H) * 0.62
-	x, y := r.X+(r.W-s)/2-1, r.Y+(r.H-s)/2-1
-	p.Stroke(ui.Rect{X: x, Y: y, W: s, H: s}, c, s/2, 1.5)
-	p.Line(x+s*0.78, y+s*0.78, x+s+2, y+s+2, 1.5, c)
-}
-
-// noteCountLabel counts notes the machine way, noun included, so a number is
-// never bare on the stacked narrow strip.
-func noteCountLabel(n int, more bool) string {
-	switch {
-	case more:
-		return fmt.Sprintf("%d+ notes", n)
-	case n == 1:
-		return "1 note"
-	}
-	return fmt.Sprintf("%d notes", n)
-}
-
-// notebookCountLabel counts notebooks, singular when there is one.
-func notebookCountLabel(n int) string {
-	if n == 1 {
-		return "1 notebook"
-	}
-	return fmt.Sprintf("%d notebooks", n)
 }
 
 // fmtCount renders a count the machine way: mono, tabular, and with a "+"

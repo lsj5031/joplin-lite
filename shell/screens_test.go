@@ -37,6 +37,16 @@ func captureDir(t *testing.T) string {
 	return dir
 }
 
+// forceMacChrome renders a capture with the macOS window chrome on every host,
+// matching the TitleBarHiddenInset metrics and traffic lights the published
+// screenshots and promo frames composite.
+func forceMacChrome(t *testing.T) {
+	t.Helper()
+	previous := windowsChrome
+	windowsChrome = false
+	t.Cleanup(func() { windowsChrome = previous })
+}
+
 // screen renders the state three times: the first frame mounts whatever
 // transient surface just opened and starts its entrance, the advance runs that
 // entrance out, and the last frame is the settled screen the audit reads.
@@ -268,6 +278,7 @@ func seedReadme(t *testing.T, svc *service.Service) *models.Note {
 // vibrancy, rounded window corners, and WindowServer drop shadow.
 func TestCaptureReadme(t *testing.T) {
 	dir := captureDir(t)
+	forceMacChrome(t)
 	registerFonts()
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
@@ -456,7 +467,7 @@ func paintTrafficLights(img *image.RGBA, dark bool) {
 		maxY := int(math.Ceil(cy + radius + 2))
 		for y := minY; y <= maxY; y++ {
 			for x := minX; x <= maxX; x++ {
-				if ! image.Pt(x, y).In(img.Bounds()) {
+				if !image.Pt(x, y).In(img.Bounds()) {
 					continue
 				}
 				dx := (float64(x) + 0.5) - l.cx

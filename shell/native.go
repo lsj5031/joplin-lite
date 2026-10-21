@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
+	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -46,6 +48,7 @@ type nativeApp struct {
 
 	dark      bool
 	savedDark bool
+	savedWash string
 
 	notebooks     []*models.Folder // flat, parents before children
 	notebookTree  []*models.Folder // roots with Children
@@ -121,6 +124,7 @@ type nativeApp struct {
 	pickAttachmentPaths     func() ([]string, error)
 	pendingInsert           string
 	pendingCaret            *int
+	pendingOpen             string
 	notebookActions         bool
 	notebookOpen            bool
 	notebookRename          bool
@@ -159,13 +163,12 @@ type nativeApp struct {
 	inlineRenameTitle string
 
 	// Pagination feedback when loading additional pages in the note list.
-	loadedFrom         int
-	lastLoadedCount    int
-	loadMoreRun        uint64
-	hasPendingScroll   bool
-	pendingScrollRow   int
-	pendingScrollAlign ui.Align
-	inlineRenameFocus  bool
+	loadedFrom        int
+	lastLoadedCount   int
+	loadMoreRun       uint64
+	hasPendingScroll  bool
+	pendingScrollRow  int
+	inlineRenameFocus bool
 
 	// Spotlight-style command & quick-open palette state.
 	paletteOpen  bool
@@ -204,6 +207,7 @@ func (a *nativeApp) targetLabel() string {
 
 func newNativeApp(db *store.DB) *nativeApp {
 	dark := loadDarkSetting(db)
+	activeWash = loadBackdropSetting(db)
 	app := &nativeApp{
 		svc:          service.New(db),
 		db:           db,
@@ -516,13 +520,24 @@ func (a *nativeApp) noteFilter(cursor string) service.NoteFilter {
 	return f
 }
 
-// reloadNotes reloads the first page for the current filter, keeping the
+// reloadNotes refreshes the loaded pages for the current filter, keeping the
 // selected note when it is still in the results.
 func (a *nativeApp) reloadNotes() {
 	page, err := a.svc.ListNoteSummaries(a.noteFilter(""))
 	if err != nil {
 		a.saveErr = err.Error()
 		return
+	}
+	// Preserve the loaded window so a palette result on a later page does not
+	// disappear on the next sync refresh.
+	for page.HasMore && page.NextCursor != "" && len(page.Notes) < len(a.notes) {
+		next, err := a.svc.ListNoteSummaries(a.noteFilter(page.NextCursor))
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		page.Notes = append(page.Notes, next.Notes...)
+		page.HasMore, page.NextCursor = next.HasMore, next.NextCursor
 	}
 	a.notes = page.Notes
 	a.hasMore, a.cursor = page.HasMore, page.NextCursor
@@ -595,7 +610,6 @@ func (a *nativeApp) loadMore() {
 		a.selectedNote = firstNew
 		a.selection.Clear()
 		a.pendingScrollRow = firstNew
-		a.pendingScrollAlign = ui.Start
 		a.hasPendingScroll = true
 		a.loadNote()
 	}
@@ -644,7 +658,7 @@ func (a *nativeApp) showNote(id string) {
 		return
 	}
 	// Markdown caches decoded images; release the previous note's cache.
-	a.md = &markdown.Options{LoadImage: a.md.LoadImage}
+	a.md = &markdown.Options{LoadImage: a.md.LoadImage, OnLink: a.md.OnLink}
 	a.note = note
 	a.selectedID = id
 	a.title, a.body = note.Title, note.Body
@@ -678,9 +692,6 @@ func (a *nativeApp) remember(id string) {
 	}
 	a.histPos = len(a.history) - 1
 }
-
-func (a *nativeApp) canBack() bool    { return a.histPos > 0 }
-func (a *nativeApp) canForward() bool { return a.histPos+1 < len(a.history) }
 
 // rowOf returns the row showing id, or -1 when the current page of rows does
 // not include it.
@@ -1279,6 +1290,71 @@ func (a *nativeApp) keepConflictVersion() {
 	a.reloadNotes()
 }
 
+// openLink handles a click on a link in the rendered note. A Joplin resource
+// reference (:/id) is copied out under its original filename and handed to the
+// system, because the vault stores extensions such as .pdf only in metadata;
+// web and mail links keep their usual behavior.
+func (a *nativeApp) openLink(link string) {
+	if id, ok := strings.CutPrefix(link, ":/"); ok {
+		if len(id) != 32 {
+			return
+		}
+		if _, err := hex.DecodeString(id); err != nil {
+			return
+		}
+		resource, err := a.db.GetResource(id)
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		if resource == nil {
+			a.saveErr = "That attachment is no longer in this vault."
+			return
+		}
+		if resource.EncryptionApplied != 0 || resource.EncryptionBlobEncrypted != 0 {
+			a.saveErr = "That attachment is encrypted and cannot be opened."
+			return
+		}
+		data, err := os.ReadFile(a.db.GetResourceFile(id))
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		name := filepath.Base(strings.TrimSpace(resource.Title))
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = "attachment"
+		}
+		if filepath.Ext(name) == "" && resource.FileExtension != "" &&
+			!strings.ContainsAny(resource.FileExtension, `/\:`) {
+			name += "." + resource.FileExtension
+		}
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			cache = os.TempDir()
+		}
+		dir := filepath.Join(cache, "joplin-lite", "attachments", id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		slash := filepath.ToSlash(path)
+		if !strings.HasPrefix(slash, "/") {
+			slash = "/" + slash
+		}
+		a.pendingOpen = (&url.URL{Scheme: "file", Path: slash}).String()
+		return
+	}
+	switch {
+	case strings.HasPrefix(link, "http://"), strings.HasPrefix(link, "https://"), strings.HasPrefix(link, "mailto:"):
+		a.pendingOpen = link
+	}
+}
+
 // attachFiles creates Joplin resources for each local file path and appends
 // their Markdown references to the open note.
 func (a *nativeApp) attachFiles(paths []string) {
@@ -1600,6 +1676,13 @@ func (a *nativeApp) openSettings() {
 	} else {
 		a.settings.Dark = a.dark
 	}
+	a.savedWash = validWash(activeWash)
+	if a.settings.Backdrop != "" {
+		// The stored choice wins over a preview left by an earlier dialog.
+		a.savedWash = validWash(a.settings.Backdrop)
+	}
+	a.settings.Backdrop = a.savedWash
+	activeWash = a.settings.Backdrop
 	a.settingsErr = ""
 	a.settingsReveal = false
 	a.settingsPick = 0
@@ -1644,6 +1727,9 @@ func (a *nativeApp) submitSettings() {
 	a.dark = a.settings.Dark
 	a.savedDark = a.dark
 	_ = saveDarkSetting(a.db, a.dark)
+	a.settings.Backdrop = validWash(a.settings.Backdrop)
+	activeWash = a.settings.Backdrop
+	a.savedWash = activeWash
 	a.settingsOpen = false
 	a.settingsErr = ""
 	// Even when the new target is off, one poll refreshes rows after the
@@ -1685,12 +1771,13 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 					washLabels := make([]string, len(washOptions))
 					for i, opt := range washOptions {
 						washLabels[i] = opt.label
-						if opt.id == activeWash {
+						if opt.id == a.settings.Backdrop {
 							washPick = i
 						}
 					}
 					if segmentedControl(c, "Backdrop", &washPick, washLabels...) {
-						activeWash = washOptions[washPick].id
+						a.settings.Backdrop = washOptions[washPick].id
+						activeWash = a.settings.Backdrop
 					}
 
 					labels, targets := a.settingsTargets()
@@ -1770,6 +1857,8 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 			if ui.Button(c, "Cancel").Label("Cancel settings").Clicked() {
 				a.dark = a.savedDark
 				a.settings.Dark = a.savedDark
+				activeWash = a.savedWash
+				a.settings.Backdrop = a.savedWash
 				a.settingsOpen = false
 			}
 			if primaryAction(c, "Save").Label("Save settings").Clicked() {
@@ -1780,6 +1869,8 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 	if !a.settingsOpen {
 		a.dark = a.savedDark
 		a.settings.Dark = a.savedDark
+		activeWash = a.savedWash
+		a.settings.Backdrop = a.savedWash
 	}
 }
 
@@ -1837,6 +1928,9 @@ func (a *nativeApp) moveNotes(ids []string, folderID string) {
 		if err := a.svc.UpdateNote(n); err != nil {
 			a.saveErr = err.Error()
 			return
+		}
+		if a.note != nil && a.note.ID == id {
+			a.note = n
 		}
 	}
 	a.bulkMoveOpen = false
@@ -1908,6 +2002,24 @@ func clip(s string, n int) string {
 	return s
 }
 
+// renameSelectedRail starts inline rename for the chosen notebook or tag, the
+// keyboard counterpart of a row's double click.
+func (a *nativeApp) renameSelectedRail() {
+	if a.inlineRenameKind != "" {
+		return
+	}
+	switch {
+	case a.selectedTag != "":
+		if tag := a.tagByID(a.selectedTag); tag != nil {
+			a.startInlineRename("tag", tag.ID, tag.Title)
+		}
+	case a.selectedNotebook != "" && a.selectedNotebook != conflictsRail:
+		if nb := a.notebookByID(a.selectedNotebook); nb != nil {
+			a.startInlineRename("notebook", nb.ID, nb.Title)
+		}
+	}
+}
+
 // startInlineRename enters inline editing for a notebook or tag in the sidebar.
 func (a *nativeApp) startInlineRename(kind, id, title string) {
 	a.inlineRenameKind = kind
@@ -1967,16 +2079,71 @@ func (a *nativeApp) openPalette() {
 	a.paletteOpen = true
 }
 
-// appMenu builds the native OS menu bar for Joplin Lite.
-func (a *nativeApp) appMenu() *mygo.Menu {
-	do := func(fn func()) func(*mygo.MenuItem, *mygo.Window) {
-		return func(*mygo.MenuItem, *mygo.Window) {
-			fn()
-			if a.invalidate != nil {
-				a.invalidate()
-			}
+func (a *nativeApp) openPaletteNote(n *models.NoteSummary) {
+	a.flush()
+	if a.dirty {
+		return
+	}
+	a.paletteOpen = false
+	notebook := a.selectedNotebook
+	if n.IsConflict != 0 {
+		notebook = conflictsRail
+	} else if notebook != "" {
+		notebook = n.ParentID
+	}
+	a.selectedNotebook, a.selectedTag, a.query = notebook, "", ""
+	a.selectedID = n.ID
+	a.restoring = true
+	a.reloadNotes()
+	a.restoring = false
+	for a.rowOf(n.ID) < 0 && a.hasMore && a.cursor != "" {
+		page, err := a.svc.ListNoteSummaries(a.noteFilter(a.cursor))
+		if err != nil {
+			a.saveErr = err.Error()
+			return
+		}
+		a.notes = append(a.notes, page.Notes...)
+		a.hasMore, a.cursor = page.HasMore, page.NextCursor
+	}
+	a.showNote(n.ID)
+	a.list.ScrollIntoView(a.selectedNote)
+	a.remember(n.ID)
+	if a.narrow {
+		a.narrowEditor = true
+	}
+}
+
+// Native callbacks do not pass through the toolkit's modal shortcut guard.
+func (a *nativeApp) modalOpen() bool {
+	return a.confirmDelete || a.confirmBulkDelete || a.confirmDeleteNotebook ||
+		a.confirmDeleteTag || a.notebookBlocked || a.notebookOpen || a.tagOpen ||
+		a.settingsOpen || a.savedOpen || a.savedDelete != "" || a.resolveConflict || a.paletteOpen
+}
+
+func (a *nativeApp) menuAction(fn func()) func(*mygo.MenuItem, *mygo.Window) {
+	return func(*mygo.MenuItem, *mygo.Window) {
+		if a.modalOpen() {
+			return
+		}
+		fn()
+		if a.invalidate != nil {
+			a.invalidate()
 		}
 	}
+}
+
+func (a *nativeApp) toggleDark() {
+	dark := !a.dark
+	if err := saveDarkSetting(a.db, dark); err != nil {
+		a.saveErr = err.Error()
+		return
+	}
+	a.dark, a.savedDark = dark, dark
+}
+
+// appMenu builds the native OS menu bar for Joplin Lite.
+func (a *nativeApp) appMenu() *mygo.Menu {
+	do := a.menuAction
 
 	var items []*mygo.MenuItem
 	if runtime.GOOS == "darwin" {
@@ -2047,11 +2214,7 @@ func (a *nativeApp) appMenu() *mygo.Menu {
 				{Label: "Back", Accelerator: "CmdOrCtrl+[", Click: do(func() { a.goHistory(-1) })},
 				{Label: "Forward", Accelerator: "CmdOrCtrl+]", Click: do(func() { a.goHistory(1) })},
 				mygo.Separator(),
-				{Label: "Toggle Dark Appearance", Click: do(func() {
-					a.dark = !a.dark
-					a.savedDark = a.dark
-					_ = saveDarkSetting(a.db, a.dark)
-				})},
+				{Label: "Toggle Dark Appearance", Click: do(a.toggleDark)},
 				mygo.Separator(),
 				{Role: mygo.RoleToggleFullScreen},
 			},
@@ -2064,18 +2227,8 @@ func (a *nativeApp) appMenu() *mygo.Menu {
 // dockMenu builds the macOS Dock icon menu.
 func (a *nativeApp) dockMenu() *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
-		{Label: "New Note", Click: func(*mygo.MenuItem, *mygo.Window) {
-			a.newNote()
-			if a.invalidate != nil {
-				a.invalidate()
-			}
-		}},
-		{Label: "Sync Now", Click: func(*mygo.MenuItem, *mygo.Window) {
-			a.syncNow()
-			if a.invalidate != nil {
-				a.invalidate()
-			}
-		}},
+		{Label: "New Note", Click: a.menuAction(a.newNote)},
+		{Label: "Sync Now", Click: a.menuAction(a.syncNow)},
 	})
 }
 
