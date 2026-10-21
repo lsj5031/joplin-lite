@@ -45,7 +45,7 @@ Name: **joplin-lite**. Visual direction: **Field Notes — Humanist** (`DESIGN.m
 ## Evidence on Hand
 
 - `shell/` — native desktop workspace, editor/preview, notebook/tag management, sync status footer, Settings dialog, and 36 headless screenshot states (`TestCaptureScreens`).
-- `reference/go-joplin` — the AGPL fork: proven `internal/e2ee` port, item serialize/unserialize, SQLite store, sync engine + S3/Joplin-Server drivers, clipper server.
+- [`jescarri/go-joplin`](https://github.com/jescarri/go-joplin) — the AGPL fork: proven `internal/e2ee` port, item serialize/unserialize, SQLite store, sync engine + S3/Joplin-Server drivers, clipper server.
 - `INTENT.md` and `DESIGN.md` — requirements, success criteria, and Field Notes visual specification.
 
 ## Product Principles

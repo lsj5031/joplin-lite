@@ -1,3 +1,0 @@
-[submodule "reference/go-joplin"]
-	path = reference/go-joplin
-	url = https://github.com/jescarri/go-joplin.git

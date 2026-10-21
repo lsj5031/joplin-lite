@@ -20,8 +20,18 @@ bash shell/build.sh
 rm -rf "$PACKAGE_DIR" "$PACKAGE_DIR.zip"
 mkdir -p "$PACKAGE_DIR"
 cp "$BIN" "$PACKAGE_DIR/Joplin Lite.exe"
-cp LICENSE NOTICE "$PACKAGE_DIR/"
+cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$PACKAGE_DIR/"
 cp shell/fonts/OFL.txt "$PACKAGE_DIR/"
+REVISION="$(git rev-parse HEAD)"
+cat > "$PACKAGE_DIR/SOURCE.txt" <<TXT
+Joplin Lite corresponding source and build files:
+https://github.com/lsj5031/joplin-lite/tree/$REVISION
+
+Dependency versions and source locations are recorded in go.mod, go.sum,
+shell/go.mod, shell/go.sum and THIRD_PARTY_NOTICES.md.
+Distribute release binaries from a verified commit. A build with local
+modifications requires the corresponding modified source as well.
+TXT
 
 cat > "$PACKAGE_DIR/README.txt" <<'TXT'
 Joplin Lite (Windows, portable)
@@ -44,8 +54,8 @@ or Joplin Server), the E2EE master password and the clipper API token.
 
 Local-only (PowerShell): & ".\Joplin Lite.exe" -no-sync
 
-License: AGPL-3.0-or-later. This package includes LICENSE and NOTICE; the
-source is https://github.com/lsj5031/joplin-lite.
+License: AGPL-3.0-or-later. This package includes LICENSE, NOTICE,
+THIRD_PARTY_NOTICES.md, OFL.txt and SOURCE.txt.
 TXT
 
 # Compress-Archive ships with Windows; zip supports cross-packaging on macOS.

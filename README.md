@@ -25,7 +25,11 @@ Grab the latest package for your computer from the **[Releases page](https://git
 | Platform | Package | How to run |
 | --- | --- | --- |
 | **macOS** (Apple silicon) | `Joplin-Lite-0.1.0-alpha.3-macos-arm64.zip` | Unzip and drag **Joplin Lite.app** to **Applications** |
-| **Windows** (64-bit, portable) | `Joplin-Lite-0.1.0-alpha.3-windows-amd64.zip` | Extract the whole folder and run **Joplin Lite.exe** |
+| **Windows** (64-bit, portable) | `Joplin-Lite-0.1.0-alpha.3-windows-amd64.zip` | Extract the whole folder and run **gojoplin-desktop.exe** |
+
+Current source builds use **Joplin Lite.exe** and include the Windows startup
+and integrated-window fixes added after alpha.3. The alpha.3 executable predates
+those fixes and expects an existing configuration.
 
 * **First launch:** The macOS app is ad-hoc signed (not notarized) and the Windows executable is not publisher-signed, so your OS may ask you to confirm opening it the first time.
 * **Default profile:** On Windows, without an explicit config, remembered launch selection, `GOJOPLIN_CONFIG_PATH`, or an existing `~/.config/go-joplin/config.yaml`, the app creates its own empty `{}` config at `%AppData%\joplin-lite\config.json`. Select official Joplin's `settings.json` explicitly with `-config` when needed. macOS retains its existing defaults: go-joplin YAML first, then official Joplin settings. Notes still default to `~/.local/share/gojoplin`; existing explicit, environment and remembered selections still apply.
@@ -41,7 +45,7 @@ Want to explore the interface before connecting your real notes? Launch Joplin L
 "/Applications/Joplin Lite.app/Contents/MacOS/Joplin Lite" -no-sync -data-dir "$HOME/Library/Application Support/joplin-lite/try-notes"
 ```
 
-**Windows (PowerShell, inside the extracted folder):**
+**Windows (PowerShell, current source build):**
 
 ```powershell
 & ".\Joplin Lite.exe" -no-sync -data-dir "$env:LOCALAPPDATA\JoplinLite\try-notes"
@@ -146,4 +150,14 @@ See [`shell/README.md`](shell/README.md) for Windows portable packaging, headles
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE). Forked from [jescarri/go-joplin](https://github.com/jescarri/go-joplin); see [NOTICE](NOTICE) and retain bundled font licenses when redistributing.
+[AGPL-3.0-or-later](LICENSE). Forked from [jescarri/go-joplin](https://github.com/jescarri/go-joplin); see [NOTICE](NOTICE).
+
+Dependencies retain their own licenses. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+contains the native dependency, embedded-font, and historical tooling notices;
+browser builds emit their own notice bundle. Overpass fonts remain under SIL
+OFL-1.1. The current folded-J artwork was created for this project.
+
+Redistributed binaries must include the license/notices and corresponding
+source for that build, including build scripts and pinned dependency manifests.
+Release tags provide matching source for released binaries. Modified networked
+versions must offer users the source as required by the AGPL.

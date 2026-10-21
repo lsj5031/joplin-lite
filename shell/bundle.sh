@@ -26,8 +26,17 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/licenses"
 cp "$BIN" "$APP/Contents/MacOS/Joplin Lite"
 cp "$ICNS" "$APP/Contents/Resources/app-icon.icns"
 # AGPL: ship the license and the attributed notices with the app.
-cp LICENSE NOTICE "$APP/Contents/Resources/licenses/"
+cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/licenses/"
 cp shell/fonts/OFL.txt "$APP/Contents/Resources/licenses/"
+REVISION="$(git rev-parse HEAD)"
+cat > "$APP/Contents/Resources/licenses/SOURCE.txt" <<TXT
+Joplin Lite corresponding source and build files:
+https://github.com/lsj5031/joplin-lite/tree/$REVISION
+
+Dependency versions and source locations are recorded in go.mod, go.sum,
+shell/go.mod, shell/go.sum and THIRD_PARTY_NOTICES.md.
+A build with local modifications requires the corresponding modified source.
+TXT
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

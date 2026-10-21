@@ -27,3 +27,28 @@ Thumbs.db
 # QA scratch (generated databases, logs, pids) and generated demo media
 /qa/run/
 /qa/video/
+
+# Local agent tooling and upstream research checkout; not application source.
+/.agents/
+/.claude/
+/.impeccable/
+/skills-lock.json
+/reference/
+/.omo/
+/.amp/
+/.freebuff/
+.debug-journal.md
+
+# Reproducible QA outputs, not the test harness or its feature specification.
+/qa/evidence/
+/qa/activity.jsonl
+/qa/results-*.json
+/qa/REPORT.md
+/qa/dashboard.html
+/qa/diag.mjs
+/qa/diag2.mjs
+
+# Personal editor/container configuration from the web starter.
+/web/.devcontainer/
+/web/.vscode/
+/web/.prettierignore

@@ -9,3 +9,27 @@ go-joplin is licensed under the GNU Affero General Public License v3.0 or later
 (AGPL-3.0-or-later).
 
 Modifications and additions Copyright (c) 2026 joplin-lite contributors.
+
+The complete AGPL version 3 text is in LICENSE. The application is offered
+under version 3 or, at your option, any later version. Third-party code and
+fonts retain their own licenses; their copyright, permission and notice texts
+are reproduced in THIRD_PARTY_NOTICES.md. Browser distributions include a
+generated THIRD_PARTY_NOTICES.txt and fonts/OFL.txt.
+
+Corresponding source, dependency manifests and build scripts:
+https://github.com/lsj5031/joplin-lite
+Release tags identify the source for released binaries. When redistributing
+a modified binary, provide the corresponding modified source and build files.
+Operators of modified networked versions must provide the source offer
+required by section 13 of the AGPL.
+
+Artwork and trademarks
+----------------------
+The current sage folded-ribbon J artwork was created for joplin-lite and is
+provided under the project license. It is distinct from official Joplin artwork.
+
+Joplin(R) is a trademark of JOPLIN SAS registered in the European Union,
+filing number 018544315. Official Joplin logos and icons are copyright
+(c) Laurent Cozic, all rights reserved, and require their owner's permission.
+The project license does not grant rights in those official marks.
+Joplin Lite is an independent client and is not endorsed by JOPLIN SAS.

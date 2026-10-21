@@ -2,7 +2,7 @@
 
 **One line:** A small Go/MyGO desktop client that is a **real Joplin peer** — E2EE-capable, multi-target sync, and a Web-Clipper-compatible server.
 
-> Status: evaluated and filled in against the actual `reference/go-joplin` code and
+> Status: evaluated and filled in against the actual [`jescarri/go-joplin`](https://github.com/jescarri/go-joplin) code and
 > against Joplin's current source (`SyncTargetRegistry`, `SyncTargetDropbox`, `LockHandler`,
 > `Dirnames`, clipper auth spec) on 2026-10-16. Corrections and gaps found in that pass are
 > marked **[verified]**, **[correction]**, **[gap]**. Everything else is intent as originally
@@ -26,7 +26,7 @@
 
 ## Evaluation summary (what the fork gives us and where it falls short)
 
-Verified against `reference/go-joplin`:
+Verified against [`jescarri/go-joplin`](https://github.com/jescarri/go-joplin):
 
 | Area | State in fork | Verdict for us |
 |---|---|---|
@@ -284,7 +284,7 @@ Clipper server compatible with the official Joplin Web Clipper:
 
 ## Foundation (decided)
 
-joplin-lite is a **fork of `jescarri/go-joplin`** (cloned at `reference/go-joplin`). It is
+joplin-lite is a **fork of `jescarri/go-joplin`** (upstream source: https://github.com/jescarri/go-joplin). It is
 **AGPL-3.0-or-later**, so joplin-lite is too. Keep upstream attribution and add a NOTICE.
 
 We keep and build on:
@@ -333,7 +333,6 @@ joplin-lite/                    # Go module (fork of go-joplin, AGPL-3.0-or-late
   internal/config/              # YAML config + env expansion
   service/                      # MyGO bound services (typed IPC for our UI)
   web/                          # UI: TanStack Start (latest) + React + TypeScript [user-directed]
-  reference/go-joplin/          # upstream, kept for reference/patches
   INTENT.md  PRODUCT.md  DESIGN.md
 ```
 

@@ -1,0 +1,16 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public Joplin Dropbox OAuth client identifier, not a bearer token"
+condition = "AND"
+targetRules = ["dropbox-api-token", "generic-api-key"]
+paths = ['''(^|/)shell/launch\.go$''']
+regexes = ['''^m044w3cvmxhzvop$''']
+
+[[allowlists]]
+description = "Fixed synthetic key in the frozen checksum unit test"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)internal/e2ee/e2ee_test\.go$''']
+regexes = ['''^0123456789abcdef$''']
