@@ -174,8 +174,9 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 	if len(app.notes) != 1 || app.notes[0].ID != fresh {
 		t.Fatalf("tag filter = %#v", app.notes)
 	}
-	if err := tt.Click("Clear tag"); err != nil {
-		t.Fatalf("click Clear tag: %v", err)
+	// Clicking the chosen tag again clears the filter.
+	if err := tt.Click("Alpha"); err != nil {
+		t.Fatalf("click Alpha again: %v", err)
 	}
 	if app.selectedTag != "" {
 		t.Fatalf("selectedTag after clear = %q", app.selectedTag)
@@ -202,9 +203,10 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 		t.Fatal("the existing note has no Edit action")
 	}
 
-	// The Todo checkbox writes through immediately.
-	if err := tt.Click("Todo"); err != nil {
-		t.Fatalf("click Todo: %v", err)
+	// Marking a note as a to-do writes through immediately from the note menu.
+	click(t, tt, "Note actions")
+	if err := tt.Click("Mark as To-do"); err != nil {
+		t.Fatalf("click Mark as To-do: %v", err)
 	}
 	got, err = svc.GetNote(seed.ID)
 	if err != nil {
@@ -213,10 +215,24 @@ func TestNativeWorkspaceDrivesTheView(t *testing.T) {
 	if got.IsTodo == 0 {
 		t.Fatal("Todo did not set is_todo")
 	}
+	tt.Frame()
+
+	// The checkbox on the list row completes the task in place.
+	if err := tt.Click("Mark Seed done"); err != nil {
+		t.Fatalf("click list checkbox: %v", err)
+	}
+	got, err = svc.GetNote(seed.ID)
+	if err != nil {
+		t.Fatalf("GetNote: %v", err)
+	}
+	if got.TodoCompleted == 0 {
+		t.Fatal("list checkbox did not complete the to-do")
+	}
 
 	// Delete opens a confirmation dialog; the note is gone only after the
 	// dialog's Delete is chosen.
-	if err := tt.Click("Delete note"); err != nil {
+	click(t, tt, "Note actions")
+	if err := tt.Click("Delete note…"); err != nil {
 		t.Fatalf("click Delete: %v", err)
 	}
 	if !app.confirmDelete {
@@ -492,10 +508,10 @@ func TestNativeTagManagement(t *testing.T) {
 		t.Fatalf("selectedTag = %q", app.selectedTag)
 	}
 
-	if err := tt.Click("Tag actions"); err != nil {
-		t.Fatalf("click Tag actions: %v", err)
+	if err := tt.RightClick("Alpha"); err != nil {
+		t.Fatalf("right-click Alpha: %v", err)
 	}
-	if err := tt.Click("Rename tag…"); err != nil {
+	if err := tt.ChooseMenuItem("Rename tag…"); err != nil {
 		t.Fatalf("click Rename tag: %v", err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -507,10 +523,10 @@ func TestNativeTagManagement(t *testing.T) {
 		t.Fatalf("tags after rename = %#v", app.tags)
 	}
 
-	if err := tt.Click("Tag actions"); err != nil {
-		t.Fatalf("click Tag actions: %v", err)
+	if err := tt.RightClick("Beta"); err != nil {
+		t.Fatalf("right-click Beta: %v", err)
 	}
-	if err := tt.Click("Delete tag…"); err != nil {
+	if err := tt.ChooseMenuItem("Delete tag…"); err != nil {
 		t.Fatalf("click Delete tag: %v", err)
 	}
 	if err := tt.Click("Delete tag"); err != nil {
@@ -561,10 +577,10 @@ func TestNativeNotebookManagement(t *testing.T) {
 		t.Fatalf("depth of child = %d, want 1", app.notebookDepth[childID])
 	}
 
-	if err := tt.Click("Notebook actions"); err != nil {
-		t.Fatalf("click actions: %v", err)
+	if err := tt.RightClick("Child"); err != nil {
+		t.Fatalf("right-click Child: %v", err)
 	}
-	if err := tt.Click("Rename notebook…"); err != nil {
+	if err := tt.ChooseMenuItem("Rename notebook…"); err != nil {
 		t.Fatalf("click Rename: %v", err)
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
@@ -586,10 +602,10 @@ func TestNativeNotebookManagement(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 	tt.Frame()
 
-	if err := tt.Click("Notebook actions"); err != nil {
-		t.Fatalf("click actions: %v", err)
+	if err := tt.RightClick("Renamed"); err != nil {
+		t.Fatalf("right-click Renamed: %v", err)
 	}
-	if err := tt.Click("Delete notebook…"); err != nil {
+	if err := tt.ChooseMenuItem("Delete notebook…"); err != nil {
 		t.Fatalf("click Delete notebook: %v", err)
 	}
 	if err := tt.Click("Delete notebook"); err != nil {
@@ -624,10 +640,10 @@ func TestNativeNotebookManagement(t *testing.T) {
 	if err := tt.Click("Parent"); err != nil {
 		t.Fatalf("select Parent: %v", err)
 	}
-	if err := tt.Click("Notebook actions"); err != nil {
-		t.Fatalf("click actions: %v", err)
+	if err := tt.RightClick("Parent"); err != nil {
+		t.Fatalf("right-click Parent: %v", err)
 	}
-	if err := tt.Click("Delete notebook…"); err != nil {
+	if err := tt.ChooseMenuItem("Delete notebook…"); err != nil {
 		t.Fatalf("click Delete notebook: %v", err)
 	}
 	if !tt.HasText("Notebook has child notebooks") || tt.HasText("Delete notebook") {
@@ -949,7 +965,7 @@ func TestNativeSettingsDialog(t *testing.T) {
 	if !app.settingsOpen {
 		t.Fatal("Settings did not open the dialog")
 	}
-	if !tt.HasText("Sync and the web clipper") {
+	if !tt.HasText("Appearance") || !tt.HasText("Synchronization") {
 		t.Fatalf("settings form not drawn; texts = %v", tt.Texts())
 	}
 	if app.settings.APIToken != "token-1" {
@@ -1371,6 +1387,11 @@ func TestNativeDragNoteToNotebook(t *testing.T) {
 	tt := ui.NewTester(app.view, 1200, 800)
 	drag := func(from, to string) {
 		t.Helper()
+		// The grip appears on hover, so point at the row before looking for it.
+		if row, ok := tt.Find(from); ok {
+			tt.Move(row.X+row.W/2, row.Y+row.H/2)
+			tt.Frame()
+		}
 		src, ok := tt.Find("Drag note " + from)
 		if !ok {
 			t.Fatalf("no grip for %q", from)
@@ -2063,8 +2084,9 @@ func TestNativeEditorAttachAndPaste(t *testing.T) {
 	}
 
 	tt := ui.NewTester(app.view, 1280, 800)
-	if err := tt.Click("Attach file"); err != nil {
-		t.Fatalf("click Attach file: %v", err)
+	click(t, tt, "Note actions")
+	if err := tt.Click("Attach files…"); err != nil {
+		t.Fatalf("click Attach files: %v", err)
 	}
 	if !strings.Contains(app.body, "![diagram.png](:/") || !strings.Contains(app.body, "[notes.txt](:/") {
 		t.Fatalf("expected image and file markdown links in body, got %q", app.body)
@@ -2188,8 +2210,9 @@ func TestNativeContextMenusInlineRenameAndPalette(t *testing.T) {
 		t.Fatalf("palette kept incompatible filters: query=%q tag=%q", app.query, app.selectedTag)
 	}
 
-	// Click the ⌘K / Command palette badge to run Toggle Dark Mode.
-	click(t, tt, "Command palette")
+	// Cmd+P opens the palette; run Toggle Dark Mode from it.
+	tt.Key(ui.Cmd, ui.KeyP)
+	tt.Frame()
 	tt.Type("Toggle Dark Mode")
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()

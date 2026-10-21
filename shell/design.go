@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/plugins/glass"
@@ -161,29 +162,30 @@ var (
 	}
 )
 
+var fontsOnce sync.Once
+
 // registerFonts adds the two vendored families. Called once at startup, before
 // the first window; a failure is logged rather than fatal, because the widget
 // toolkit falls back to the system family and the app still works.
 func registerFonts() {
-	if err := ui.RegisterFont(overpassTTF, "Overpass"); err != nil {
-		slog.Warn("cannot register Overpass; falling back to the system font", "error", err)
-	}
-	if err := ui.RegisterFont(overpassMonoTTF, fontMono); err != nil {
-		slog.Warn("cannot register Overpass Mono; falling back to the system font", "error", err)
-	}
-	if windowsChrome {
-		return
-	}
-	// Use installed fonts without redistributing Apple's font files. Other
-	// platforms retain the bundled family rather than relying on a silent fallback.
-	for _, family := range ui.FontFamilies() {
-		switch family.Name {
-		case "Avenir Next":
-			fontSans = family.Name
-		case "Optima":
-			fontHeading = family.Name
+	fontsOnce.Do(func() {
+		if err := ui.RegisterFont(overpassTTF, "Overpass"); err != nil {
+			slog.Warn("cannot register Overpass; falling back to the system font", "error", err)
 		}
-	}
+		if err := ui.RegisterFont(overpassMonoTTF, fontMono); err != nil {
+			slog.Warn("cannot register Overpass Mono; falling back to the system font", "error", err)
+		}
+		// Use installed fonts without redistributing Apple's font files. Other
+		// platforms retain the bundled family rather than relying on a silent fallback.
+		for _, family := range ui.FontFamilies() {
+			switch family.Name {
+			case "Avenir Next":
+				fontSans = family.Name
+			case "Optima":
+				fontHeading = family.Name
+			}
+		}
+	})
 }
 
 // designTheme carries Field Notes into MyGo's standard widgets.

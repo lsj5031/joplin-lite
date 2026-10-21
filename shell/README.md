@@ -190,9 +190,10 @@ The window has a notebook tree with create/rename/delete, a keyset-paged note
 list with search, **Saved** searches and a **Sort** menu (updated, created or
 title; either direction), tags with create/rename/delete, filtering and
 per-note assignment (with an inline filter and **New tag…** inside the note
-**Tags** popover), a Conflicts view with a live conflict count in the notebook
-rail and **Resolve conflict** (keep this version on the original, or preserve it
-as a regular note if the original was deleted), a title and Markdown body editor
+**Tags** popover), a Conflicts view whose rail row appears only while a conflict
+exists (with a live count) and **Resolve conflict** (keep this version on the
+original, or preserve it as a regular note if the original was deleted), a title
+and Markdown body editor
 that starts at the top of the note and autosaves after 500 ms, a rendered
 preview, new note, todo toggle, move to another notebook (with inline notebook
 filtering), delete with confirmation, and Back/Forward through visited notes.
@@ -205,13 +206,16 @@ initially focus **Cancel**, so Enter alone does not delete work.
 
 The note list is multi-select (Cmd/Ctrl-click adds a row, Shift-click a range,
 Cmd/Ctrl+A all): a bar above the list shows the count and moves every chosen
-note to a notebook or deletes them after confirmation. The choice is pruned
+note to a notebook or deletes them after confirmation. Rows carry the updated
+time in mono at the right and a hairline rule underneath; a to-do gets a real
+checkbox that completes the task without opening the note. The choice is pruned
 whenever the rows change, so it never counts a hidden note; pending edits to a
 note that is being deleted are dropped instead of written back.
 
-Each row has a `::` grip: dragging it onto a notebook moves that note there,
-or the whole selection when the dragged row is part of it. The grip, not the
-row, is the drag source so a click still chooses rows.
+Each row reveals a grip at its left edge on hover: dragging it onto a notebook
+moves that note there, or the whole selection when the dragged row is part of
+it. The grip, not the row, is the drag source so a click still chooses rows,
+and it stays mounted during the drag so leaving the row does not cancel it.
 
 The sidebar footer shows sync state, a **Sync now** button and **Settings**;
 when a pass finishes, rows and notebooks reload and an idle open note picks up
@@ -226,18 +230,19 @@ connection is retried by the loop itself (45 s and 30 s), and the footer says
 when ("retrying at 15:05"); failures that need the user wait for the ten-minute
 pass or **Sync now**.
 
-**Settings** chooses the appearance (`Light` or `Dark`) and Oklab gradient
-backdrop (`Sage`, `Linen`, `Mist`, or `Kero`), and edits the sync target (off,
-file system folder, or Joplin Server
-URL/email/password), the E2EE master password and the clipper API token
-(**Regenerate** mints a new one). Values are stored in the vault's local
+**Settings** groups **Appearance** (`Light` or `Dark`, and the Oklab gradient
+backdrop `Sage`, `Linen`, `Mist`, or `Kero`) above **Synchronization** (off,
+file system folder, or Joplin Server URL/email/password), then the clipper API
+token (**Regenerate** mints a new one). The E2EE master-password card appears
+once a sync target is set, since a local-only vault has nothing to encrypt. Values are stored in the vault's local
 `key_values` table — never in the config file, which may be Joplin desktop's
 `settings.json` — and are applied on save: the clipper accepts only the new
 token at once, and the sync loop is replaced after its current pass ends.
 Outside official Keychain reuse mode, the master password is stored locally and
 unencrypted; use the explicit Keychain reuse launch mode above to keep recovered
 passwords out of storage. Server and master passwords are masked
-when Settings opens; **Show passwords** reveals them for the current dialog.
+when Settings opens; **Show passwords** reveals them for the current dialog
+when the encryption card is shown.
 Dropbox and S3 targets still come from
 the config file and are kept (shown read-only) by the dialog.
 

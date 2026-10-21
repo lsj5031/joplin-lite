@@ -73,7 +73,8 @@ func TestNativeMenusRespectDeleteConfirmation(t *testing.T) {
 	app.showNote(beta.ID)
 	app.remember(beta.ID)
 	tt := ui.NewTester(app.view, 1280, 800)
-	click(t, tt, "Delete note")
+	click(t, tt, "Note actions")
+	click(t, tt, "Delete note…")
 	var back *mygo.MenuItem
 	for _, menu := range app.appMenu().Items() {
 		for _, item := range menu.Submenu {
@@ -145,12 +146,21 @@ func TestNativeHeaderActionsRemainVisible(t *testing.T) {
 			app.dark, app.railOpen = dark, true
 			tt := ui.NewTester(app.view, 1024, 640)
 			screen(tt)
-			for _, label := range []string{"Move note", "Note tags", "Todo", "Attach file", "Edit", "Delete note"} {
+			// The header keeps the everyday actions in view; the structural
+			// ones are one menu away rather than four 28px symbols wide.
+			for _, label := range []string{"Move note", "Note tags", "Edit", "Note actions"} {
 				r, ok := tt.Find(label)
 				if !ok || r.W < 20 || r.H < 20 || r.X < 0 || r.X+r.W > 1024 || r.Y+r.H > 640 {
 					t.Errorf("%s is inaccessible: %+v found=%v", label, r, ok)
 				}
 			}
+			click(t, tt, "Note actions")
+			for _, label := range []string{"Mark as To-do", "Attach files…", "Delete note…"} {
+				if _, ok := tt.Find(label); !ok {
+					t.Errorf("%s is missing from the note menu", label)
+				}
+			}
+			tt.Key(0, ui.KeyEscape)
 			r, ok := tt.Find("Distinctive note excerpt")
 			if !ok || r.X >= app.railW+app.listW+cardGap || r.H == 0 {
 				t.Fatal("note list lost its excerpt")
@@ -260,6 +270,59 @@ func TestNativeContextCancelKeepsFilterConsistent(t *testing.T) {
 					t.Fatal("cancel left stale notes under the new filter")
 				}
 			})
+		}
+	}
+}
+
+// TestNativeEditorHeaderIsOneQuietRow pins the distillation: the pills hug
+// their text on the same 48px spine as the title, structural actions live in
+// one menu, and zero-state chrome stays out of the list.
+func TestNativeEditorHeaderIsOneQuietRow(t *testing.T) {
+	registerFonts()
+	app, _ := openNativeTestApp(t)
+	nb := regressionNotebook(t, app, "Welcome")
+	note := addTestNote(t, app.svc, nb.ID, "Reading notes", "A body\n\nPreview paragraph")
+	addTestNote(t, app.svc, nb.ID, "Title only", "")
+	app.reloadNotebooks()
+	app.reloadNotes()
+	app.showNote(note.ID)
+	tt := ui.NewTester(app.view, 1200, 800)
+	tt.Frame()
+
+	move, ok := tt.Find("Move note")
+	if !ok {
+		t.Fatal("notebook pill is missing")
+	}
+	title, ok := tt.Find("Note title")
+	if !ok {
+		t.Fatal("note title is missing")
+	}
+	if diff := move.X - title.X; diff > 0.5 || diff < -0.5 {
+		t.Fatalf("header and title do not share a spine: pill x=%v title x=%v", move.X, title.X)
+	}
+	body, ok := tt.Find("Preview paragraph")
+	if !ok {
+		t.Fatal("preview body is missing")
+	}
+	if diff := body.X - title.X; diff > 0.5 || diff < -0.5 {
+		t.Fatalf("preview body and title do not share a spine: body x=%v title x=%v", body.X, title.X)
+	}
+	if move.W > 200 {
+		t.Fatalf("notebook pill stretches to %v; it should hug its text", move.W)
+	}
+	if tt.HasText("Empty note") {
+		t.Fatal("title-only rows still print \"Empty note\"")
+	}
+	if _, ok := tt.Find("Conflicts"); ok {
+		t.Fatal("the Conflicts row appears with zero conflicts")
+	}
+	if _, ok := tt.Find("Attach file"); ok {
+		t.Fatal("the attach action still takes a header slot")
+	}
+	click(t, tt, "Note actions")
+	for _, item := range []string{"Mark as To-do", "Attach files…", "Delete note…"} {
+		if _, ok := tt.Find(item); !ok {
+			t.Fatalf("%s is missing from the note menu", item)
 		}
 	}
 }

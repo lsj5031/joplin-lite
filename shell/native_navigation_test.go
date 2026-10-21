@@ -107,13 +107,15 @@ func TestNativeNavigation(t *testing.T) {
 				t.Fatal("Move action unreachable")
 			}
 			tt.Key(0, ui.KeyEscape)
-			click(t, tt, "Delete note")
+			click(t, tt, "Note actions")
+			click(t, tt, "Delete note…")
 			shot("safe-delete")
 			tt.Key(0, ui.KeyEnter)
 			if n, _ := app.svc.GetNote(alpha.ID); n == nil || app.confirmDelete {
 				t.Fatal("Enter must cancel deletion")
 			}
-			click(t, tt, "Delete note")
+			click(t, tt, "Note actions")
+			click(t, tt, "Delete note…")
 			click(t, tt, "Delete")
 			if n, _ := app.svc.GetNote(alpha.ID); n != nil {
 				t.Fatal("explicit Delete did not delete")

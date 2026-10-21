@@ -16,12 +16,16 @@ func (a *nativeApp) windowsTitleBar(c *ui.Context, t *ui.Theme) float32 {
 	ui.Row(c.Key("windows-titlebar")).Height(height).Shrink(0).
 		Padding(0, bar.Right+12, 0, bar.Left+12).Gap(10).
 		AlignItems(ui.Center).DragWindow().Label("Window toolbar").Children(func() {
-		if iconButton(c, "window-notebooks", iconSidebar, "Open notebooks", "Toggle notebooks and tags (Ctrl+\\)").Clicked() {
+		railLabel := "Open notebooks"
+		if a.railOpen && !a.narrow {
+			railLabel = "Close notebooks"
+		}
+		if iconButton(c, "window-notebooks", iconSidebar, railLabel, "Toggle notebooks and tags (Ctrl+\\)").Clicked() {
 			a.railOpen = !a.railOpen
 		}
 		mark(c)
 		ui.Text(c, "Joplin Lite").FontSize(14).Bold().TextColor(inkNavy).Shrink(0)
-		ui.Spacer(c).Width(12)
+		ui.Spacer(c).MinWidth(12)
 		a.searchField(c, t)
 		ui.Spacer(c).MinWidth(48)
 		if primaryAction(c, "New note").Clicked() {

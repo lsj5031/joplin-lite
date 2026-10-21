@@ -57,9 +57,10 @@ type backend struct {
 	syncGen    int
 	closed     bool
 
-	status *syncStatus
-	notify func()
-	launch launchSettings
+	status  *syncStatus
+	notify  func()
+	metrics *uiMetrics
+	launch  launchSettings
 
 	// logRestore closes the desktop log file and puts the previous default
 	// logger back; nil for a backend that never opened one.
@@ -93,6 +94,7 @@ type syncStatus struct {
 	retry    time.Time
 	persist  func(time.Time) error
 	notify   func()
+	metrics  *uiMetrics
 }
 
 // syncSnapshot is a consistent copy of the sync state.
@@ -116,6 +118,15 @@ func (s *syncStatus) setNotify(fn func()) {
 	}
 	s.mu.Lock()
 	s.notify = fn
+	s.mu.Unlock()
+}
+
+func (s *syncStatus) setMetrics(m *uiMetrics) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.metrics = m
 	s.mu.Unlock()
 }
 
@@ -504,7 +515,7 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 	b.engine = nil
 	// A finishing old pass may still persist its own target's timestamp, but
 	// cannot publish that result as the newly selected target's status.
-	b.status = &syncStatus{notify: b.notify}
+	b.status = &syncStatus{notify: b.notify, metrics: b.metrics}
 	b.cfg = &cfg
 	b.token = cfg.APIToken
 	b.syncGen++
@@ -563,6 +574,19 @@ func (b *backend) setNotify(fn func()) {
 	b.syncMu.Unlock()
 	if status != nil {
 		status.setNotify(fn)
+	}
+}
+
+func (b *backend) setMetrics(m *uiMetrics) {
+	if b == nil {
+		return
+	}
+	b.syncMu.Lock()
+	b.metrics = m
+	status := b.status
+	b.syncMu.Unlock()
+	if status != nil {
+		status.setMetrics(m)
 	}
 }
 
@@ -681,9 +705,16 @@ func randomToken() (string, error) {
 // tick. Failures that need the user keep waiting for that tick.
 func syncLoop(ctx context.Context, engine syncer, status *syncStatus) {
 	run := func() time.Duration {
+		start := time.Now()
 		status.start()
 		err := engine.Sync(ctx)
 		status.finish(err)
+		if status != nil {
+			status.mu.Lock()
+			m := status.metrics
+			status.mu.Unlock()
+			m.observeAttrs(spanSyncPass, start, slog.Bool("error", err != nil))
+		}
 		if err == nil {
 			return 0
 		}

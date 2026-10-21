@@ -281,7 +281,8 @@ func TestCapturePromo(t *testing.T) {
 	// 3. Palette: open the Command Palette from the search bar and filter live
 	// down to "Toggle dark mode".
 	p.begin("palette")
-	p.tap("Command palette")
+	p.tt.Key(ui.Cmd, ui.KeyP)
+	p.tt.Frame()
 	p.hold(0.45)
 	p.typeAt("dark", 4)
 	p.hold(0.7)

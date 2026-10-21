@@ -60,6 +60,9 @@ func screen(tt *ui.Tester) *image.RGBA {
 // writeCapture writes one PNG and logs its text, the audit's index.
 func writeCapture(t *testing.T, dir, name string, img *image.RGBA, tt *ui.Tester) {
 	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
 	path := filepath.Join(dir, name+".png")
 	f, err := os.Create(path)
 	if err != nil {
@@ -607,10 +610,15 @@ func TestCaptureScreens(t *testing.T) {
 	capture(t, dir, "09-sort-menu", tt)
 	click(t, tt, "Sort")
 
+	// The bookmark appears once there is a query to save, so give it one.
+	app.query = "reading"
+	app.reloadNotes()
 	click(t, tt, "Saved searches")
 	tt.Advance(220 * time.Millisecond)
 	capture(t, dir, "10-saved-menu", tt)
 	click(t, tt, "Saved searches")
+	app.query = ""
+	app.reloadNotes()
 
 	app.selectedNotebook = work.ID
 	app.selectedID = long.ID
@@ -641,7 +649,8 @@ func TestCaptureScreens(t *testing.T) {
 	capture(t, dir, "15-new-tag", tt)
 	app.tagOpen = false
 
-	click(t, tt, "Delete note")
+	click(t, tt, "Note actions")
+	click(t, tt, "Delete note…")
 	tt.Advance(220 * time.Millisecond)
 	capture(t, dir, "16-delete-note", tt)
 	click(t, tt, "Cancel")

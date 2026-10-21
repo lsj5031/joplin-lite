@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -96,6 +97,7 @@ type nativeApp struct {
 
 	todo          bool
 	confirmDelete bool
+	noteMenuOpen  bool
 	moveOpen      bool
 	moveFilter    string
 	conflictCount int
@@ -112,7 +114,6 @@ type nativeApp struct {
 
 	tagMenuOpen             bool
 	tagFilter               string
-	tagActions              bool
 	tagOpen                 bool
 	tagRename               bool
 	tagAttachNote           bool
@@ -125,7 +126,6 @@ type nativeApp struct {
 	pendingInsert           string
 	pendingCaret            *int
 	pendingOpen             string
-	notebookActions         bool
 	notebookOpen            bool
 	notebookRename          bool
 	notebookTitle           string
@@ -185,7 +185,8 @@ type nativeApp struct {
 	target    int
 	targetSet bool
 
-	md *markdown.Options
+	md      *markdown.Options
+	metrics *uiMetrics
 }
 
 // targetLabel names the sync target for the status strip: the backend's own
@@ -206,6 +207,7 @@ func (a *nativeApp) targetLabel() string {
 }
 
 func newNativeApp(db *store.DB) *nativeApp {
+	bootStart := time.Now()
 	dark := loadDarkSetting(db)
 	activeWash = loadBackdropSetting(db)
 	app := &nativeApp{
@@ -216,12 +218,14 @@ func newNativeApp(db *store.DB) *nativeApp {
 		selectedNote: -1,
 		railW:        railWidth,
 		listW:        listWidth,
+		metrics:      newUIMetrics(),
 	}
 	// Screenshot attachments can decode to hundreds of MB; load one at a time.
 	var imageMu sync.Mutex
 	app.md = &markdown.Options{LoadImage: func(ref string) (ui.ImageSource, error) {
 		imageMu.Lock()
 		defer imageMu.Unlock()
+		start := time.Now()
 		id, ok := strings.CutPrefix(ref, ":/")
 		if !ok || len(id) != 32 {
 			return nil, fmt.Errorf("not a Joplin resource reference")
@@ -240,6 +244,12 @@ func newNativeApp(db *store.DB) *nativeApp {
 		if err != nil {
 			return nil, err
 		}
+		defer func() {
+			app.metrics.observeAttrs(spanLoadImage, start,
+				slog.String("resource_id", id),
+				slog.Int("bytes", len(data)),
+			)
+		}()
 		if resource.Mime == "image/svg+xml" {
 			return ui.ParseSVG(data)
 		}
@@ -266,10 +276,16 @@ func newNativeApp(db *store.DB) *nativeApp {
 	app.loadSavedSearches()
 	app.reloadNotes()
 	app.remember(app.selectedID)
+	app.metrics.observeAttrs(spanBoot, bootStart,
+		slog.Int("notebooks", len(app.notebooks)),
+		slog.Int("tags", len(app.tags)),
+		slog.Int("notes", len(app.notes)),
+	)
 	return app
 }
 
 func (a *nativeApp) reloadNotebooks() {
+	start := time.Now()
 	tree, err := a.svc.NotebookTree()
 	if err != nil {
 		return
@@ -290,6 +306,10 @@ func (a *nativeApp) reloadNotebooks() {
 		a.selectedNotebook = ""
 	}
 	a.reloadConflictCount()
+	a.metrics.observeAttrs(spanReloadNotebooks, start,
+		slog.Int("notebooks", len(a.notebooks)),
+		slog.Int("conflicts", a.conflictCount),
+	)
 }
 
 func (a *nativeApp) reloadConflictCount() {
@@ -299,6 +319,7 @@ func (a *nativeApp) reloadConflictCount() {
 }
 
 func (a *nativeApp) reloadTags() {
+	start := time.Now()
 	page, err := a.svc.ListTags(service.Page{Limit: nativeNotebookLimit})
 	if err != nil {
 		return
@@ -307,6 +328,7 @@ func (a *nativeApp) reloadTags() {
 	if a.selectedTag != "" && a.tagByID(a.selectedTag) == nil {
 		a.selectedTag = ""
 	}
+	a.metrics.observeAttrs(spanReloadTags, start, slog.Int("tags", len(a.tags)))
 }
 
 func (a *nativeApp) tagByID(id string) *models.Tag {
@@ -320,7 +342,6 @@ func (a *nativeApp) tagByID(id string) *models.Tag {
 
 func (a *nativeApp) openNewTag() {
 	a.tagMenuOpen = false
-	a.tagActions = false
 	a.tagRename = false
 	a.tagAttachNote = false
 	a.tagTitle = ""
@@ -338,7 +359,6 @@ func (a *nativeApp) openRenameTag() {
 	if tag == nil {
 		return
 	}
-	a.tagActions = false
 	a.tagRename = true
 	a.tagAttachNote = false
 	a.tagTitle = tag.Title
@@ -523,6 +543,8 @@ func (a *nativeApp) noteFilter(cursor string) service.NoteFilter {
 // reloadNotes refreshes the loaded pages for the current filter, keeping the
 // selected note when it is still in the results.
 func (a *nativeApp) reloadNotes() {
+	start := time.Now()
+	pages := 1
 	page, err := a.svc.ListNoteSummaries(a.noteFilter(""))
 	if err != nil {
 		a.saveErr = err.Error()
@@ -536,6 +558,7 @@ func (a *nativeApp) reloadNotes() {
 			a.saveErr = err.Error()
 			return
 		}
+		pages++
 		page.Notes = append(page.Notes, next.Notes...)
 		page.HasMore, page.NextCursor = next.HasMore, next.NextCursor
 	}
@@ -566,6 +589,11 @@ func (a *nativeApp) reloadNotes() {
 		a.list.ScrollIntoView(idx)
 	}
 	a.loadNote()
+	a.metrics.observeAttrs(spanReloadNotes, start,
+		slog.Int("rows", len(a.notes)),
+		slog.Int("pages", pages),
+		slog.Int("query_len", len(a.query)),
+	)
 }
 
 // pruneSelection drops chosen keys the current rows no longer show, so the
@@ -595,6 +623,7 @@ func (a *nativeApp) loadMore() {
 	if !a.hasMore || a.cursor == "" {
 		return
 	}
+	start := time.Now()
 	page, err := a.svc.ListNoteSummaries(a.noteFilter(a.cursor))
 	if err != nil {
 		a.saveErr = err.Error()
@@ -613,6 +642,10 @@ func (a *nativeApp) loadMore() {
 		a.hasPendingScroll = true
 		a.loadNote()
 	}
+	a.metrics.observeAttrs(spanLoadMore, start,
+		slog.Int("loaded", len(page.Notes)),
+		slog.Int("total_rows", len(a.notes)),
+	)
 }
 
 // loadNote flushes pending edits before switching, then loads the selected
@@ -623,6 +656,7 @@ func (a *nativeApp) loadNote() {
 		a.flush()
 		a.note = nil
 		a.selectedID = ""
+		a.noteMenuOpen = false
 		a.title, a.body = "", ""
 		a.dirty = false
 		a.todo = false
@@ -653,6 +687,7 @@ func (a *nativeApp) showNote(id string) {
 		return
 	}
 	a.flush()
+	start := time.Now()
 	note, err := a.svc.GetNote(id)
 	if err != nil || note == nil {
 		return
@@ -661,6 +696,7 @@ func (a *nativeApp) showNote(id string) {
 	a.md = &markdown.Options{LoadImage: a.md.LoadImage, OnLink: a.md.OnLink}
 	a.note = note
 	a.selectedID = id
+	a.noteMenuOpen = false
 	a.title, a.body = note.Title, note.Body
 	a.editing = false
 	a.focusBody = false
@@ -675,6 +711,10 @@ func (a *nativeApp) showNote(id string) {
 			break
 		}
 	}
+	a.metrics.observeAttrs(spanShowNote, start,
+		slog.Int("body_bytes", len(a.body)),
+		slog.Int("tags", len(a.noteTags)),
+	)
 }
 
 // remember makes id the current history step, dropping any forward steps.
@@ -780,6 +820,7 @@ func (a *nativeApp) goHistory(delta int) {
 // markDirty records an edit and arms the debounce timer. The timer only asks
 // for a frame: the write stays on the UI thread, as the store expects.
 func (a *nativeApp) markDirty() {
+	start := time.Now()
 	a.dirty = true
 	if a.note != nil {
 		for _, row := range a.notes {
@@ -791,6 +832,7 @@ func (a *nativeApp) markDirty() {
 		}
 	}
 	a.saveDue = time.Now().Add(nativeSaveDelay)
+	a.metrics.observeAttrs(spanMarkDirty, start, slog.Int("body_bytes", len(a.body)))
 	if a.invalidate == nil {
 		return
 	}
@@ -814,6 +856,7 @@ func (a *nativeApp) flush() {
 	if !a.dirty || a.note == nil {
 		return
 	}
+	start := time.Now()
 	n := *a.note
 	n.Title = a.title
 	n.Body = a.body
@@ -833,6 +876,7 @@ func (a *nativeApp) flush() {
 			break
 		}
 	}
+	a.metrics.observeAttrs(spanFlushSave, start, slog.Int("body_bytes", len(n.Body)))
 }
 
 // newNote creates a note in the selected notebook (or the first one) and
@@ -906,7 +950,6 @@ func (a *nativeApp) moveTo(folderID string) {
 }
 
 func (a *nativeApp) openNewNotebook() {
-	a.notebookActions = false
 	a.notebookRename = false
 	a.notebookParent = a.selectedNotebook
 	if a.notebookParent == conflictsRail {
@@ -923,7 +966,6 @@ func (a *nativeApp) openRenameNotebook() {
 	if nb == nil {
 		return
 	}
-	a.notebookActions = false
 	a.notebookRename = true
 	a.notebookParent = nb.ParentID
 	a.notebookCandidateParent = ""
@@ -1113,6 +1155,42 @@ func (a *nativeApp) setTodo(on bool) {
 	for _, row := range a.notes {
 		if row.ID == n.ID {
 			row.IsTodo = n.IsTodo
+			row.TodoCompleted = n.TodoCompleted
+			break
+		}
+	}
+}
+
+// setTodoCompleted checks or unchecks a to-do from the note list or the
+// header pill, saving pending edits to the open note first.
+func (a *nativeApp) setTodoCompleted(id string, done bool) {
+	if id == "" {
+		return
+	}
+	a.flush()
+	n, err := a.svc.GetNote(id)
+	if err != nil {
+		a.saveErr = err.Error()
+		return
+	}
+	if n == nil || n.IsTodo == 0 {
+		return
+	}
+	if done {
+		n.TodoCompleted = 1
+	} else {
+		n.TodoCompleted = 0
+	}
+	if err := a.svc.UpdateNote(n); err != nil {
+		a.saveErr = err.Error()
+		return
+	}
+	if a.note != nil && a.note.ID == id {
+		a.note = n
+		a.todo = n.IsTodo != 0
+	}
+	for _, row := range a.notes {
+		if row.ID == id {
 			row.TodoCompleted = n.TodoCompleted
 			break
 		}
@@ -1480,6 +1558,7 @@ func (a *nativeApp) deleteNote() {
 	}
 	a.note = nil
 	a.selectedID = ""
+	a.noteMenuOpen = false
 	a.title, a.body = "", ""
 	a.todo = false
 	a.noteTags = nil
@@ -1638,6 +1717,7 @@ func (a *nativeApp) syncNow() {
 // refreshAfterSync reloads notebooks and rows, and updates the open note only
 // when it has no unsaved edits, so a pull cannot overwrite what is being typed.
 func (a *nativeApp) refreshAfterSync() {
+	defer a.metrics.observe(spanRefreshAfterSync, time.Now())
 	a.reloadNotebooks()
 	a.reloadTags()
 	a.reloadNotes()
@@ -1749,24 +1829,24 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 			ui.Icon(c, iconSettings).Size(16, 16).TextColor(routeBlue)
 			ui.Text(c, "Settings").FontSize(17).Bold()
 		})
-		ui.Text(c, "Sync and the web clipper, without editing a config file.").
-			FontSize(12).TextColor(t.TextMuted)
-
 		_, height := c.Size()
 		ui.Scroll(c.Key("settings-fields")).Width(420).MaxHeight(max(120, height-210)).Children(func() {
 			ui.Column(c).Gap(8).Children(func() {
-				// Group 1: Appearance & Sync Target
+				// Group 1: Appearance, with each track named above it.
 				ui.Column(c).Width(416).Padding(8, 10).Gap(6).
 					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
+					ui.Text(c, "Appearance").FontSize(12).Bold()
+					label(c, "Theme")
 					appearancePick := 0
 					if a.settings.Dark {
 						appearancePick = 1
 					}
-					if segmentedControl(c, "Appearance", &appearancePick, "Light", "Dark") {
+					if segmentedControl(c, "Theme", &appearancePick, "Light", "Dark") {
 						a.settings.Dark = appearancePick == 1
 						a.dark = a.settings.Dark
 					}
 
+					label(c, "Surface wash")
 					washPick := 0
 					washLabels := make([]string, len(washOptions))
 					for i, opt := range washOptions {
@@ -1775,10 +1855,18 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 							washPick = i
 						}
 					}
-					if segmentedControl(c, "Backdrop", &washPick, washLabels...) {
+					if segmentedControl(c, "Surface wash", &washPick, washLabels...) {
 						a.settings.Backdrop = washOptions[washPick].id
 						activeWash = a.settings.Backdrop
 					}
+				})
+
+				// Group 2: Synchronization on its own, so its target is not read
+				// as a third appearance choice.
+				ui.Column(c).Width(416).Padding(8, 10).Gap(6).
+					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
+					ui.Text(c, "Synchronization").FontSize(12).Bold()
+					label(c, "Sync target")
 
 					labels, targets := a.settingsTargets()
 					if segmentedControl(c, "Sync target", &a.settingsPick, labels...) {
@@ -1814,20 +1902,23 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 					}
 				})
 
-				// Group 2: End-to-End Encryption
-				ui.Column(c).Width(416).Padding(8, 10).Gap(5).
-					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
-					ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
-					master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
-						Placeholder("Leave empty when E2EE is off").
-						Label("E2EE master password").Width(394)
-					if !a.settingsReveal {
-						master.Password()
-					}
-					ui.Checkbox(c, &a.settingsReveal, "Show passwords")
-					ui.Text(c, "Decrypts synced notes on this device. Stored locally in this vault and never sent anywhere.").
-						FontSize(11).TextColor(t.TextMuted)
-				})
+				// Encryption only matters once items leave this device; a local-only
+				// vault should not be asked for a master password.
+				if a.settings.Target != targetOff {
+					ui.Column(c).Width(416).Padding(8, 10).Gap(5).
+						Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
+						ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
+						master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
+							Placeholder("Leave empty when E2EE is off").
+							Label("E2EE master password").Width(394)
+						if !a.settingsReveal {
+							master.Password()
+						}
+						ui.Checkbox(c, &a.settingsReveal, "Show passwords")
+						ui.Text(c, "Decrypts synced notes on this device. Stored locally in this vault and never sent anywhere.").
+							FontSize(11).TextColor(t.TextMuted)
+					})
+				}
 
 				// Group 3: Web Clipper Token
 				ui.Column(c).Width(416).Padding(8, 10).Gap(5).
@@ -1973,10 +2064,7 @@ func (a *nativeApp) modeLabel() string {
 }
 
 func noteRowTitle(n *models.NoteSummary) string {
-	title := n.Title
-	if strings.TrimSpace(title) == "" {
-		title = "Untitled"
-	}
+	title := noteTitle(n)
 	switch {
 	case n.IsTodo != 0 && n.TodoCompleted != 0:
 		return "☑ " + title
@@ -1984,6 +2072,15 @@ func noteRowTitle(n *models.NoteSummary) string {
 		return "☐ " + title
 	}
 	return title
+}
+
+// noteTitle is a summary's title without the to-do glyph, which a list row
+// draws as a real checkbox instead.
+func noteTitle(n *models.NoteSummary) string {
+	if strings.TrimSpace(n.Title) == "" {
+		return "Untitled"
+	}
+	return n.Title
 }
 
 // excerpt is a list-row summary: whitespace collapsed and cut short, so a
@@ -2237,6 +2334,9 @@ func (a *nativeApp) dockMenu() *mygo.Menu {
 func openNativeWindow(be *backend) *mygo.Window {
 	app := newNativeApp(be.db)
 	app.be = be
+	if be != nil {
+		be.setMetrics(app.metrics)
+	}
 	app.loadSettings = be.Settings
 	app.applySettings = be.ApplySettings
 	app.target, app.targetSet = be.Settings().Target, true
@@ -2298,6 +2398,7 @@ func openNativeWindow(be *backend) *mygo.Window {
 		if app.syncPoll != nil {
 			app.syncPoll.Stop()
 		}
+		app.metrics.logSummary("window closed")
 	})
 	if *smoke {
 		// Native content has no page to evaluate, so the smoke check captures

@@ -129,8 +129,9 @@ func TestCaptureDemo(t *testing.T) {
 	d.click("Meeting 12 Oct")
 	d.hold(0.9)
 
-	// Command palette (⌘K) and search.
-	d.click("Command palette")
+	// Command palette (Cmd/Ctrl+P) and search.
+	d.tt.Key(ui.Cmd, ui.KeyP)
+	d.tt.Frame()
 	d.hold(1.1)
 	app.paletteOpen = false
 	d.hold(0.3)
