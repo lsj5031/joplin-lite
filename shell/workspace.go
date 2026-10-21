@@ -860,6 +860,13 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 		a.emptyList(c, t)
 		return
 	}
+	// The toolkit's list keeps a choice by key when rows move under it, so a
+	// note that lands at the index the open note just left would keep the
+	// pill on a note that is not in the editor. Correct a wrong row; a list
+	// with no choice is left to make one, as clicking a row to open it does.
+	if a.selectedNote >= 0 && a.selectedNote < len(a.notes) && a.notes[a.selectedNote].ID != a.selectedID {
+		a.selectedNote = a.rowOf(a.selectedID)
+	}
 	a.list.Selected = &a.selectedNote
 	a.list.Selection = &a.selection
 	a.list.Key = func(i int) any {

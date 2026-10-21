@@ -682,15 +682,19 @@ func (a *nativeApp) remember(id string) {
 func (a *nativeApp) canBack() bool    { return a.histPos > 0 }
 func (a *nativeApp) canForward() bool { return a.histPos+1 < len(a.history) }
 
-// noteInRows reports whether id is in the current page of the list.
-func (a *nativeApp) noteInRows(id string) bool {
-	for _, row := range a.notes {
-		if row.ID == id {
-			return true
+// rowOf returns the row showing id, or -1 when the current page of rows does
+// not include it.
+func (a *nativeApp) rowOf(id string) int {
+	for i := range a.notes {
+		if a.notes[i].ID == id {
+			return i
 		}
 	}
-	return false
+	return -1
 }
+
+// noteInRows reports whether id is in the current page of the list.
+func (a *nativeApp) noteInRows(id string) bool { return a.rowOf(id) >= 0 }
 
 // historyShortcuts walks the note history with the keyboard. MyGO keeps Alt
 // and an arrow for a focused editor on macOS, where that is word-by-word
@@ -766,6 +770,15 @@ func (a *nativeApp) goHistory(delta int) {
 // for a frame: the write stays on the UI thread, as the store expects.
 func (a *nativeApp) markDirty() {
 	a.dirty = true
+	if a.note != nil {
+		for _, row := range a.notes {
+			if row.ID == a.note.ID {
+				row.Title = a.title
+				row.Excerpt = excerpt(a.body)
+				break
+			}
+		}
+	}
 	a.saveDue = time.Now().Add(nativeSaveDelay)
 	if a.invalidate == nil {
 		return

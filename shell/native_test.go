@@ -2137,3 +2137,42 @@ func TestNativeLoadMoreScrollsToNewlyLoadedNotes(t *testing.T) {
 	}
 }
 
+// TestNewNoteChosenRow covers the toolkit list's keyed choice: a new note
+// inserted above the open one moves that note's row down, and the list follows
+// the item it remembers by key. The editor's note must still be the chosen row,
+// or the pill sits on a note that is not the one in the editor.
+func TestNewNoteChosenRow(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	notebook := &models.Folder{Title: "Notes"}
+	if err := svc.CreateNotebook(notebook); err != nil {
+		t.Fatalf("CreateNotebook: %v", err)
+	}
+	opened := &models.Note{ParentID: notebook.ID, Title: "Older note"}
+	if err := svc.CreateNote(opened); err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	app.reloadNotebooks()
+	app.selectedNotebook = notebook.ID
+	app.selectedID = opened.ID
+	app.reloadNotes()
+	app.showNote(opened.ID)
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyN)
+	// One frame lets the list map its remembered key to its new index; the
+	// next one applies the editor's row.
+	tt.Frame()
+	tt.Frame()
+
+	if app.note == nil {
+		t.Fatal("expected the new note to be open")
+	}
+	if app.selectedNote < 0 || app.selectedNote >= len(app.notes) {
+		t.Fatalf("expected a chosen row, got %d of %d", app.selectedNote, len(app.notes))
+	}
+	if got := app.notes[app.selectedNote].ID; got != app.note.ID {
+		t.Fatalf("chosen row shows note %s, editor shows %s", got, app.note.ID)
+	}
+}
