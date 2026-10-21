@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>joplin-lite promo</title>
+<style>
+  @font-face {
+    font-family: 'Overpass Mono';
+    src: url('/shell/fonts/OverpassMono.ttf') format('truetype');
+    font-weight: 400;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #F4F7EF; }
+
+  #frame { position: absolute; top: 0; left: 0; overflow: hidden; background: #F4F7EF; }
+  #bgLight, #bgDark { position: absolute; inset: 0; }
+  #bgLight {
+    background:
+      radial-gradient(1400px 900px at 78% 6%, #FBFCF7 0%, rgba(251,252,247,0) 62%),
+      radial-gradient(1100px 800px at 12% 96%, #E4EBDD 0%, rgba(228,235,221,0) 58%),
+      linear-gradient(163deg, #F8FAF3 0%, #EFF3E9 48%, #E6ECE0 100%);
+  }
+  #bgDark {
+    opacity: 0;
+    background:
+      radial-gradient(1500px 950px at 74% 4%, #2C3A30 0%, rgba(44,58,48,0) 64%),
+      radial-gradient(1100px 800px at 8% 98%, #1F2C24 0%, rgba(31,44,36,0) 60%),
+      linear-gradient(163deg, #2A372E 0%, #223028 52%, #1C2821 100%);
+  }
+
+  /* The app window is rendered 1:1 from the 2x native capture without cropping
+     its edges or cross-dissolving across beats. */
+  #stage {
+    position: absolute;
+    overflow: hidden;
+    border-radius: 12px;
+    will-change: transform, opacity;
+  }
+  #shot {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  #type { position: absolute; opacity: 0; }
+  #kicker {
+    font-family: 'Overpass Mono', ui-monospace, monospace;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    opacity: 0;
+  }
+  #krule {
+    height: 1px;
+    opacity: 0;
+    transform-origin: 0 50%;
+    background: rgba(86,108,74,.5);
+  }
+  #line {
+    font-family: 'Avenir Next', Avenir, 'Helvetica Neue', sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  #subline {
+    font-family: 'Avenir Next', Avenir, 'Helvetica Neue', sans-serif;
+    font-weight: 400;
+    margin-top: 14px;
+    line-height: 1.45;
+  }
+
+  #hook, #end {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    font-family: 'Avenir Next', Avenir, 'Helvetica Neue', sans-serif;
+    padding: 0 160px;
+    pointer-events: none;
+  }
+  .row { display: flex; align-items: center; gap: 18px; }
+  .mark { flex: none; }
+  .wordmark { font-family: Optima, Candara, 'Avenir Next', sans-serif; letter-spacing: .01em; }
+  .statement {
+    font-family: Optima, Candara, 'Avenir Next', sans-serif;
+    font-weight: 400;
+    letter-spacing: -0.012em;
+  }
+  .sub, .meta { font-family: 'Overpass Mono', ui-monospace, monospace; }
+  .hair { height: 1px; }
+
+  #end .inner { align-items: flex-start; }
+</style>
+</head>
+<body>
+<div id="frame">
+  <div id="bgLight"></div>
+  <div id="bgDark"></div>
+
+  <div id="stage">
+    <canvas id="shot" width="2560" height="1600"></canvas>
+  </div>
+
+  <div id="type">
+    <div id="kicker"></div>
+    <div id="krule"></div>
+    <div id="line"></div>
+    <div id="subline"></div>
+  </div>
+
+  <div id="hook">
+    <div class="row" id="hookMark">
+      <svg class="mark" viewBox="0 0 64 64" fill="none"><path d="M22 8h28L38 20H22z" fill="#566C4A" opacity=".36"/><path d="M38 20 50 8v35H38z" fill="#566C4A" opacity=".74"/><path d="M14 43h36L38 55H26z" fill="#566C4A"/><path d="M26 31v12H14z" fill="#566C4A" opacity=".56"/><path d="M14 31h12L14 43z" fill="#566C4A" opacity=".68"/></svg>
+      <span class="wordmark">joplin-lite</span>
+    </div>
+    <div class="hair" id="hookRule"></div>
+    <div class="statement" id="hookA">Joplin notes.</div>
+    <div class="statement" id="hookB">No browser inside.</div>
+    <div class="sub" id="hookSub">one native process &nbsp;·&nbsp; ~120 MB RAM &nbsp;·&nbsp; your library, unchanged</div>
+  </div>
+
+  <div id="end">
+    <div class="inner">
+      <div class="row" id="endMark">
+        <svg class="mark" viewBox="0 0 64 64" fill="none"><path d="M22 8h28L38 20H22z" fill="#566C4A" opacity=".36"/><path d="M38 20 50 8v35H38z" fill="#566C4A" opacity=".74"/><path d="M14 43h36L38 55H26z" fill="#566C4A"/><path d="M26 31v12H14z" fill="#566C4A" opacity=".56"/><path d="M14 31h12L14 43z" fill="#566C4A" opacity=".68"/></svg>
+        <span class="wordmark" id="endName">Joplin Lite</span>
+      </div>
+      <div class="statement" id="endTag">A quiet, native home for your Joplin notes.</div>
+      <div class="hair" id="endRule"></div>
+      <div class="meta" id="endMeta">v0.1.0-alpha.3 &nbsp;·&nbsp; macOS &amp; Windows</div>
+      <div class="meta" id="endUrl">github.com/lsj5031/joplin-lite</div>
+      <div class="meta" id="endLic">AGPL-3.0 · independent Joplin client</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const BASE = q.get('frames') || '/tmp/promo';
+
+const INK = '#2E3D32', INK_SOFT = '#5D6C57', ACCENT = '#566C4A';
+const NIGHT_INK = '#E8ECDF', NIGHT_SOFT = '#AFBAA5', NIGHT_ACCENT = '#C1D2AD';
+
+const FRAME = { w: 1920, h: 1080 };
+// Exact 16:10 window aspect ratio (1.10x of 1280x800), giving the native app
+// 1408x880 of uncropped screen real estate while keeping a clean editorial
+// caption column on the left.
+const CARD = { x: 456, y: 100, w: 1408, h: 880 };
+
+// Every 'app' scene derives its exact duration from the captured beat's frame
+// span at 30 fps, so frames play 1:1 with zero time-warping or jump cuts.
+const SCENES = [
+  { kind: 'hook', dur: 2.1 },
+  {
+    kind: 'app',
+    beat: 'library',
+    dur: 0,
+    kicker: 'your library',
+    cap: 'Notebooks, tags, and every note.',
+    sub: 'Liquid Glass sidebar rail with live counts and instant filtering.',
+  },
+  {
+    kind: 'app',
+    beat: 'write',
+    dur: 0,
+    kicker: 'writing',
+    cap: 'Markdown in, a page out.',
+    sub: 'Write in plain Markdown and toggle into a typeset Field Notes page.',
+  },
+  {
+    kind: 'app',
+    beat: 'palette',
+    dur: 0,
+    kicker: '⌘K · ⌘P',
+    cap: 'Every command, one keystroke.',
+    sub: 'Jump to any note or action from the keyboard.',
+  },
+  {
+    kind: 'app',
+    beat: 'night',
+    dur: 0,
+    dark: true,
+    kicker: 'light · dark',
+    cap: 'Then the lights go down.',
+    sub: 'Warm daylight paper and deep forest night ink.',
+  },
+  { kind: 'end', dur: 2.5, dark: true },
+];
+
+let MANIFEST = null, BEATS = {};
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const easeOut = (u) => 1 - Math.pow(1 - clamp(u, 0, 1), 3);
+
+// ---------------------------------------------------------------- timeline
+let STARTS = [];
+function timeline() {
+  let t = 0;
+  STARTS = SCENES.map((s) => { const at = t; t += s.dur; return at; });
+  return t;
+}
+let TOTAL = 0;
+
+function locate(t) {
+  let i = SCENES.length - 1;
+  for (let k = 0; k < SCENES.length; k++) {
+    if (t < STARTS[k] + SCENES[k].dur - 1e-6) { i = k; break; }
+  }
+  return { i, scene: SCENES[i], local: Math.max(0, t - STARTS[i]) };
+}
+
+// ------------------------------------------------------------------ colour
+const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const LIGHT_RGB = { ink: rgb(INK), soft: rgb(INK_SOFT), accent: rgb(ACCENT) };
+const NIGHT_RGB = { ink: rgb(NIGHT_INK), soft: rgb(NIGHT_SOFT), accent: rgb(NIGHT_ACCENT) };
+function mix(kind, u) {
+  const a = LIGHT_RGB[kind], b = NIGHT_RGB[kind];
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * u));
+  return 'rgb(' + c.join(',') + ')';
+}
+
+// ------------------------------------------------------------------ layout
+function buildLayout() {
+  document.getElementById('frame').style.width = FRAME.w + 'px';
+  document.getElementById('frame').style.height = FRAME.h + 'px';
+  const stage = document.getElementById('stage');
+  stage.style.left = CARD.x + 'px';
+  stage.style.top = CARD.y + 'px';
+  stage.style.width = CARD.w + 'px';
+  stage.style.height = CARD.h + 'px';
+
+  const type = document.getElementById('type');
+  type.style.left = '64px';
+  type.style.width = '344px';
+  document.getElementById('line').style.fontSize = '40px';
+  document.getElementById('line').style.lineHeight = '1.14';
+  document.getElementById('subline').style.fontSize = '16px';
+  document.getElementById('kicker').style.fontSize = '12px';
+  document.getElementById('kicker').style.marginBottom = '12px';
+  const kr = document.getElementById('krule');
+  kr.style.width = '34px';
+  kr.style.marginBottom = '16px';
+}
+
+function buildCards() {
+  document.getElementById('hookMark').querySelector('.mark').style.width = '54px';
+  document.getElementById('hookMark').querySelector('.mark').style.height = '54px';
+  document.getElementById('hookMark').querySelector('.wordmark').style.fontSize = '26px';
+  for (const id of ['hookA', 'hookB']) {
+    const el = document.getElementById(id);
+    el.style.fontSize = '84px';
+    el.style.lineHeight = '1.06';
+  }
+  const hr = document.getElementById('hookRule');
+  hr.style.margin = '34px 0 30px';
+  hr.style.width = '64px';
+  hr.style.background = 'rgba(86,108,74,.34)';
+  const hs = document.getElementById('hookSub');
+  hs.style.fontSize = '15px';
+  hs.style.marginTop = '30px';
+  hs.style.lineHeight = '1.6';
+
+  const em = document.getElementById('endMark');
+  em.querySelector('.mark').style.width = '60px';
+  em.querySelector('.mark').style.height = '60px';
+  em.querySelector('.wordmark').style.fontSize = '40px';
+  const tag = document.getElementById('endTag');
+  tag.style.fontSize = '30px';
+  tag.style.marginTop = '28px';
+  tag.style.fontFamily = "'Avenir Next', Avenir, sans-serif";
+  tag.style.fontWeight = '400';
+  tag.style.lineHeight = '1.35';
+  const er = document.getElementById('endRule');
+  er.style.width = '100%';
+  er.style.maxWidth = '640px';
+  er.style.margin = '30px 0 26px';
+  for (const id of ['endMeta', 'endUrl']) {
+    const el = document.getElementById(id);
+    el.style.fontSize = '16px';
+    el.style.lineHeight = '1.9';
+  }
+  const lic = document.getElementById('endLic');
+  lic.style.fontSize = '13px';
+  lic.style.lineHeight = '1.9';
+  lic.style.marginTop = '26px';
+}
+
+// ------------------------------------------------------------------ frames
+const shotCanvas = document.getElementById('shot');
+const ctx = shotCanvas.getContext('2d');
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
+
+const imageCache = new Map();
+const inflight = new Map();
+
+function loadFrame(n) {
+  let img = imageCache.get(n);
+  if (img) return Promise.resolve(img);
+  let p = inflight.get(n);
+  if (!p) {
+    p = new Promise((resolve, reject) => {
+      const im = new Image();
+      im.decoding = 'async';
+      im.onload = () => { imageCache.set(n, im); inflight.delete(n); resolve(im); };
+      im.onerror = () => { inflight.delete(n); reject(new Error('frame ' + n)); };
+      im.src = BASE + '/frames/' + String(n).padStart(4, '0') + '.png';
+    });
+    inflight.set(n, p);
+  }
+  return p;
+}
+
+function pruneCache(keep) {
+  if (imageCache.size < 90) return;
+  for (const k of imageCache.keys()) {
+    if (imageCache.size <= 70) break;
+    if (Math.abs(k - keep) > 40) imageCache.delete(k);
+  }
+}
+
+// -------------------------------------------------------------------- draw
+function setText(el, text) {
+  if (el.__text !== text) { el.textContent = text; el.__text = text; }
+}
+
+// High-DPI vector pointer drawn at 2x canvas coordinates from promo.json.
+function drawCursor(c, frameNum) {
+  if (!MANIFEST.cursors || frameNum < 1 || frameNum > MANIFEST.cursors.length) return;
+  const cur = MANIFEST.cursors[frameNum - 1];
+  if (!cur || cur.opacity <= 0.02) return;
+
+  const x = cur.x * 2;
+  const y = cur.y * 2;
+  const scale = cur.down ? 0.88 : 1.0;
+
+  c.save();
+  c.translate(x, y);
+  c.globalAlpha = clamp(cur.opacity, 0, 1);
+
+  if (cur.down) {
+    c.save();
+    c.beginPath();
+    c.arc(2, 2, 22, 0, Math.PI * 2);
+    c.fillStyle = 'rgba(86, 108, 74, 0.22)';
+    c.fill();
+    c.lineWidth = 2.5;
+    c.strokeStyle = 'rgba(86, 108, 74, 0.55)';
+    c.stroke();
+    c.restore();
+  }
+
+  c.scale(scale, scale);
+
+  // Classic macOS pointer arrow path at 2x retina scale (36px tall).
+  const arrow = new Path2D('M 0 0 L 0 31 L 7.8 23.8 L 13.5 35.5 L 18.2 33.2 L 12.5 21.6 L 22.5 21.6 Z');
+
+  c.shadowColor = 'rgba(18, 26, 20, 0.34)';
+  c.shadowBlur = 9;
+  c.shadowOffsetX = 1.5;
+  c.shadowOffsetY = 3.5;
+
+  c.fillStyle = '#1B241D';
+  c.fill(arrow);
+
+  c.shadowColor = 'transparent';
+  c.lineWidth = 2.6;
+  c.lineJoin = 'round';
+  c.strokeStyle = '#FFFFFF';
+  c.stroke(arrow);
+
+  c.restore();
+}
+
+function applyCaption(scene, local, night) {
+  const type = document.getElementById('type');
+  if (scene.kind !== 'app') { type.style.opacity = 0; return; }
+  const kicker = document.getElementById('kicker');
+  const krule = document.getElementById('krule');
+  const line = document.getElementById('line');
+  const subline = document.getElementById('subline');
+
+  kicker.style.color = mix('soft', night);
+  line.style.color = mix('ink', night);
+  subline.style.color = mix('soft', night);
+  krule.style.background = mix('accent', night);
+  krule.style.opacity = 1;
+
+  const d = 0.08;
+  const k = easeOut((local - d) / 0.36);
+  const r = easeOut((local - d - 0.04) / 0.44);
+  const l = easeOut((local - d - 0.08) / 0.52);
+  const s = easeOut((local - d - 0.14) / 0.56);
+  const out = 1 - easeOut((local - (scene.dur - 0.28)) / 0.22);
+
+  setText(kicker, scene.kicker);
+  setText(line, scene.cap);
+  setText(subline, scene.sub || '');
+  type.style.opacity = 1;
+  kicker.style.opacity = clamp(k * out, 0, 1);
+  kicker.style.transform = 'translateY(' + (1 - k) * -5 + 'px)';
+  krule.style.opacity = clamp(r * out, 0, 1);
+  krule.style.transform = 'scaleX(' + (0.15 + 0.85 * r) + ')';
+  line.style.transform = 'translateY(' + (1 - l) * 12 + 'px)';
+  line.style.opacity = clamp(l * out, 0, 1);
+  subline.style.transform = 'translateY(' + (1 - s) * 10 + 'px)';
+  subline.style.opacity = clamp(s * out, 0, 1);
+
+  type.style.top = Math.round((FRAME.h - type.offsetHeight) / 2) + 'px';
+}
+
+function applyHook(scene, local) {
+  const hook = document.getElementById('hook');
+  if (scene.kind !== 'hook') { hook.style.opacity = 0; return; }
+  const out = 1 - easeOut((local - (scene.dur - 0.28)) / 0.24);
+  hook.style.opacity = out;
+  const step = (delay, dur = 0.52) => easeOut((local - delay) / dur);
+  const mk = step(0.06), rule = step(0.18), a = step(0.24), b = step(0.34), sub = step(0.48);
+  document.getElementById('hookMark').style.opacity = mk;
+  document.getElementById('hookMark').style.transform = 'translateY(' + (1 - mk) * 10 + 'px)';
+  const hr = document.getElementById('hookRule');
+  hr.style.opacity = rule;
+  hr.style.transform = 'scaleX(' + (0.3 + 0.7 * rule) + ')';
+  hr.style.transformOrigin = '0 50%';
+  for (const [id, k] of [['hookA', a], ['hookB', b]]) {
+    const el = document.getElementById(id);
+    el.style.opacity = k;
+    el.style.transform = 'translateY(' + (1 - k) * 20 + 'px)';
+    el.style.color = INK;
+  }
+  document.getElementById('hookMark').querySelector('.wordmark').style.color = INK;
+  const s = document.getElementById('hookSub');
+  s.style.color = INK_SOFT;
+  s.style.opacity = sub;
+  s.style.transform = 'translateY(' + (1 - sub) * 12 + 'px)';
+}
+
+function applyEnd(scene, local) {
+  const end = document.getElementById('end');
+  if (scene.kind !== 'end') { end.style.opacity = 0; return; }
+  end.style.opacity = 1;
+  const step = (delay, dur = 0.52) => easeOut((local - delay) / dur);
+  const mk = step(0.18), tag = step(0.30), rule = step(0.40), meta = step(0.48), url = step(0.56), lic = step(0.66);
+  document.getElementById('endMark').style.opacity = mk;
+  document.getElementById('endMark').style.transform = 'translateY(' + (1 - mk) * 14 + 'px)';
+  document.getElementById('endMark').querySelector('.wordmark').style.color = NIGHT_INK;
+  document.getElementById('endMark').querySelectorAll('path').forEach((p) => { p.style.fill = NIGHT_ACCENT; });
+  const t = document.getElementById('endTag');
+  t.style.opacity = tag;
+  t.style.color = NIGHT_SOFT;
+  t.style.transform = 'translateY(' + (1 - tag) * 16 + 'px)';
+  const r = document.getElementById('endRule');
+  r.style.opacity = rule;
+  r.style.background = 'rgba(193,210,173,.22)';
+  r.style.transform = 'scaleX(' + (0.2 + 0.8 * rule) + ')';
+  r.style.transformOrigin = '0 50%';
+  for (const [id, k, dy] of [['endMeta', meta, 10], ['endUrl', url, 10], ['endLic', lic, 8]]) {
+    const el = document.getElementById(id);
+    el.style.opacity = k;
+    el.style.transform = 'translateY(' + (1 - k) * dy + 'px)';
+  }
+  document.getElementById('endMeta').style.color = NIGHT_SOFT;
+  document.getElementById('endUrl').style.color = NIGHT_ACCENT;
+  document.getElementById('endLic').style.color = '#8A9682';
+}
+
+async function applySceneFrame(scene, local) {
+  const beat = BEATS[scene.beat];
+  const offset = clamp(Math.floor(local * MANIFEST.fps + 1e-5), 0, beat.to - beat.from);
+  const n = clamp(beat.from + offset, 1, MANIFEST.frames);
+  const img = await loadFrame(n);
+  ctx.clearRect(0, 0, 2560, 1600);
+  ctx.drawImage(img, 0, 0, 2560, 1600);
+  drawCursor(ctx, n);
+  pruneCache(n);
+  return n;
+}
+
+// ------------------------------------------------------------------ render
+async function renderAt(t) {
+  const { i, scene, local } = locate(t);
+
+  const night = !scene.dark ? 0
+    : (i > 0 && SCENES[i - 1].dark) ? 1 : easeOut(local / 0.45);
+  document.getElementById('bgDark').style.opacity = night;
+
+  if (scene.kind === 'app') {
+    await applySceneFrame(scene, local);
+  }
+  applyCaption(scene, local, night);
+  applyHook(scene, local);
+  applyEnd(scene, local);
+
+  const stage = document.getElementById('stage');
+  let alpha = 1;
+  let lift = 0;
+  if (scene.kind === 'hook') {
+    alpha = 0;
+  } else if (scene.kind === 'end') {
+    const out = easeOut(local / 0.30);
+    alpha = 1 - out;
+    lift = out * 10;
+  } else if (i === 1 && local < 0.55) {
+    const enter = easeOut(local / 0.50);
+    alpha = enter;
+    lift = (1 - enter) * 14;
+  }
+  stage.style.opacity = alpha;
+  stage.style.transform = 'translateY(' + lift + 'px)';
+  stage.style.boxShadow = night > 0.02
+    ? '0 40px 90px -28px rgba(0,0,0,.64), 0 4px 14px rgba(0,0,0,.36)'
+    : '0 34px 74px -26px rgba(36,48,36,.32), 0 3px 12px rgba(36,48,36,.08)';
+  stage.style.border = night > 0.02
+    ? '1px solid rgba(232,236,223,.12)'
+    : '1px solid rgba(52,66,56,.14)';
+
+  await new Promise((r) => requestAnimationFrame(r));
+  return { scene: scene.kind, local };
+}
+
+// -------------------------------------------------------------------- boot
+async function boot() {
+  MANIFEST = await (await fetch(BASE + '/promo.json')).json();
+  MANIFEST.frames = MANIFEST.beats.reduce((n, b) => Math.max(n, b.to), 0);
+  for (const b of MANIFEST.beats) BEATS[b.name] = b;
+  for (const s of SCENES) {
+    if (s.kind === 'app') {
+      const b = BEATS[s.beat];
+      if (!b) throw new Error('missing beat: ' + s.beat);
+      s.dur = (b.to - b.from + 1) / MANIFEST.fps;
+    }
+  }
+  buildLayout();
+  buildCards();
+  TOTAL = timeline();
+  window.__duration = TOTAL;
+  window.__fps = MANIFEST.fps;
+  window.__scenes = STARTS.map((start, i) => ({
+    start,
+    dur: SCENES[i].dur,
+    kind: SCENES[i].kind,
+    beat: SCENES[i].beat || null,
+  }));
+  window.renderAt = renderAt;
+  await renderAt(0);
+  window.__ready = true;
+}
+
+boot().catch((e) => { window.__bootError = String(e && e.stack || e); });
+</script>
+</body>
+</html>

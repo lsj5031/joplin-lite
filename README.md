@@ -7,8 +7,7 @@
 Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a single lightweight native app (~120 MB RAM, no Electron or embedded browser) with warm Field Notes paper tones, Liquid Glass surfaces, and a fast, distraction-free Markdown editor.
 
 **[Download v0.1.0-alpha.3](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)** ·
-**[Watch the 29s workspace tour](https://github.com/lsj5031/joplin-lite/releases/download/v0.1.0-alpha.3/Joplin-Lite-workspace-demo.mp4)** ·
-**[Watch the writing demo](https://github.com/lsj5031/joplin-lite/releases/download/v0.1.0-alpha.3/Joplin-Lite-writing-demo.mp4)** ·
+**[Watch the 25s demo film](docs/promo/joplin-lite-promo.mp4)** ·
 **[Technical & desktop guide](shell/README.md)**
 
 ![Reading a note in Joplin Lite](docs/screenshots/native-workspace.png)

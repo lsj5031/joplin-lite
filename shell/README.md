@@ -266,6 +266,11 @@ ffmpeg -y -framerate 30 -i ../tmp/ui-audit/demo/%04d.png \
   ../qa/video/native-workspace.mp4
 ```
 
+`CAPTURE_DIR=../tmp/promo go test -run TestCapturePromo ./` renders the
+promotional tour instead: reading, writing, and the command palette at 2x, with
+beat boundaries for `qa/promo`, which cuts the launch film. See
+[`qa/promo/README.md`](../qa/promo/README.md).
+
 ## Browser preview (optional)
 
 The web build is not embedded in any binary. To use it in a browser over the

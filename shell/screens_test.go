@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -35,15 +36,19 @@ func captureDir(t *testing.T) string {
 	return dir
 }
 
-// capture renders the state three times: the first frame mounts whatever
+// screen renders the state three times: the first frame mounts whatever
 // transient surface just opened and starts its entrance, the advance runs that
 // entrance out, and the last frame is the settled screen the audit reads.
-func capture(t *testing.T, dir, name string, tt *ui.Tester) {
-	t.Helper()
+func screen(tt *ui.Tester) *image.RGBA {
 	tt.Frame()
 	tt.Advance(260 * time.Millisecond)
 	tt.Frame()
-	img := tt.Image()
+	return tt.Image()
+}
+
+// writeCapture writes one PNG and logs its text, the audit's index.
+func writeCapture(t *testing.T, dir, name string, img *image.RGBA, tt *ui.Tester) {
+	t.Helper()
 	path := filepath.Join(dir, name+".png")
 	f, err := os.Create(path)
 	if err != nil {
@@ -53,11 +58,16 @@ func capture(t *testing.T, dir, name string, tt *ui.Tester) {
 	if err := png.Encode(f, img); err != nil {
 		t.Fatalf("encode %s: %v", path, err)
 	}
-	// A screen is made of what it says; the list is the audit's index.
 	texts := tt.Texts()
 	if len(texts) > 0 {
 		t.Logf("%s: %d texts: %s", name, len(texts), strings.Join(clipList(texts, 14), " | "))
 	}
+}
+
+// capture writes a settled screen for the audit.
+func capture(t *testing.T, dir, name string, tt *ui.Tester) {
+	t.Helper()
+	writeCapture(t, dir, name, screen(tt), tt)
 }
 
 // click presses the control showing or labeled s after settling the tree, so
@@ -187,44 +197,78 @@ func (a *nativeApp) syncNow() {
 
 See the [migration notes](docs/native-ui-migration.md) for the full table.`
 
+// seedReadme fills a vault with the short, synthetic everyday notes the public
+// screenshots and the launch film share, so the README, the stills and the
+// video show one library. It returns the note both open.
+func seedReadme(t *testing.T, svc *service.Service) *models.Note {
+	t.Helper()
+	var everydayID, readingID, ideasID string
+	for _, title := range []string{"Everyday", "Reading", "Ideas"} {
+		nb := &models.Folder{Title: title}
+		if err := svc.CreateNotebook(nb); err != nil {
+			t.Fatalf("CreateNotebook: %v", err)
+		}
+		switch title {
+		case "Everyday":
+			everydayID = nb.ID
+		case "Reading":
+			readingID = nb.ID
+		case "Ideas":
+			ideasID = nb.ID
+		}
+	}
+	// The notes are a minute apart, so the list order is the fixture's and not
+	// the order a same-millisecond sort happens to return. Screenshots and the
+	// launch film then show one library in one order.
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	var selected, books *models.Note
+	for i, entry := range []struct {
+		parent string
+		title  string
+		body   string
+	}{
+		{readingID, "Books for autumn", "A few pages before the day begins.\n\n- A book of essays\n- Something to read twice"},
+		{ideasID, "A small kitchen garden", "Basil by the window. Rosemary by the door."},
+		{everydayID, "Weekly notes", "Keep the useful things. Leave a little room for next week."},
+		{everydayID, "Favourite walks", "The long way home, along the water."},
+		{everydayID, "A slower Saturday", "## Leave the afternoon open\n\nA walk by the water, a small notebook, and no particular hurry.\n\n### Take along\n\n- [x] A thermos of coffee\n- [ ] The book from the bedside table\n- [ ] Something to write with\n\n> Make room for the things you notice."},
+	} {
+		at := base + int64(i)*60_000
+		n := &models.Note{ParentID: entry.parent, Title: entry.title, Body: entry.body, CreatedTime: at, UpdatedTime: at}
+		if err := svc.CreateNote(n); err != nil {
+			t.Fatalf("CreateNote: %v", err)
+		}
+		if i == 0 {
+			books = n
+		}
+		selected = n
+	}
+	for _, name := range []string{"weekend", "outdoors", "reading"} {
+		tag := &models.Tag{Title: name}
+		if err := svc.CreateTag(tag); err != nil {
+			t.Fatalf("CreateTag: %v", err)
+		}
+		target := selected.ID
+		if name == "reading" {
+			target = books.ID
+		}
+		if err := svc.AddTag(target, tag.ID); err != nil {
+			t.Fatalf("AddTag: %v", err)
+		}
+	}
+	if err := svc.UpdateNote(selected); err != nil {
+		t.Fatalf("UpdateNote: %v", err)
+	}
+	return selected
+}
+
 // TestCaptureReadme uses short, synthetic everyday notes for public screenshots.
 func TestCaptureReadme(t *testing.T) {
 	dir := captureDir(t)
 	registerFonts()
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
-	var everydayID string
-	for _, title := range []string{"Everyday", "Reading", "Ideas"} {
-		nb := &models.Folder{Title: title}
-		if err := svc.CreateNotebook(nb); err != nil {
-			t.Fatal(err)
-		}
-		if title == "Everyday" {
-			everydayID = nb.ID
-		}
-	}
-	var selected *models.Note
-	for _, entry := range []struct{ title, body string }{
-		{"Books for autumn", "A few pages before the day begins.\n\n- A book of essays\n- Something to read twice"},
-		{"A small kitchen garden", "Basil by the window. Rosemary by the door."},
-		{"Weekly notes", "Keep the useful things. Leave a little room for next week."},
-		{"Favourite walks", "The long way home, along the water."},
-		{"A slower Saturday", "## Leave the afternoon open\n\nA walk by the water, a small notebook, and no particular hurry.\n\n### Take along\n\n- [x] A thermos of coffee\n- [ ] The book from the bedside table\n- [ ] Something to write with\n\n> Make room for the things you notice."},
-	} {
-		selected = addTestNote(t, svc, everydayID, entry.title, entry.body)
-	}
-	for _, name := range []string{"weekend", "outdoors"} {
-		tag := &models.Tag{Title: name}
-		if err := svc.CreateTag(tag); err != nil {
-			t.Fatal(err)
-		}
-		if err := svc.AddTag(selected.ID, tag.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := svc.UpdateNote(selected); err != nil {
-		t.Fatal(err)
-	}
+	selected := seedReadme(t, svc)
 	app.reloadNotebooks()
 	app.reloadTags()
 	app.selectedID = selected.ID
