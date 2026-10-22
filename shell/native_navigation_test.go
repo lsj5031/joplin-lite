@@ -61,9 +61,9 @@ func TestNativeNavigation(t *testing.T) {
 					t.Fatalf("Shift selection must preserve list and range: editor=%v selection=%v", app.narrowEditor, app.selectedIDs())
 				}
 				click(t, tt, "Delete selected notes")
-				tt.Key(0, ui.KeyEnter)
+				tt.Key(0, ui.KeyEscape)
 				if n, _ := app.svc.GetNote(alpha.ID); n == nil || app.confirmBulkDelete {
-					t.Fatal("Enter must cancel bulk deletion")
+					t.Fatal("Escape must cancel bulk deletion")
 				}
 				click(t, tt, "Clear selection")
 				click(t, tt, "Alpha")
@@ -109,16 +109,10 @@ func TestNativeNavigation(t *testing.T) {
 			tt.Key(0, ui.KeyEscape)
 			click(t, tt, "Note actions")
 			click(t, tt, "Delete note…")
-			shot("safe-delete")
+			shot("delete-confirm")
 			tt.Key(0, ui.KeyEnter)
-			if n, _ := app.svc.GetNote(alpha.ID); n == nil || app.confirmDelete {
-				t.Fatal("Enter must cancel deletion")
-			}
-			click(t, tt, "Note actions")
-			click(t, tt, "Delete note…")
-			click(t, tt, "Delete")
-			if n, _ := app.svc.GetNote(alpha.ID); n != nil {
-				t.Fatal("explicit Delete did not delete")
+			if n, _ := app.svc.GetNote(alpha.ID); n != nil || app.confirmDelete {
+				t.Fatal("Enter must confirm deletion")
 			}
 		})
 	}
@@ -174,9 +168,9 @@ func TestNativeSavedSearchNavigation(t *testing.T) {
 	if app.savedDelete != "Search 19" {
 		t.Fatal("delete confirmation did not open")
 	}
-	tt.Key(0, ui.KeyEnter)
+	tt.Key(0, ui.KeyEscape)
 	if len(app.savedSearches) != 20 || app.savedDelete != "" {
-		t.Fatal("Enter must cancel saved-search deletion")
+		t.Fatal("Escape must cancel saved-search deletion")
 	}
 	click(t, tt, "Saved searches")
 	tt.Scroll(r.X+30, r.Y+10, 0, 1200)

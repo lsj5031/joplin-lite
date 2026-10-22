@@ -148,7 +148,7 @@ func (a *nativeApp) backupDialogs(c *ui.Context, t *ui.Theme) {
 	p := a.importPlan
 	message := fmt.Sprintf("%d notes, %d notebooks and %d attachments from \"%s\".\n\nEvery item gets a new id, so nothing is overwritten; importing the same archive twice adds a second copy.",
 		p.Notes, p.Folders, p.Resources, filepath.Base(a.importPath))
-	if confirmDialogKeys(c, actionTheme, &a.confirmImport, "Import archive?", message, "Import", true) == 1 {
+	if confirmDialog(c, actionTheme, &a.confirmImport, "Import archive?", message, "Import") == 1 {
 		a.startImport()
 	} else if !a.confirmImport {
 		a.importPath, a.importPlan = "", nil

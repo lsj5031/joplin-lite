@@ -133,9 +133,9 @@ func TestImportDialogReturnConfirms(t *testing.T) {
 	}
 }
 
-// TestDeleteDialogReturnStillCancels guards the safe default: destructive
-// confirmations keep Cancel focused, so Return cannot destroy work.
-func TestDeleteDialogReturnStillCancels(t *testing.T) {
+// TestDeleteDialogReturnDeletes pins the confirmation keys: the destructive
+// button holds the focus, so Return confirms the deletion and Escape cancels.
+func TestDeleteDialogReturnDeletes(t *testing.T) {
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
 	nb := &models.Folder{Title: "Inbox"}
@@ -154,14 +154,14 @@ func TestDeleteDialogReturnStillCancels(t *testing.T) {
 	tt.Frame()
 
 	if app.confirmDelete {
-		t.Fatal("Return should choose Cancel in a delete confirmation")
+		t.Fatal("Return left the delete confirmation open")
 	}
 	got, err := svc.GetNote(note.ID)
 	if err != nil {
 		t.Fatalf("GetNote: %v", err)
 	}
-	if got == nil {
-		t.Fatal("Return deleted the note; destructive dialogs must keep Cancel focused")
+	if got != nil {
+		t.Fatal("Return did not delete the note")
 	}
 }
 
