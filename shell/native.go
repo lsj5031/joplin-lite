@@ -98,6 +98,18 @@ type nativeApp struct {
 	focusBody   bool
 	focusSearch bool
 
+	// JEX export/import. The work runs off the UI thread and reports through
+	// backupBusy / backupNotice / backupErr; the pick* seams let tests avoid
+	// native panels.
+	backupBusy    string
+	backupNotice  string
+	backupErr     string
+	importPath    string
+	importPlan    *service.ImportResult
+	confirmImport bool
+	pickExportPath func() (string, error)
+	pickImportPath func() (string, error)
+
 	todo          bool
 	confirmDelete bool
 	noteMenuOpen  bool
@@ -2512,7 +2524,8 @@ func (a *nativeApp) openPaletteNote(n *models.NoteSummary) {
 func (a *nativeApp) modalOpen() bool {
 	return a.confirmDelete || a.confirmBulkDelete || a.confirmDeleteNotebook ||
 		a.confirmDeleteTag || a.notebookBlocked || a.notebookOpen || a.tagOpen ||
-		a.settingsOpen || a.savedOpen || a.savedDelete != "" || a.resolveConflict || a.paletteOpen
+		a.settingsOpen || a.savedOpen || a.savedDelete != "" || a.resolveConflict || a.paletteOpen ||
+		a.confirmImport
 }
 
 func (a *nativeApp) menuAction(fn func()) func(*mygo.MenuItem, *mygo.Window) {
@@ -2567,6 +2580,10 @@ func (a *nativeApp) appMenu() *mygo.Menu {
 		mygo.Separator(),
 		{Label: "Save Note", Accelerator: "CmdOrCtrl+S", Click: do(a.flush)},
 		{Label: "Attach Files…", Click: do(a.promptAttachFiles)},
+		mygo.Separator(),
+		{Label: "Export All Notes (JEX)…", Accelerator: "CmdOrCtrl+Shift+E", Click: do(a.exportAll)},
+		{Label: "Import JEX Archive…", Click: do(a.chooseImportArchive)},
+		mygo.Separator(),
 		{Label: "Sync Now", Accelerator: "CmdOrCtrl+R", Click: do(a.syncNow)},
 		mygo.Separator(),
 	}

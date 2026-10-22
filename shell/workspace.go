@@ -84,6 +84,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.settingsDialog(c, t)
 	a.savedSearchDialog(c, t)
 	a.conflictDialog(c, t)
+	a.backupDialogs(c, t)
 	a.commandPalette(c, t)
 
 	if a.confirmDelete {
@@ -126,11 +127,17 @@ func (a *nativeApp) view(c *ui.Context) {
 	if a.narrow && !windowsChrome {
 		a.topBar(c, t)
 	}
+	// Status strips go under the workspace: the macOS window uses a hidden
+	// inset title bar, so a strip emitted first would sit under the traffic
+	// lights. Reserve their height here and draw them after the main row.
+	statusH := float32(0)
 	if a.saveErr != "" {
-		ui.Text(c, a.statusText()).Height(36).Shrink(0).Padding(8, 14).
-			TextColor(signalRed).Background(paperRaised).SingleLine().Tooltip(a.statusText())
-		body = max(0, body-36)
+		statusH += 36
 	}
+	if line, _ := a.backupStatus(); line != "" {
+		statusH += 36
+	}
+	body = max(0, body-statusH)
 	mainRow := ui.Row(c).Height(body).Shrink(0).AlignItems(ui.Stretch).Clip()
 	backdrop(c, mainRow)
 	mainRow.Children(func() {
@@ -156,6 +163,14 @@ func (a *nativeApp) view(c *ui.Context) {
 			a.notesPane(c, t)
 		}
 	})
+	if a.saveErr != "" {
+		ui.Text(c, a.statusText()).Height(36).Shrink(0).Padding(8, 14).
+			TextColor(signalRed).Background(paperRaised).SingleLine().Tooltip(a.statusText())
+	}
+	if line, tone := a.backupStatus(); line != "" {
+		ui.Text(c, line).Height(36).Shrink(0).Padding(8, 14).
+			TextColor(tone).Background(paperRaised).SingleLine().Tooltip(line)
+	}
 	if a.narrow && a.railOpen {
 		a.railOverlay(c, t)
 	}

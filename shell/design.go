@@ -282,20 +282,40 @@ func dangerTheme() *ui.Theme {
 // confirmDialog focuses Cancel so Enter cannot destroy work on opening.
 // It returns 1 for the explicit action, 0 for Cancel, or -1 otherwise.
 func confirmDialog(c *ui.Context, theme func() *ui.Theme, open *bool, title, message, action string) int {
+	return confirmDialogKeys(c, theme, open, title, message, action, false)
+}
+
+// confirmDialogKeys is confirmDialog with a choice of what Enter answers. Only
+// dialogs whose action is safe to repeat in place set answerEnter: a focused
+// Cancel keeps a stray Return from deleting notes, while an import that ran a
+// dry run first should confirm on Return the way a save panel does.
+func confirmDialogKeys(c *ui.Context, theme func() *ui.Theme, open *bool, title, message, action string, answerEnter bool) int {
 	chosen := -1
 	ui.Modal(c, open, func() {
 		ui.Text(c, title).FontSize(sizeBody).Bold()
 		ui.Text(c, message).MaxWidth(320).TextColor(inkSoft)
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "Cancel").AutoFocus().Clicked() {
+			cancel := ui.Button(c, "Cancel")
+			if !answerEnter {
+				cancel = cancel.AutoFocus()
+			}
+			if cancel.Clicked() {
 				chosen = 0
 				*open = false
 			}
-			if underTheme(c, theme, func() ui.Element { return ui.PrimaryButton(c, action) }).Clicked() {
+			act := underTheme(c, theme, func() ui.Element { return ui.PrimaryButton(c, action) })
+			if answerEnter {
+				act = act.AutoFocus()
+			}
+			if act.Clicked() {
 				chosen = 1
 				*open = false
 			}
 		})
+		if answerEnter && c.Shortcut(0, ui.KeyEscape) {
+			chosen = 0
+			*open = false
+		}
 	})
 	return chosen
 }

@@ -310,6 +310,39 @@ promotional tour instead: reading, writing, and the command palette at 2x, with
 beat boundaries for `qa/promo`, which cuts the launch film. See
 [`qa/promo/README.md`](../qa/promo/README.md).
 
+## Backup: JEX export and import
+
+The File menu writes and reads Joplin's own JEX format, so an archive stays
+exchangeable with official Joplin:
+
+- **File ▸ Export All Notes (JEX)…** writes every note, notebook, attachment,
+  tag and tag link to a dated `.jex` file (suggested beside your other
+  backups). The archive is built beside the target and renamed only when
+  complete, so an interrupted export never leaves a truncated file.
+- **File ▸ Import JEX Archive…** reads the archive first and shows what it
+  contains; nothing is written until you confirm. Imported items get new ids,
+  so importing twice adds a second copy instead of overwriting anything.
+
+Both actions run off the UI thread and report progress at the bottom of the
+window. The same work is available headlessly:
+
+```sh
+./tmp/gojoplin.exe export jex ~/backups/all_notebooks.jex --data-dir ~/.config/joplin-desktop
+./tmp/gojoplin.exe import jex ~/backups/all_notebooks.jex --dry-run --data-dir /tmp/try-notes
+./tmp/gojoplin.exe import jex ~/backups/all_notebooks.jex --data-dir /tmp/try-notes
+```
+
+`--notebook <id>` imports every note into one existing notebook instead of
+recreating the archive's notebook tree. `--force` overwrites an existing
+export target.
+
+A JEX archive is an uncompressed tar of `<id>.md` item files plus
+`resources/<id>.<extension>` blobs. It is **plain text**: note bodies and
+attachment bytes are readable without a password, exactly as in official
+Joplin. Fields that Joplin keeps but this client does not model (`is_locked`,
+`extracted_resource_ids`, and resource OCR metadata) are omitted on export;
+Joplin treats the missing values as defaults on import.
+
 ## Browser preview (optional)
 
 The web build is not embedded in any binary. To use it in a browser over the

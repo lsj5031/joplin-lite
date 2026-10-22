@@ -62,6 +62,7 @@ Keep those same flags whenever you want to reopen your trial notebook collection
 - **Stay organized without clutter.** Keep the sidebar focused on your note titles, or open the translucent **Notebooks & Tags** rail (`Cmd/Ctrl+\`) when you want to browse folders, filter by tag, rename inline (`F2` / `Return`), or drag notes into another notebook. Select multiple notes (`Cmd/Ctrl+Click` or `Shift+Click`) to move or delete them in bulk.
 - **Attach files & images effortlessly.** Click the paperclip button, drag files straight into the editor, or paste images from your clipboard.
 - **Resolve sync conflicts safely.** When two devices edit the same note, Joplin Lite shows a side-by-side comparison of both complete versions so you never lose work blindly.
+- **Keep portable backups.** Export the whole library to a `.jex` file that Joplin itself can read, or import one back—notes, notebooks, attachments and tags included. See [Backups: JEX export and import](#backups-jex-export-and-import).
 - **Make the space yours.** Open **Settings** (`Cmd/Ctrl+,`) to switch between **Light** and **Dark** appearances and choose from four Oklab gradient backdrops (**Sage**, **Linen**, **Mist**, and **Kero**).
 
 ![Writing with Markdown and autosave](docs/screenshots/native-writing.png)
@@ -122,6 +123,33 @@ On **macOS**, you can also configure a remembered Finder launch file (`~/Library
 - **Content-hash reuse:** Existing local metadata and attachments are verified against Dropbox's content hash and reused without re-downloading.
 - **Clear status in the sidebar footer:** Always see whether you are **Local only**, **Checking items**, **Synced**, **Offline**, or waiting on another device's sync lock, alongside the last successful sync time.
 - **Optional deletion guard:** Setting `sync.dropbox.block_deletes: true` in YAML prevents outgoing remote deletions while you test. Turn it off when you want local note deletions to sync to Dropbox.
+
+---
+
+## Backups: JEX export and import
+
+JEX is Joplin's own lossless export format, so archives move in either direction between Joplin Lite and official Joplin. In the app, use **File ▸ Export All Notes (JEX)…** and **File ▸ Import JEX Archive…**; the same work is available from the command line:
+
+```sh
+# every note, notebook, attachment, tag and tag link
+./gojoplin export jex ~/JoplinBackup/all-2026-10-22.jex --data-dir ~/.config/joplin-desktop
+
+# see what an archive holds without writing anything
+./gojoplin import jex ~/JoplinBackup/all-2026-10-22.jex --dry-run --data-dir /tmp/try-notes
+
+# import it (optionally into one existing notebook instead of its own tree)
+./gojoplin import jex ~/JoplinBackup/all-2026-10-22.jex --data-dir /tmp/try-notes [--notebook <id>]
+```
+
+Build the command-line binary with `go build -o gojoplin .` from the repository root. `--force` overwrites an existing export target, and `--data-dir` chooses the profile, so an import can be rehearsed in a throwaway directory first.
+
+What to expect:
+
+- **Exports are atomic.** The archive is built beside the target and renamed only when complete, so an interrupted run never leaves a truncated file that looks like a backup.
+- **Imports read before they write.** The archive is parsed and its note, notebook and attachment counts are reported before anything changes; a failure leaves the library untouched. In the app this is the confirmation dialog—nothing is written until you approve it.
+- **Imported items get new ids.** Notebook parents, attachment references in note bodies, and tag links are remapped to them, but importing the same archive twice adds a second copy instead of merging. Created and updated times come from the archive, so date-sorted lists keep their original order.
+- **Archives are plain text.** JEX is an uncompressed tar of `<id>.md` items plus `resources/<id>.<extension>` blobs, so note bodies and attachment bytes are readable without a password—exactly as in official Joplin. Treat a backup file like the notes it contains.
+- **A few Joplin-only fields are not carried.** `is_locked`, `extracted_resource_ids`, and resource OCR metadata are omitted on export and fall back to Joplin's defaults on import. Attachments whose blobs are still end-to-end encrypted are exported as metadata only, since their ciphertext cannot be restored as usable plaintext.
 
 ---
 
