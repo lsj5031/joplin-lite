@@ -188,21 +188,23 @@ type nativeApp struct {
 	target    int
 	targetSet bool
 
-	md             *markdown.Options
-	mdTheme        *markdown.Theme
-	mdThemeDark    bool
-	mdThemeWash    string
-	mdThemeInit    bool
-	previewDoc     *parser.Document
-	previewRaw     string
-	previewBody    string
-	previewChunks  []string
-	previewList    ui.ListState
-	previewReady   bool
-	wordCountBody  string
-	wordCountVal   int
-	wordCountReady bool
-	metrics        *uiMetrics
+	md                  *markdown.Options
+	mdTheme             *markdown.Theme
+	mdThemeDark         bool
+	mdThemeWash         string
+	mdThemeInit         bool
+	previewDoc          *parser.Document
+	previewRaw          string
+	previewBody         string
+	previewChunks       []string
+	previewChunkStarts  []int
+	previewPreserveBody string
+	previewList         ui.ListState
+	previewReady        bool
+	wordCountBody       string
+	wordCountVal        int
+	wordCountReady      bool
+	metrics             *uiMetrics
 }
 
 // targetLabel names the sync target for the status strip: the backend's own
@@ -713,6 +715,8 @@ func (a *nativeApp) showNote(id string) {
 	a.previewRaw = ""
 	a.previewBody = ""
 	a.previewChunks = nil
+	a.previewChunkStarts = nil
+	a.previewPreserveBody = ""
 	a.previewReady = false
 	a.wordCountBody = ""
 	a.wordCountReady = false
@@ -2372,7 +2376,16 @@ func (a *nativeApp) prepareMarkdownOptions() string {
 		a.previewBody = formatMarkdownPreviewWithDoc(a.previewDoc, a.body)
 		a.previewChunks = nil
 		a.previewChunks = previewChunksAbove(a.previewDoc, a.previewBody, previewChunkRunes, previewVirtualizeRunes)
-		a.previewList = ui.ListState{EstimatedRowHeight: previewEstimatedRowHeight}
+		a.previewChunkStarts = a.previewChunkStarts[:0]
+		start := 0
+		for _, chunk := range a.previewChunks {
+			a.previewChunkStarts = append(a.previewChunkStarts, start)
+			start += len(chunk)
+		}
+		if !a.previewReady || a.previewPreserveBody != a.body {
+			a.previewList = ui.ListState{EstimatedRowHeight: previewEstimatedRowHeight}
+		}
+		a.previewPreserveBody = ""
 		a.previewReady = true
 	}
 	a.md.Theme = a.mdTheme

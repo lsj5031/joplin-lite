@@ -9,6 +9,7 @@ patches=(
   "$root/shell/patches/mygo-large-layouts.patch"
   "$root/shell/patches/mygo-inline-transforms.patch"
   "$root/shell/patches/mygo-list-estimate.patch"
+  "$root/shell/patches/mygo-task-checkboxes.patch"
 )
 dest="$root/tmp/mygo-patched"
 stamp="$version:$(git hash-object "${patches[@]}")"
@@ -42,4 +43,4 @@ git -C "$stage" apply "${patches[@]}"
 printf '%s\n' "$stamp" > "$stage/.joplin-patch"
 mv "$stage" "$dest"
 stage=""
-echo "Prepared MyGO $version with large-layout cache and paint fixes."
+echo "Prepared MyGO $version with preview performance and task checkbox fixes."

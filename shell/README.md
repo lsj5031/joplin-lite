@@ -219,6 +219,10 @@ never synced. Reusing a name requires an explicit **Replace saved search**
 action; deleting a saved search asks for confirmation. Destructive dialogs
 initially focus **Cancel**, so Enter alone does not delete work.
 
+Markdown task checkboxes (`- [ ]` / `- [x]`) also work in the rendered preview:
+click a box or focus it and press Space. Changes use normal autosave, preserve
+the original Markdown outside the marker, and keep long-note scroll position.
+
 The note list is multi-select (Cmd/Ctrl-click adds a row, Shift-click a range,
 Cmd/Ctrl+A all): a bar above the list shows the count and moves every chosen
 note to a notebook or deletes them after confirmation. Rows carry the updated
@@ -240,8 +244,9 @@ stay on this computer (and **Set up sync** in place of the unusable **Sync
 now**), **Sync paused · another device is syncing** when the target's lock is
 held, **Offline · sync paused** when the target cannot be reached, **Sync
 stopped · target needs a newer Joplin** for an unsupported format, and
-**Sync failed** with the reason for everything else. A lock or a lost
-connection is retried by the loop itself (45 s and 30 s), and the footer says
+**Sync failed** with the reason for everything else, including local file
+permission/write errors (which do not trigger the short offline retry).
+A lock or a lost connection is retried by the loop itself (45 s and 30 s), and the footer says
 when ("retrying at 15:05"); failures that need the user wait for the ten-minute
 pass or **Sync now**.
 

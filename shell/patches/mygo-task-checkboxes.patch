@@ -1,0 +1,100 @@
+diff --git a/ui/markdown/task_toggle_test.go b/ui/markdown/task_toggle_test.go
+new file mode 100644
+index 0000000..71dbbc6
+--- /dev/null
++++ b/ui/markdown/task_toggle_test.go
+@@ -0,0 +1,59 @@
++package markdown
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/egoist/mygo/ui"
++)
++
++func TestTaskToggleMouseAndKeyboard(t *testing.T) {
++	for _, source := range []string{
++		"- [ ] task",
++		"1. [ ] task",
++		"> - [ ] task",
++		"- parent\n  - [ ] task",
++		"中文\n\n- [X] task\r\n",
++	} {
++		t.Run(source, func(t *testing.T) {
++			src := source
++			calls := 0
++			o := &Options{OnTask: func(offset int, checked bool) {
++				want := strings.Index(src, "[") + 1
++				if offset != want || checked == (src[offset] != ' ') {
++					t.Fatalf("callback offset=%d checked=%v, source=%q", offset, checked, src)
++				}
++				value := " "
++				if checked {
++					value = "x"
++				}
++				src = src[:offset] + value + src[offset+1:]
++				calls++
++			}}
++			tt := ui.NewTester(func(c *ui.Context) { View(c, src, o) }, 600, 400)
++			if err := tt.Click("Task: task"); err != nil {
++				t.Fatal(err)
++			}
++			if calls != 1 {
++				t.Fatalf("mouse callback count = %d", calls)
++			}
++			tt.Key(0, ui.KeySpace)
++			if calls != 2 {
++				t.Fatalf("keyboard callback count = %d", calls)
++			}
++			if got, want := src[strings.Index(src, "[")+1] != ' ', strings.Contains(source, "[X]"); got != want {
++				t.Fatal("second toggle did not restore task state")
++			}
++		})
++	}
++}
++
++func TestTaskMarkersRemainDisplayOnlyWithoutCallback(t *testing.T) {
++	tt := ui.NewTester(func(c *ui.Context) { View(c, "- [ ] task", nil) }, 600, 400)
++	if _, ok := tt.Find("Task: task"); ok {
++		t.Fatal("display-only task became interactive")
++	}
++	if !tt.HasText("task") {
++		t.Fatal("display-only task text disappeared")
++	}
++}
+diff --git a/ui/markdown/view.go b/ui/markdown/view.go
+index 8833d95..a34e1d1 100644
+--- a/ui/markdown/view.go
++++ b/ui/markdown/view.go
+@@ -26,6 +26,10 @@ type Options struct {
+ 	// router around the view, a link to #a-heading scrolls to that
+ 	// heading, and links of other schemes do nothing.
+ 	OnLink func(url string)
++	// OnTask, when set, enables task checkboxes. offset is the byte offset
++	// of the space or x inside the task marker in View's source. The caller
++	// owns the edit; without this callback tasks remain display-only.
++	OnTask func(offset int, checked bool)
+ 	// LoadImage loads the image at url, on a goroutine of its own, for the
+ 	// views to show; until it has, they show its description. Without
+ 	// it, images show as their descriptions. FileImages loads files.
+@@ -562,7 +566,18 @@ func (st *viewState) marker(c *ui.Context, list, item *parser.Block, n, depth in
+ 			size := th.em(0.95)
+ 			lineH := th.FontSize * th.LineHeight * 1.2
+ 			checked := item.Task == parser.Checked
+-			cb := ui.Box(c).Size(size, size).Radius(max(3, size/5)).Margin(max(0, (lineH-size)/2-1), 0, 0, 0).Role(ui.RoleCheckBox).Checked(checked)
++			var cb ui.Element
++			if st.o.OnTask != nil {
++				line, _, _ := strings.Cut(st.doc.Source()[item.Start:item.End], "\n")
++				marker := strings.IndexByte(line, '[')
++				cb = ui.CheckboxBase(c, &checked).Label("Task: " + strings.TrimSpace(line[marker+3:]))
++				if cb.Changed() {
++					st.o.OnTask(item.Start+marker+1, checked)
++				}
++			} else {
++				cb = ui.Box(c).Role(ui.RoleCheckBox).Checked(checked)
++			}
++			cb.Size(size, size).Radius(max(3, size/5)).Margin(max(0, (lineH-size)/2-1), 0, 0, 0)
+ 			if checked {
+ 				cb.Background(th.Checkbox).Draw(func(p *ui.Painter, r ui.Rect) {
+ 					path := &ui.Path{}

@@ -804,11 +804,24 @@ func retryAfter(err error) time.Duration {
 }
 
 // isOffline reports whether a sync error means the target could not be
-// reached, rather than refusing the request. HTTP clients usually wrap a
-// net.Error; the text check covers the errors built from a response body.
+// reached, rather than refusing the request. Filesystem errno values also
+// implement net.Error, so that interface alone is not evidence of an outage.
 func isOffline(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pathErr *os.PathError
+	var linkErr *os.LinkError
+	if errors.As(err, &pathErr) || errors.As(err, &linkErr) {
+		return false
+	}
+	var opErr *net.OpError
+	var dnsErr *net.DNSError
+	if errors.As(err, &opErr) || errors.As(err, &dnsErr) {
+		return true
+	}
 	var nerr net.Error
-	if errors.As(err, &nerr) {
+	if errors.As(err, &nerr) && (nerr.Timeout() || nerr.Temporary()) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

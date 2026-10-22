@@ -1,9 +1,9 @@
-# MyGO long-document patches
+# MyGO preview patches
 
 The shell pins MyGO v0.5.5 and replaces it with `tmp/mygo-patched`.
 `bash shell/prepare-mygo.sh` copies that release from the verified Go module
 cache and applies `mygo-large-layouts.patch`, `mygo-inline-transforms.patch`,
-and `mygo-list-estimate.patch`.
+`mygo-list-estimate.patch`, and `mygo-task-checkboxes.patch`.
 `shell/build.sh` runs this step
 automatically. Go and Git are required, with Bash as for the existing build.
 Nothing changes in the shared module cache. Direct shell `go build`, `go test`,
@@ -47,7 +47,20 @@ chunks plus the toolkit's overscan, and reduces chunks from 12,000 to roughly
 1,000 runes. Only paragraphs above 12,000 runes enter this path; short
 paragraphs and unsplittable inline spans stay intact. Body changes reset the
 list. This retains the existing chunking limitations, but no longer shapes
-the whole long paragraph before displaying its beginning.
+the whole long paragraph before displaying its beginning. Task checkbox edits
+preserve the list position; other body changes still reset it.
+
+The fourth patch adds opt-in `markdown.Options.OnTask`. Task markers retain
+their existing look but become focusable checkboxes with click and Space-key
+handling when a callback is supplied. The callback receives the source byte
+offset of the task's state character and its new checked state. The caller
+owns persistence; views without a callback remain display-only.
+
+The shell maps each chunk's offset back through preview-only line formatting
+to the original note, changes just the task marker, and uses normal autosave.
+It rejects callbacks for stale bodies or other notes. Tests cover nested and
+quoted lists, uppercase markers, CRLF/CJK text, duplicate task text, code
+fences, long-note scroll retention, note switching, and failed saves.
 
 ## Validation
 
@@ -86,6 +99,8 @@ large-layout cache. No new package dependency was added.
 With the additional list-estimate patch, the native counter is 9,466,880 bytes
 (another 512 bytes for the estimate field/setup change); the webview example
 remains 9,672,192 bytes.
+The task-checkbox patch leaves both example sizes unchanged: neither example
+uses the Markdown renderer, so the opt-in interaction adds no code to them.
 
 The shell also has `BenchmarkPreviewSingleViewWarmFrames`. It deliberately
 bypasses application chunking and uses the shell's fonts and Markdown theme.
@@ -113,4 +128,5 @@ views. The scrollbar uses estimated document height until pages are measured.
 Once upstream releases include equivalent fixes, remove the replacement and
 preparation step together, upgrade the pin, and retain equivalent regression
 coverage. The preview also requires the initial row-height API or an equivalent
-upstream way to bound first-frame list construction.
+upstream way to bound first-frame list construction, and task checkbox callbacks
+that identify the clicked source marker.
