@@ -10,7 +10,6 @@ import (
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
@@ -1133,7 +1132,7 @@ func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string,
 		// alive when the pointer leaves the row for a notebook.
 		if a.railOpen {
 			grip := ui.Text(c, "⣿").FontSize(sizeMonoSm).TextColor(hairlineStrong)
-			grip.Absolute().Left(1).Top(15).Width(10)
+			grip.Absolute().Left(1).Top(9).Width(10)
 			grip.Label("Drag note " + title).Tooltip("Drag to a notebook")
 			if a.selection.Has(n.ID) && len(dragIDs) > 0 {
 				grip.Drag(dragIDs)
@@ -1176,22 +1175,15 @@ func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string,
 			}
 		}
 
-		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-				name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
-				if current || bulk {
-					name.FontWeight(600).TextColor(inkNavy)
-				} else {
-					name.TextColor(inkNavy.Alpha(0.86))
-				}
-				ui.Text(c, noteTime(n.UpdatedTime)).Font(fontMono).FontFeatures("tnum").
-					FontSize(sizeMonoSm).TextColor(inkSoft).Shrink(0)
-			})
-			// A title-only note keeps its row to one line; a literal "Empty
-			// note" was noise repeated on every bodyless note.
-			if preview := excerpt(n.Excerpt); preview != "" {
-				ui.Text(c, preview).FontSize(sizeLabel).LineHeight(1.25).TextColor(inkSoft).SingleLine()
+		ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(8).Children(func() {
+			name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
+			if current || bulk {
+				name.FontWeight(600).TextColor(inkNavy)
+			} else {
+				name.TextColor(inkNavy.Alpha(0.86))
 			}
+			ui.Text(c, noteTime(n.UpdatedTime)).Font(fontMono).FontFeatures("tnum").
+				FontSize(sizeMonoSm).TextColor(inkSoft).Shrink(0)
 		})
 	})
 }
@@ -1257,7 +1249,7 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 				Label("Note body").
 				Font(fontSans).
 				FontSize(sizeBody).
-				LineHeight(1.9).
+				LineHeight(1.6).
 				Padding(18, 48, 32, 48).
 				Background(paperRaised).
 				Border(0, ui.Transparent).
@@ -1303,24 +1295,7 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		ui.Box(c.Key("preview-box")).Grow(1).MinHeight(0).Children(func() {
-			ui.Scroll(c).Fill().Padding(20, 48, 48, 48).Children(func() {
-				ui.Row(c).FillWidth().Children(func() {
-					ui.Column(c).Grow(1).MaxWidth(700).Gap(20).Children(func() {
-						if a.body == "" {
-							ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
-							return
-						}
-						a.md.Theme = &markdown.Theme{Font: fontSans, FontSize: sizeBody, LineHeight: 1.9, CodeFont: fontMono}
-						a.md.OnLink = nil
-						if strings.Contains(a.body, "](:/") {
-							a.md.OnLink = a.openLink
-						}
-						mdStart := time.Now()
-						markdown.View(c, a.body, a.md)
-						a.metrics.observeAttrs(spanUIMarkdownPreview, mdStart, slog.Int("body_bytes", len(a.body)))
-					})
-				})
-			})
+			a.previewContent(c)
 			ui.Box(c.Key("preview-edge")).Absolute().Top(0).Left(0).Right(0).Height(18).PassThrough().
 				Material(glass.ScrollEdge{Background: paperRaised})
 		})
@@ -1410,12 +1385,7 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 
 		ui.Spacer(c)
 		if !a.narrow {
-			wcStart := time.Now()
-			words := len(strings.Fields(a.body))
-			a.metrics.observeAttrs(spanUIWordCount, wcStart,
-				slog.Int("body_bytes", len(a.body)),
-				slog.Int("words", words),
-			)
+			words := a.bodyWordCount()
 			wordUnit := "words"
 			if words == 1 {
 				wordUnit = "word"

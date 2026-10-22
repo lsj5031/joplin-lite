@@ -143,7 +143,7 @@ const (
 	listMaxWidth  = float32(460)
 	topBarHeight  = float32(56)
 	narrowWidth   = float32(1024)
-	rowHeight     = float32(52)
+	rowHeight     = float32(36)
 	cardGap       = float32(8)
 	radiusControl = float32(6)
 	radiusSmall   = float32(4)

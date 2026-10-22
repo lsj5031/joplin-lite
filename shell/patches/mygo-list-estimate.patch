@@ -1,0 +1,75 @@
+diff --git a/ui/list.go b/ui/list.go
+index d00b7f2..3112215 100644
+--- a/ui/list.go
++++ b/ui/list.go
+@@ -39,6 +39,12 @@ type ListState struct {
+ 	// Handle names this list independently of its per-pass node.
+ 	Handle
+ 
++	// EstimatedRowHeight is the initial height in DIPs of an unmeasured
++	// row. Positive finite values help lists of tall, expensive content
++	// avoid building too many rows before the first layout. Once rows are
++	// measured their average takes over. Zero uses the theme's default.
++	EstimatedRowHeight float32
++
+ 	// Key returns an identity for the item row i shows, such as its ID:
+ 	// comparable, and unique among the rows. Without it, a row is its
+ 	// index. With it, the state of a row (focus, text being edited, …)
+@@ -421,6 +427,9 @@ func (s *ListState) sync(e *node, n int) {
+ 		s.header.row = -1
+ 	}
+ 	s.heights.def = float64(e.c.theme.Space(8))
++	if h := s.EstimatedRowHeight; h > 0 && !math.IsInf(float64(h), 0) {
++		s.heights.def = float64(h)
++	}
+ 	if s.Key != nil && n > 0 {
+ 		if k := s.anchorKey; k != nil {
+ 			if j, ok := s.find(k, s.anchor, n); ok && j != s.anchor {
+diff --git a/ui/list_estimate_test.go b/ui/list_estimate_test.go
+new file mode 100644
+index 0000000..d7866ea
+--- /dev/null
++++ b/ui/list_estimate_test.go
+@@ -0,0 +1,42 @@
++package ui
++
++import (
++	"math"
++	"testing"
++)
++
++func TestListTallInitialEstimateLimitsWork(t *testing.T) {
++	s := ListState{EstimatedRowHeight: 1000}
++	built := map[int]bool{}
++	tt := coreNewTester(func(c *context) {
++		coreList(c, &s, 100, func(i int) {
++			built[i] = true
++			coreBox(c).Height(1000)
++		}).Fill()
++	}, 400, 500)
++	if len(built) > 1+listOverscan {
++		t.Fatalf("built %d tall rows for one visible row", len(built))
++	}
++	checkRows(t, tt, &s, 0, 0, 500)
++	s.ScrollToEnd()
++	tt.Frame()
++	if _, last := s.Visible(); last != 99 {
++		t.Fatalf("cannot reach last row: %d", last)
++	}
++}
++
++func TestListInaccurateInitialEstimateFillsViewport(t *testing.T) {
++	for _, estimate := range []float32{1, 1000, 0, -1, float32(math.NaN()), float32(math.Inf(1))} {
++		s := ListState{EstimatedRowHeight: estimate}
++		tt := coreNewTester(func(c *context) {
++			coreList(c, &s, 100, func(i int) {
++				coreBox(c).Height(varied(i))
++			}).Fill()
++		}, 400, 500)
++		checkRows(t, tt, &s, 0, 0, 500)
++		tt.Scroll(100, 100, 0, 300)
++		checkRows(t, tt, &s, 0, 0, 500)
++		tt.SetSize(300, 600)
++		checkRows(t, tt, &s, 0, 0, 600)
++	}
++}

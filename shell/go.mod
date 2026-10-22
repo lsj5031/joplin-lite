@@ -57,3 +57,6 @@ require (
 )
 
 replace github.com/lsj5031/joplin-lite => ../
+
+// Prepared by bash shell/prepare-mygo.sh; see patches/README.md.
+replace github.com/egoist/mygo => ../tmp/mygo-patched

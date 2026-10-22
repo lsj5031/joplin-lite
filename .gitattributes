@@ -5,3 +5,7 @@ internal/models/testdata/** -text
 
 # Keep shell scripts and Go files on their committed line endings.
 *.sh text eol=lf
+
+# Dependency patches must apply to the LF sources in the Go module cache.
+# Unified diffs require a space before context lines, including blank/tabbed ones.
+shell/patches/*.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab

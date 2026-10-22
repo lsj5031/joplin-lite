@@ -1,0 +1,300 @@
+diff --git a/internal/text/large_layout_test.go b/internal/text/large_layout_test.go
+new file mode 100644
+index 0000000..ffb276c
+--- /dev/null
++++ b/internal/text/large_layout_test.go
+@@ -0,0 +1,150 @@
++package text
++
++import (
++	"fmt"
++	"runtime"
++	"strings"
++	"testing"
++	"weak"
++)
++
++func largeParagraph(suffix string) Params {
++	return Params{Text: strings.Repeat("mixed 中文。 ", 10000) + suffix, Width: 700}
++}
++
++func TestLargeLayoutBudgetProtectsLabels(t *testing.T) {
++	s := newSystem()
++	s.eng = &stubEngine{}
++	p := Params{Text: "ordinary label"}
++	label := s.Layout(p)
++	ordinaryBytes := s.layoutBytes
++	for i := range 12 {
++		s.Layout(largeParagraph(fmt.Sprint(i)))
++		if s.largeLayoutBytes > maxLargeLayoutBytes {
++			t.Fatalf("large layouts retained %d bytes", s.largeLayoutBytes)
++		}
++		if s.layoutBytes != ordinaryBytes || s.Layout(p) != label {
++			t.Fatal("large layouts displaced ordinary labels")
++		}
++		s.EndFrame()
++	}
++}
++
++func TestLargeLayoutKeepsRecentParagraphs(t *testing.T) {
++	s := newSystem()
++	s.eng = &stubEngine{}
++	a, b := largeParagraph("a"), largeParagraph("b")
++	first, second := s.Layout(a), s.Layout(b)
++	for range 12 {
++		s.EndFrame()
++		if s.Layout(a) != first || s.Layout(b) != second {
++			t.Fatal("alternating visible paragraphs evicted each other")
++		}
++	}
++}
++
++func TestLargeLayoutEvictsLeastRecentParagraph(t *testing.T) {
++	s := newSystem()
++	s.eng = &stubEngine{}
++	a, b := largeParagraph("a"), largeParagraph("b")
++	first := s.Layout(a)
++	s.EndFrame()
++	old := weak.Make(s.Layout(b))
++	s.EndFrame()
++	s.Layout(a)
++	s.Layout(largeParagraph("c"))
++	if s.Layout(a) != first {
++		t.Fatal("evicted the recently used paragraph")
++	}
++	runtime.GC()
++	if old.Value() != nil {
++		t.Fatal("evicted paragraph is still retained")
++	}
++	runtime.KeepAlive(s)
++}
++
++func TestLargeLayoutExpiresAndClears(t *testing.T) {
++	for _, clearCache := range []bool{false, true} {
++		t.Run(fmt.Sprint(clearCache), func(t *testing.T) {
++			s := newSystem()
++			s.eng = &stubEngine{}
++			old := weak.Make(s.Layout(largeParagraph("old")))
++			if clearCache {
++				s.clearLayouts()
++			} else {
++				for range liveLayoutFrames - 1 {
++					s.EndFrame()
++					if len(s.largeLayouts) == 0 {
++						t.Fatal("paragraph expired while still recent")
++					}
++				}
++				s.EndFrame()
++			}
++			if len(s.largeLayouts) != 0 || s.largeLayoutBytes != 0 {
++				t.Fatal("large-layout cache did not clear")
++			}
++			runtime.GC()
++			if old.Value() != nil {
++				t.Fatal("unused paragraph is still retained")
++			}
++			runtime.KeepAlive(s)
++		})
++	}
++}
++
++func TestLargeLayoutRejectsBeyondBudget(t *testing.T) {
++	s := newSystem()
++	s.eng = &stubEngine{}
++	p := largeParagraph("cached")
++	first := s.Layout(p)
++	huge := s.Layout(Params{Text: strings.Repeat("x", maxLargeLayoutBytes/64)})
++	if n := layoutBytes(&cached{layout: *huge}); n <= maxLargeLayoutBytes {
++		t.Fatalf("fixture does not exceed the budget: %d", n)
++	}
++	if len(huge.Runes) != maxLargeLayoutBytes/64 || len(huge.Lines) == 0 {
++		t.Fatal("uncached text did not lay out")
++	}
++	if len(s.largeLayouts) != 1 || s.Layout(p) != first {
++		t.Fatal("unadmittable paragraph evicted cached text")
++	}
++}
++
++func TestLargeLayoutInvalidatesChangedParams(t *testing.T) {
++	s := newSystem()
++	s.eng = &stubEngine{}
++	p := largeParagraph("original")
++	first := s.Layout(p)
++	p.Width = 500
++	if s.Layout(p) == first {
++		t.Fatal("width change reused stale layout")
++	}
++	p.Text += " edited"
++	if got := s.Layout(p); got.Params.Text != p.Text || got == first {
++		t.Fatal("edit reused stale layout")
++	}
++	s.clearLayouts()
++	made := s.LayoutsMade()
++	s.Layout(p)
++	if s.LayoutsMade() != made+1 {
++		t.Fatal("cache invalidation did not reshape")
++	}
++}
++
++func TestLargeLayoutReusesDisplayedParagraph(t *testing.T) {
++	s := newSystem()
++	s.eng = &stubEngine{}
++	p := largeParagraph("first")
++	first := s.Layout(p)
++	if n := layoutBytes(&cached{layout: *first}); n <= maxLayoutBytes {
++		t.Fatalf("fixture is not oversized: %d bytes", n)
++	}
++	for range 20 {
++		s.EndFrame()
++		if s.Layout(p) != first || s.Layout(p) != first {
++			t.Fatal("unchanged oversized paragraph was reshaped")
++		}
++	}
++	if n := s.LayoutsMade(); n != 1 {
++		t.Fatalf("made %d layouts, want 1", n)
++	}
++}
+diff --git a/internal/text/layout.go b/internal/text/layout.go
+index a9215bf..4463b45 100644
+--- a/internal/text/layout.go
++++ b/internal/text/layout.go
+@@ -331,6 +331,10 @@ type System struct {
+ 	oldest, newest *cached
+ 	layoutBytes    int
+ 	frame          uint64
++	// Oversized paragraphs have their own budget so they cannot evict
++	// ordinary labels. Only a few fit; no second recency list is needed.
++	largeLayouts     map[Params]*cached
++	largeLayoutBytes int
+ 	// made counts the layouts made (LayoutsMade), and gen the times the
+ 	// system forgot its layouts (Generation).
+ 	made, gen uint64
+@@ -637,6 +641,12 @@ func (s *System) EndFrame() {
+ 	for s.oldest != nil && s.frame-s.oldest.used > 240 {
+ 		s.removeLayout(s.oldest)
+ 	}
++	for p, c := range s.largeLayouts {
++		if s.frame-c.used >= liveLayoutFrames {
++			delete(s.largeLayouts, p)
++			s.largeLayoutBytes -= c.bytes
++		}
++	}
+ }
+ 
+ // Layout shapes and wraps p.Text. The result is shared and must not be
+@@ -648,6 +658,10 @@ func (s *System) Layout(p Params) *Layout {
+ 		s.useLayout(c)
+ 		return &c.layout
+ 	}
++	if c, ok := s.largeLayouts[p]; ok {
++		c.used = s.frame
++		return &c.layout
++	}
+ 	// A short label may be a slice of a large document. Cache owned strings
+ 	// so the memory estimate reflects what those parameters keep alive.
+ 	p.Text = strings.Clone(p.Text)
+@@ -658,8 +672,6 @@ func (s *System) Layout(p Params) *Layout {
+ 	p.Style.Lang = strings.Clone(p.Style.Lang)
+ 	c := s.layout(p)
+ 	c.bytes = layoutBytes(c)
+-	// A large paragraph still lays out correctly; keeping it would evict
+-	// all the ordinary labels and lines of other windows.
+ 	if c.bytes <= maxLayoutBytes {
+ 		for s.oldest != nil && (s.overLayoutBudget(c.bytes) || len(s.layouts) >= maxLayouts) {
+ 			s.removeLayout(s.oldest)
+@@ -667,6 +679,8 @@ func (s *System) Layout(p Params) *Layout {
+ 		s.layouts[p] = c
+ 		s.layoutBytes += c.bytes
+ 		s.useLayout(c)
++	} else if c.bytes <= maxLargeLayoutBytes {
++		s.keepLargeLayout(p, c)
+ 	}
+ 	return &c.layout
+ }
+@@ -678,8 +692,30 @@ const (
+ 	maxLiveLayoutBytes = 64 << 20
+ 	maxLayoutBytes     = 8 << 20
+ 	maxLayouts         = 4096
++	// Additional, lazily used room for paragraphs above the ordinary
++	// admission limit. The combined estimated cache ceiling is 96 MiB.
++	maxLargeLayoutBytes = 32 << 20
+ )
+ 
++func (s *System) keepLargeLayout(p Params, c *cached) {
++	for s.largeLayoutBytes+c.bytes > maxLargeLayoutBytes {
++		var oldest *cached
++		for _, entry := range s.largeLayouts {
++			if oldest == nil || entry.used < oldest.used {
++				oldest = entry
++			}
++		}
++		delete(s.largeLayouts, oldest.layout.Params)
++		s.largeLayoutBytes -= oldest.bytes
++	}
++	if s.largeLayouts == nil {
++		s.largeLayouts = make(map[Params]*cached)
++	}
++	c.used = s.frame
++	s.largeLayouts[p] = c
++	s.largeLayoutBytes += c.bytes
++}
++
+ // Above the ordinary budget, keep layouts used within a few global frames:
+ // otherwise sequential reuse of a larger working set evicts each layout just
+ // before its next use. The hard cap and entry limit still apply to live text.
+@@ -751,6 +787,8 @@ func (s *System) clearLayouts() {
+ 	}
+ 	clear(s.layouts)
+ 	s.layoutBytes = 0
++	clear(s.largeLayouts)
++	s.largeLayoutBytes = 0
+ }
+ 
+ // LayoutsMade returns how many layouts the system has made, those Layout
+diff --git a/ui/markdown/large_layout_test.go b/ui/markdown/large_layout_test.go
+new file mode 100644
+index 0000000..58acde7
+--- /dev/null
++++ b/ui/markdown/large_layout_test.go
+@@ -0,0 +1,41 @@
++package markdown
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/egoist/mygo/internal/text"
++	"github.com/egoist/mygo/ui"
++)
++
++func largeParagraphTester() *ui.Tester {
++	src := strings.Repeat("中文 mixed punctuation。 https://example.com/path\n", 1700)
++	return ui.NewTester(func(c *ui.Context) {
++		ui.Scroll(c).Fill().Children(func() { View(c, src, nil) })
++	}, 700, 600)
++}
++
++func TestLargeParagraphWarmFramesReuseLayout(t *testing.T) {
++	tt := largeParagraphTester()
++	tt.Frame()
++	made := text.Shared().LayoutsMade()
++	for range 5 {
++		tt.Frame()
++	}
++	if n := text.Shared().LayoutsMade() - made; n != 0 {
++		t.Fatalf("unchanged Markdown reshaped %d layouts in warm frames", n)
++	}
++}
++
++func BenchmarkLargeParagraphWarmFrames(b *testing.B) {
++	tt := largeParagraphTester()
++	tt.Frame()
++	made := text.Shared().LayoutsMade()
++	b.ReportAllocs()
++	b.ResetTimer()
++	for range b.N {
++		tt.Frame()
++	}
++	b.StopTimer()
++	b.ReportMetric(float64(text.Shared().LayoutsMade()-made)/float64(b.N), "layouts/frame")
++}

@@ -15,11 +15,21 @@ it). No frontend toolchain is needed for the app.
 bash shell/build.sh              # -> tmp/Joplin Lite.exe
 ```
 
-The script only runs `go build` with `-trimpath` and `-s -w`, plus
+The script first prepares our pinned, patched MyGO copy (see
+[`patches/README.md`](patches/README.md)), then runs `go build` with
+`-trimpath`, `-s -w`, `mygo_noinspector`, and MyGO's production flag, plus
 `-H=windowsgui` when the target is Windows so double-clicking the executable
 does not open a console window. There is no `npm` step and nothing is staged
 for `go:embed`. `OUT` overrides the build output path; relative paths are
 resolved from `shell/`. Packaging scripts use that same output path.
+
+Before running Go commands directly in the separate shell module:
+
+```sh
+bash shell/prepare-mygo.sh       # from the repository root; requires Git
+cd shell
+CGO_ENABLED=0 go test ./...
+```
 
 ### macOS app bundle
 
@@ -62,6 +72,11 @@ empty `{}` config at `os.UserConfigDir()/joplin-lite/config.json`
 (`%AppData%\joplin-lite\config.json` on Windows). Official Joplin's
 `settings.json` is selected only explicitly with `-config` or a remembered
 launch selection; it is no longer imported implicitly.
+
+For a stable per-user Windows location, put the portable package in
+`%LOCALAPPDATA%\Programs\Joplin Lite` and create a shortcut to `Joplin Lite.exe`
+under `%APPDATA%\Microsoft\Windows\Start Menu\Programs`. This requires no
+administrator permissions and leaves the existing vault and settings untouched.
 
 ## Run
 

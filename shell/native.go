@@ -13,10 +13,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+	"github.com/egoist/mygo/ui/markdown/parser"
 	"golang.org/x/image/draw"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -185,8 +188,21 @@ type nativeApp struct {
 	target    int
 	targetSet bool
 
-	md      *markdown.Options
-	metrics *uiMetrics
+	md             *markdown.Options
+	mdTheme        *markdown.Theme
+	mdThemeDark    bool
+	mdThemeWash    string
+	mdThemeInit    bool
+	previewDoc     *parser.Document
+	previewRaw     string
+	previewBody    string
+	previewChunks  []string
+	previewList    ui.ListState
+	previewReady   bool
+	wordCountBody  string
+	wordCountVal   int
+	wordCountReady bool
+	metrics        *uiMetrics
 }
 
 // targetLabel names the sync target for the status strip: the backend's own
@@ -694,6 +710,12 @@ func (a *nativeApp) showNote(id string) {
 	}
 	// Markdown caches decoded images; release the previous note's cache.
 	a.md = &markdown.Options{LoadImage: a.md.LoadImage, OnLink: a.md.OnLink}
+	a.previewRaw = ""
+	a.previewBody = ""
+	a.previewChunks = nil
+	a.previewReady = false
+	a.wordCountBody = ""
+	a.wordCountReady = false
 	a.note = note
 	a.selectedID = id
 	a.noteMenuOpen = false
@@ -2089,14 +2111,277 @@ func excerpt(body string) string {
 	return clip(body, 120)
 }
 
-// clip collapses whitespace and cuts s to n runes.
+// clip collapses whitespace and cuts s to n runes without scanning or
+// allocating past the first n collapsed runes of a long note body.
 func clip(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n]) + "…"
+	if n <= 0 || s == "" {
+		return ""
 	}
-	return s
+	var b strings.Builder
+	b.Grow(min(len(s), n*4+4))
+	count := 0
+	inSpace := true
+	pendingSpace := false
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			if !inSpace {
+				pendingSpace = true
+				inSpace = true
+			}
+			continue
+		}
+		if pendingSpace {
+			if count >= n {
+				b.WriteString("…")
+				return b.String()
+			}
+			b.WriteByte(' ')
+			count++
+			pendingSpace = false
+		}
+		if count >= n {
+			b.WriteString("…")
+			return b.String()
+		}
+		b.WriteRune(r)
+		count++
+		inSpace = false
+	}
+	return b.String()
+}
+
+// countWords counts whitespace-delimited words without allocating a slice.
+func countWords(s string) int {
+	n := 0
+	inWord := false
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			inWord = false
+		} else if !inWord {
+			inWord = true
+			n++
+		}
+	}
+	return n
+}
+
+// bodyWordCount returns the cached word count for a.body, recomputing only
+// when the body string changes.
+func (a *nativeApp) bodyWordCount() int {
+	wcStart := time.Now()
+	if !a.wordCountReady || a.wordCountBody != a.body {
+		a.wordCountVal = countWords(a.body)
+		a.wordCountBody = a.body
+		a.wordCountReady = true
+	}
+	a.metrics.observeAttrs(spanUIWordCount, wcStart,
+		slog.Int("body_bytes", len(a.body)),
+		slog.Int("words", a.wordCountVal),
+	)
+	return a.wordCountVal
+}
+
+// formatMarkdownPreview preserves single line breaks inside Markdown
+// paragraphs (matching Joplin's default note renderer and the raw editor)
+// while leaving code blocks, tables, math, headings, and inline spans intact.
+func formatMarkdownPreview(src string) string {
+	if !strings.Contains(src, "\n") {
+		return src
+	}
+	return formatMarkdownPreviewWithDoc(parser.New(parser.Default), src)
+}
+
+func formatMarkdownPreviewWithDoc(d *parser.Document, src string) string {
+	if !strings.Contains(src, "\n") {
+		return src
+	}
+	d.Set(src)
+	var breaks []int
+	for i := 1; i < d.Len(); i++ {
+		if d.Block(i).Kind != parser.Paragraph {
+			continue
+		}
+		for _, inl := range d.Inlines(i) {
+			if inl.Kind == parser.SoftBreak && inl.Start >= 0 && inl.Start <= len(src) {
+				breaks = append(breaks, inl.Start)
+			}
+		}
+	}
+	if len(breaks) == 0 {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src) + len(breaks)*2)
+	prev := 0
+	for _, pos := range breaks {
+		if pos < prev || pos > len(src) {
+			continue
+		}
+		b.WriteString(src[prev:pos])
+		b.WriteString("  ")
+		prev = pos
+	}
+	b.WriteString(src[prev:])
+	return b.String()
+}
+
+// Small chunks bound cold shaping work for the visible part of a long note.
+// Short documents retain a single Markdown view.
+const previewChunkRunes = 1000
+const previewVirtualizeRunes = 12000
+const previewEstimatedRowHeight = 500
+
+// previewChunks splits src inside paragraphs longer than limit runes, at line
+// ends that no inline span crosses. It returns nil when no paragraph is long
+// enough. Other blocks are never split: their layouts are small, and cutting
+// between blocks would drop the spacing a block gets from following another.
+func previewChunks(doc *parser.Document, src string, limit int) []string {
+	return previewChunksAbove(doc, src, limit, limit)
+}
+
+func previewChunksAbove(doc *parser.Document, src string, limit, threshold int) []string {
+	if limit <= 0 || utf8.RuneCountInString(src) <= threshold {
+		return nil
+	}
+	doc.Set(src)
+	var cuts []int
+	for i := 1; i < doc.Len(); i = doc.Block(i).Next {
+		b := doc.Block(i)
+		if b.Kind != parser.Paragraph || utf8.RuneCountInString(src[b.Start:b.End]) <= threshold {
+			continue
+		}
+		cuts = append(cuts, paragraphCuts(doc, src, i, limit)...)
+	}
+	if len(cuts) == 0 {
+		return nil
+	}
+	chunks := make([]string, 0, len(cuts)+1)
+	prev := 0
+	for _, pos := range cuts {
+		chunks = append(chunks, src[prev:pos])
+		prev = pos
+	}
+	return append(chunks, src[prev:])
+}
+
+// paragraphCuts returns the offsets in src where the block's paragraph can
+// start a new Markdown view: the starts of its lines, far enough apart that
+// each piece stays under limit runes, and outside every inline span so a link,
+// emphasis or code span is never cut.
+func paragraphCuts(doc *parser.Document, src string, block, limit int) []int {
+	b := doc.Block(block)
+	inlines := doc.Inlines(block)
+	inSpan := func(pos int) bool {
+		for _, inl := range inlines {
+			switch inl.Kind {
+			case parser.Code, parser.Emphasis, parser.Strong, parser.Strikethrough,
+				parser.Link, parser.Image, parser.HTML, parser.Math, parser.FootnoteRef:
+				if inl.Start < pos && pos < inl.End {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	var cuts []int
+	runes := 0
+	for pos := b.Start; pos < b.End; {
+		nl := strings.IndexByte(src[pos:b.End], '\n')
+		if nl < 0 {
+			break
+		}
+		lineEnd := pos + nl
+		runes += len([]rune(src[pos : lineEnd+1]))
+		next := lineEnd + 1
+		if runes >= limit && next < b.End && !inSpan(next) {
+			cuts = append(cuts, next)
+			runes = 0
+		}
+		pos = next
+	}
+	if len(cuts) > 0 {
+		return cuts
+	}
+	// A paragraph written on one line has no line end to split at; wrap it at
+	// rune boundaries that no span crosses, as a line break would.
+	runes = 0
+	for i := b.Start; i < b.End; {
+		next := i + 1
+		for next < b.End && src[next]&0xC0 == 0x80 {
+			next++
+		}
+		runes++
+		if runes >= limit && next < b.End && !inSpan(next) {
+			cuts = append(cuts, next)
+			runes = 0
+		}
+		i = next
+	}
+	return cuts
+}
+
+// prepareMarkdownOptions updates and returns the cached markdown.Options for
+// the current note body and palette without allocating a new Theme or
+// re-formatting unchanged Markdown on every frame.
+func (a *nativeApp) prepareMarkdownOptions() string {
+	if !a.mdThemeInit || a.mdThemeDark != a.dark || a.mdThemeWash != activeWash {
+		a.mdTheme = &markdown.Theme{
+			Font:           fontSans,
+			FontSize:       sizeBody,
+			LineHeight:     1.6,
+			CodeLineHeight: 1.45,
+			BlockSpacing:   0.85,
+			ItemSpacing:    0.28,
+			Text:           inkNavy,
+			Muted:          inkSoft,
+			Link:           routeBlue,
+			Strong:         inkNavy,
+			StrongWeight:   600,
+			Rule:           hairline,
+			QuoteBar:       routeBlue.Alpha(0.55),
+			QuoteText:      inkSoft,
+			QuoteBarWidth:  3,
+			Headings: [6]markdown.HeadingStyle{
+				{Size: 1.55, Weight: 700, Color: inkNavy, Top: 1.35, Bottom: 0.5},
+				{Size: 1.32, Weight: 650, Color: inkNavy, Top: 1.25, Bottom: 0.45},
+				{Size: 1.16, Weight: 600, Color: inkNavy, Top: 1.1, Bottom: 0.4},
+				{Size: 1.05, Weight: 600, Color: inkNavy, Top: 1.0, Bottom: 0.35},
+				{Size: 1.0, Weight: 600, Color: inkNavy, Top: 0.9, Bottom: 0.3},
+				{Size: 0.94, Weight: 600, Color: inkSoft, Top: 0.85, Bottom: 0.3},
+			},
+			CodeFont:            fontMono,
+			CodeSize:            0.86,
+			Code:                inkNavy,
+			CodeBackground:      paperSunken.Alpha(0.75),
+			CodeBlockBackground: paperSunken.Alpha(0.55),
+			CodeBlockBorder:     hairline,
+			TableBorder:         hairline,
+			TableHeader:         paperSunken.Alpha(0.65),
+			TableStripe:         paperSunken.Alpha(0.28),
+			Checkbox:            routeBlue,
+		}
+		a.mdThemeDark = a.dark
+		a.mdThemeWash = activeWash
+		a.mdThemeInit = true
+	}
+	if !a.previewReady || a.previewRaw != a.body {
+		a.previewRaw = a.body
+		if a.previewDoc == nil {
+			a.previewDoc = parser.New(parser.Default)
+		}
+		a.previewBody = formatMarkdownPreviewWithDoc(a.previewDoc, a.body)
+		a.previewChunks = nil
+		a.previewChunks = previewChunksAbove(a.previewDoc, a.previewBody, previewChunkRunes, previewVirtualizeRunes)
+		a.previewList = ui.ListState{EstimatedRowHeight: previewEstimatedRowHeight}
+		a.previewReady = true
+	}
+	a.md.Theme = a.mdTheme
+	a.md.WrapCode = true
+	a.md.OnLink = nil
+	if strings.Contains(a.body, "](:/") {
+		a.md.OnLink = a.openLink
+	}
+	return a.previewBody
 }
 
 // renameSelectedRail starts inline rename for the chosen notebook or tag, the

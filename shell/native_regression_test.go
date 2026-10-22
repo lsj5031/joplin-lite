@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 	"github.com/lsj5031/joplin-lite/internal/models"
 )
 
@@ -161,9 +162,12 @@ func TestNativeHeaderActionsRemainVisible(t *testing.T) {
 				}
 			}
 			tt.Key(0, ui.KeyEscape)
-			r, ok := tt.Find("Distinctive note excerpt")
+			r, ok := tt.Find("A readable title")
 			if !ok || r.X >= app.railW+app.listW+cardGap || r.H == 0 {
-				t.Fatal("note list lost its excerpt")
+				t.Fatal("note list lost its title")
+			}
+			if ex, ok := tt.Find("Distinctive note excerpt"); ok && ex.X < app.railW+app.listW {
+				t.Fatalf("note list should not render a second excerpt line: %+v", ex)
 			}
 			if dir := os.Getenv("CAPTURE_DIR"); dir != "" {
 				if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -324,5 +328,103 @@ func TestNativeEditorHeaderIsOneQuietRow(t *testing.T) {
 		if _, ok := tt.Find(item); !ok {
 			t.Fatalf("%s is missing from the note menu", item)
 		}
+	}
+}
+
+func TestMarkdownPreviewSoftBreaksAndCaching(t *testing.T) {
+	registerFonts()
+	app, _ := openNativeTestApp(t)
+	nb := regressionNotebook(t, app, "Preview examples")
+	body := "### 目录示例\nhttps://example.com/index\n\n### 参考链接\nhttps://example.org/notes#section\nhttps://example.net/read?id=101-102\n\n101-102\n103\n104-105\n106-107\n108-109\n110-111\n112-113\n114-115\n\n=== 测试记录\n101 第一条示例\n102-103 第二条示例\n104 分段记录（上）\n105 分段记录（下）\n106-107 中文与 English 混合内容\n\n```text\ncode line 1\ncode line 2\n```"
+	note := addTestNote(t, app.svc, nb.ID, "Multilingual preview", body)
+	addTestNote(t, app.svc, nb.ID, "Another note", "Second note body that should not appear in note row")
+	app.reloadNotebooks()
+	app.reloadNotes()
+	app.showNote(note.ID)
+
+	tt := ui.NewTester(app.view, 1280, 800)
+	tt.Frame()
+
+	// Verify code block content has no trailing spaces injected.
+	formatted := formatMarkdownPreview(body)
+	if !strings.Contains(formatted, "```text\ncode line 1\ncode line 2\n```") {
+		t.Fatalf("code block should not be modified: %q", formatted)
+	}
+	if !strings.Contains(formatted, "101-102  \n103  \n104-105") {
+		t.Fatalf("paragraph soft breaks should become hard line breaks: %q", formatted)
+	}
+
+	// Verify word count and preview body are cached across frames and mode switches.
+	wc := app.bodyWordCount()
+	if wc == 0 || !app.wordCountReady || !app.previewReady {
+		t.Fatalf("expected cached word count and preview state, got wc=%d wordCountReady=%v previewReady=%v", wc, app.wordCountReady, app.previewReady)
+	}
+	themePtr := app.mdTheme
+	if dir := os.Getenv("CAPTURE_DIR"); dir != "" {
+		writeCapture(t, dir, "multilingual-preview", screen(tt), tt)
+	}
+	click(t, tt, "Edit")
+	tt.Frame()
+	if dir := os.Getenv("CAPTURE_DIR"); dir != "" {
+		writeCapture(t, dir, "multilingual-edit", screen(tt), tt)
+	}
+	click(t, tt, "Preview")
+	tt.Frame()
+	if app.mdTheme != themePtr {
+		t.Fatal("markdown theme should be reused across Edit/Preview switches")
+	}
+}
+
+// TestPreviewChunksLongParagraph covers the one-paragraph note whose shaped
+// layout misses MyGo's cache: it is split at line ends, and the pieces rejoin
+// to the same Markdown.
+func TestPreviewChunksLongParagraph(t *testing.T) {
+	doc := parser.New(parser.Default)
+	var b strings.Builder
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&b, "%03d 中文测试记录　『日本語の表示テスト』　2026/01/08　〖8.5%%〗 mixed text\n", i)
+	}
+	src := formatMarkdownPreviewWithDoc(doc, b.String())
+	chunks := previewChunks(doc, src, previewChunkRunes)
+	if len(chunks) < 2 {
+		t.Fatalf("a %d-rune paragraph was not split: %d chunks", len([]rune(src)), len(chunks))
+	}
+	if strings.Join(chunks, "") != src {
+		t.Fatal("split chunks do not rejoin to the formatted preview")
+	}
+	for _, chunk := range chunks {
+		if n := len([]rune(chunk)); n > previewChunkRunes*2 {
+			t.Fatalf("chunk of %d runes is much larger than the %d-rune budget", n, previewChunkRunes)
+		}
+	}
+}
+
+// TestPreviewChunksNeverCutInline keeps a link split across source lines in
+// one piece, and wraps a single-line paragraph at a rune boundary instead.
+func TestPreviewChunksNeverCutInline(t *testing.T) {
+	doc := parser.New(parser.Default)
+	body := "[the link\nlabel](https://example.com) " + strings.Repeat("中", 200)
+	src := formatMarkdownPreviewWithDoc(doc, body)
+	chunks := previewChunks(doc, src, 40)
+	if len(chunks) < 2 {
+		t.Fatalf("a %d-rune single-line paragraph was not split", len([]rune(src)))
+	}
+	start := strings.Index(src, "[the link")
+	end := strings.Index(src, "https://example.com)") + len("https://example.com)")
+	for _, chunk := range chunks {
+		if strings.Contains(chunk, "[the link") && !strings.Contains(chunk, "https://example.com)") {
+			t.Fatalf("link was cut across chunks: %q", chunk)
+		}
+	}
+	if start < 0 || end <= start {
+		t.Fatal("link not found in the formatted source")
+	}
+}
+
+func TestPreviewChunksShortBodyUnsplit(t *testing.T) {
+	doc := parser.New(parser.Default)
+	src := formatMarkdownPreviewWithDoc(doc, "short\nbody")
+	if chunks := previewChunks(doc, src, previewChunkRunes); chunks != nil {
+		t.Fatalf("short body was split: %q", chunks)
 	}
 }

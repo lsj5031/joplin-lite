@@ -1,0 +1,52 @@
+diff --git a/ui/paint.go b/ui/paint.go
+index e94601d..1250c56 100644
+--- a/ui/paint.go
++++ b/ui/paint.go
+@@ -660,9 +660,10 @@ func (p *Painter) textBackgrounds(l *text.Layout, x, y float32, ts textStyle, sp
+ 	if l == nil || ts.background.A == 0 && sp == nil {
+ 		return
+ 	}
++	inlineTransforms := p.inlineTransforms()
+ 	for li := range l.Lines {
+ 		line := &l.Lines[li]
+-		if !p.transform.Set && !p.inlineTransforms() && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
++		if !p.transform.Set && !inlineTransforms && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
+ 			continue
+ 		}
+ 		if ts.background.A > 0 && line.Width > 0 {
+@@ -685,20 +686,23 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
+ 	shade := text.ShadeOf(color.R, color.G, color.B)
+ 	start := int32(len(p.s.Glyphs))
+ 	var run *glyphRun
+-	if sys.JoinsGlyphs() && !p.inlineTransforms() {
++	// The inline tree does not change during this paint pass. Scanning
++	// it for every line and glyph makes long rich text need quadratic work.
++	inlineTransforms := p.inlineTransforms()
++	if sys.JoinsGlyphs() && !inlineTransforms {
+ 		// The engine's, whose buffers each text reuses.
+ 		run = &p.rt.glyphRun
+ 		run.ids, run.pens, run.glyphs = run.ids[:0], run.pens[:0], run.glyphs[:0]
+ 	}
+ 	for li := range l.Lines {
+ 		line := &l.Lines[li]
+-		if !p.transform.Set && !p.inlineTransforms() && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
++		if !p.transform.Set && !inlineTransforms && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
+ 			continue
+ 		}
+ 		baseline := sys.Baseline((y + line.Baseline) * s)
+ 		for _, g := range line.Glyphs {
+ 			pen := (x + g.X) * s
+-			if g.Object || !p.transform.Set && !p.inlineTransforms() && (pen > (p.clip.X+p.clip.W)*s || pen+(g.Advance+g.Size)*s < p.clip.X*s) {
++			if g.Object || !p.transform.Set && !inlineTransforms && (pen > (p.clip.X+p.clip.W)*s || pen+(g.Advance+g.Size)*s < p.clip.X*s) {
+ 				continue
+ 			}
+ 			ix := float32(math.Floor(float64(pen)))
+@@ -708,7 +712,7 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
+ 					glyphShade = text.ShadeOf(glyphColor.R, glyphColor.G, glyphColor.B)
+ 				}
+ 			}
+-			gi := sys.Glyph(g.Font, g.ID, s, pen, glyphShade, p.opaque && !p.inlineTransforms())
++			gi := sys.Glyph(g.Font, g.ID, s, pen, glyphShade, p.opaque && !inlineTransforms)
+ 			if !gi.OK {
+ 				continue
+ 			}
