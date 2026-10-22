@@ -400,8 +400,8 @@ func TestListenAddr(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{"defaults", Config{}, "localhost:41184"},
-		{"custom port", Config{Port: 9999}, "localhost:9999"},
+		{"defaults", Config{}, "127.0.0.1:41184"},
+		{"custom port", Config{Port: 9999}, "127.0.0.1:9999"},
 		{"custom host", Config{ListenHost: "0.0.0.0", Port: 41184}, "0.0.0.0:41184"},
 	}
 	for _, tt := range tests {

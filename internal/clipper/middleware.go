@@ -8,7 +8,7 @@ import (
 // apiAuth implements Joplin's checkToken_ (packages/lib/services/rest/Api.ts):
 //
 //   - the ping and pairing endpoints are open — the extension ping-scans
-//     41184–41194 unauthenticated and pairs without a token;
+//     41184–41193 unauthenticated and pairs without a token;
 //   - everything else takes the API token as a **query parameter**
 //     (`?token=<API_TOKEN>`) exactly like the official extension sends it;
 //     `Authorization: Bearer <key>` is additionally accepted for our own

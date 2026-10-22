@@ -47,6 +47,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>Joplin Lite</string>
   <key>CFBundleExecutable</key><string>Joplin Lite</string>
   <key>CFBundleIdentifier</key><string>com.joplinlite.desktop</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>com.joplinlite.desktop.joplin</string>
+      <key>CFBundleURLSchemes</key><array><string>joplin</string></array>
+    </dict>
+  </array>
   <key>CFBundleIconFile</key><string>app-icon</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Joplin Lite</string>

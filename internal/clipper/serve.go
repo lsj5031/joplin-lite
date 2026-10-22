@@ -10,7 +10,7 @@ import (
 
 // Serve runs the clipper HTTP server. A bind failure maps to the explicit
 // message: the clipper port (41184) cannot be shared with Joplin desktop —
-// the extension ping-scans 41184–41194 and both servers answering would
+// the extension ping-scans 41184–41193 and both servers answering would
 // split clips arbitrarily.
 func Serve(httpSrv *http.Server) error {
 	err := httpSrv.ListenAndServe()

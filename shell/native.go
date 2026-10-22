@@ -2487,37 +2487,62 @@ func (a *nativeApp) openPalette() {
 }
 
 func (a *nativeApp) openPaletteNote(n *models.NoteSummary) {
-	a.flush()
-	if a.dirty {
-		return
+	a.paletteOpen = false
+	a.openNoteRow(n.ID, n.ParentID, n.IsConflict)
+}
+
+// openExternalNote shows the note a joplin://x-callback-url/openNote link
+// names, which may sit in a notebook the list is not showing. It reports
+// false, leaving a status message, when the note cannot be opened.
+func (a *nativeApp) openExternalNote(id string) bool {
+	note, err := a.svc.GetNote(id)
+	if err != nil {
+		a.saveErr = err.Error()
+		return false
+	}
+	if note == nil {
+		a.saveErr = "That note is not in this vault yet."
+		return false
 	}
 	a.paletteOpen = false
+	return a.openNoteRow(note.ID, note.ParentID, note.IsConflict)
+}
+
+// openNoteRow selects the notebook (or the Conflicts rail) of a note and its
+// row, paging the list until the row is loaded. A draft that could not be
+// saved keeps the editor where it is.
+func (a *nativeApp) openNoteRow(id, parentID string, isConflict int) bool {
+	a.flush()
+	if a.dirty {
+		return false
+	}
 	notebook := a.selectedNotebook
-	if n.IsConflict != 0 {
+	if isConflict != 0 {
 		notebook = conflictsRail
 	} else if notebook != "" {
-		notebook = n.ParentID
+		notebook = parentID
 	}
 	a.selectedNotebook, a.selectedTag, a.query = notebook, "", ""
-	a.selectedID = n.ID
+	a.selectedID = id
 	a.restoring = true
 	a.reloadNotes()
 	a.restoring = false
-	for a.rowOf(n.ID) < 0 && a.hasMore && a.cursor != "" {
+	for a.rowOf(id) < 0 && a.hasMore && a.cursor != "" {
 		page, err := a.svc.ListNoteSummaries(a.noteFilter(a.cursor))
 		if err != nil {
 			a.saveErr = err.Error()
-			return
+			return false
 		}
 		a.notes = append(a.notes, page.Notes...)
 		a.hasMore, a.cursor = page.HasMore, page.NextCursor
 	}
-	a.showNote(n.ID)
+	a.showNote(id)
 	a.list.ScrollIntoView(a.selectedNote)
-	a.remember(n.ID)
+	a.remember(id)
 	if a.narrow {
 		a.narrowEditor = true
 	}
+	return a.note != nil && a.note.ID == id
 }
 
 // Native callbacks do not pass through the toolkit's modal shortcut guard.
@@ -2645,8 +2670,9 @@ func (a *nativeApp) dockMenu() *mygo.Menu {
 }
 
 // openNativeWindow opens the native workspace. It returns the window so the
-// caller keeps the same lifecycle handling as the webview shell.
-func openNativeWindow(be *backend) *mygo.Window {
+// caller keeps the same lifecycle handling as the webview shell, and the
+// workspace so an incoming joplin:// link can select a note in it.
+func openNativeWindow(be *backend) (*mygo.Window, *nativeApp) {
 	app := newNativeApp(be.db)
 	app.be = be
 	if be != nil {
@@ -2726,5 +2752,5 @@ func openNativeWindow(be *backend) *mygo.Window {
 			mygo.App.Quit()
 		}()
 	}
-	return win
+	return win, app
 }

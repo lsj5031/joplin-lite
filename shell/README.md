@@ -107,6 +107,27 @@ same reason in a native dialog.
 | `-smoke` | development check: capture `tmp/native-smoke.png` after the first frames, then quit |
 | `-smoke-after` | how long to let the window render before the capture (default 6s) |
 
+### External links (joplin://)
+
+Joplin's external links — the form Joplin copies for other apps — open the
+note they name:
+
+```
+joplin://x-callback-url/openNote?id=bca23b7573e156f6c428fb9a9f0d0fc7
+```
+
+The macOS bundle declares the `joplin` scheme (`CFBundleURLTypes`) and claims it
+on startup, so clicking such a link in another app brings Joplin Lite forward,
+switches to the note's notebook and selects the note; a link that has to start
+the app works too. A link whose note has not synced to this device shows a
+status message instead of opening.
+
+Only `openNote` is handled: `openFolder`, `openTag`, `createNote` and
+`x-success`/`x-error` callback parameters are ignored. Windows packages are
+deliberately registry-free, so they do not claim `joplin://` — a URL passed on
+the command line still opens its note, but clicking such a link does not start
+the app.
+
 ### Remembered native startup
 
 Finder launches read `joplin-lite/launch.json` inside Go's `os.UserConfigDir()`:
@@ -126,15 +147,16 @@ with exactly these supported fields (paths must be absolute; `~` is not expanded
 {
   "config": "/Users/YOU/.config/joplin-desktop/settings.json",
   "profile": "/Users/YOU/.config/joplin-desktop",
-  "addr": "127.0.0.1:41984",
+  "addr": "127.0.0.1:41185",
   "reuse_official_keychain": true,
   "dropbox_block_deletes": true
 }
 ```
 
 `config` and `profile` are required. `addr` is optional (otherwise the loaded
-config's API address applies); both booleans default to false. This file contains
-no credentials. Prefer a private directory and mode `0600` for the file.
+config's API address applies) and must stay in 41184–41193, the range the Web
+Clipper scans for the clipper service; both booleans default to false. This
+file contains no credentials. Prefer a private directory and mode `0600` for the file.
 The app does not write it or rewrite official `settings.json`.
 
 Explicit `-config`, `-data-dir`, `-addr`, or `-no-sync` flags select an independent

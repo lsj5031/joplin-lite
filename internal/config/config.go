@@ -107,7 +107,7 @@ type Config struct {
 	MasterPassword string `json:"-"`
 	DataDir        string `json:"-"`
 	Port           int    `json:"-"`
-	ListenHost     string `json:"-"` // bind address host (default: localhost)
+	ListenHost     string `json:"-"` // bind address host (default: 127.0.0.1)
 
 	// NoSync runs the server local-only: no sync backend, no remote. Used to
 	// browse/operate on a local database (e.g. a Joplin profile copy) without
@@ -146,7 +146,10 @@ type RAGConfig struct {
 func (c *Config) ListenAddr() string {
 	host := c.ListenHost
 	if host == "" {
-		host = "localhost"
+		// The official web clipper only ever dials 127.0.0.1, while a
+		// "localhost" bind can land on ::1 (notably on Windows), leaving the
+		// extension unable to find the clipper service.
+		host = "127.0.0.1"
 	}
 	port := c.Port
 	if port == 0 {

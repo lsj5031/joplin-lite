@@ -51,7 +51,7 @@ Want to explore the interface before connecting your real notes? Launch Joplin L
 & ".\Joplin Lite.exe" -no-sync -data-dir "$env:LOCALAPPDATA\JoplinLite\try-notes"
 ```
 
-Keep those same flags whenever you want to reopen your trial notebook collection. *(If the local Clipper API port is already taken by another app, pass `-addr 127.0.0.1:41984`.)*
+Keep those same flags whenever you want to reopen your trial notebook collection. *(If the local Clipper API port is already taken by another app, pass `-addr 127.0.0.1:41185` — the Web Clipper only scans ports 41184–41193.)*
 
 ---
 
@@ -61,6 +61,7 @@ Keep those same flags whenever you want to reopen your trial notebook collection
 - **Jump anywhere from the keyboard.** Press `Cmd/Ctrl+P` (or click `⌘K` in the search bar) to open the **Command & Note Palette**, switch notes instantaneously, toggle appearances, or trigger sync.
 - **Stay organized without clutter.** Keep the sidebar focused on your note titles, or open the translucent **Notebooks & Tags** rail (`Cmd/Ctrl+\`) when you want to browse folders, filter by tag, rename inline (`F2` / `Return`), or drag notes into another notebook. Select multiple notes (`Cmd/Ctrl+Click` or `Shift+Click`) to move or delete them in bulk.
 - **Attach files & images effortlessly.** Click the paperclip button, drag files straight into the editor, or paste images from your clipboard.
+- **Follow `joplin://` links.** Paste an external link such as `joplin://x-callback-url/openNote?id=…` into another app and clicking it brings Joplin Lite forward with that note selected.
 - **Resolve sync conflicts safely.** When two devices edit the same note, Joplin Lite shows a side-by-side comparison of both complete versions so you never lose work blindly.
 - **Keep portable backups.** Export the whole library to a `.jex` file that Joplin itself can read, or import one back—notes, notebooks, attachments and tags included. See [Backups: JEX export and import](#backups-jex-export-and-import).
 - **Make the space yours.** Open **Settings** (`Cmd/Ctrl+,`) to switch between **Light** and **Dark** appearances and choose from four Oklab gradient backdrops (**Sage**, **Linen**, **Mist**, and **Kero**).

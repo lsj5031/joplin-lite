@@ -52,7 +52,7 @@ api:
 server:
   data_dir: ""       # Default: GOJOPLIN_DATA_DIR or ~/.local/share/gojoplin
   port: 41184        # Overridable by GOJOPLIN_PORT
-  listen_host: ""    # Default: localhost; use "0.0.0.0" to bind all interfaces (GOJOPLIN_LISTEN_HOST)
+  listen_host: ""    # Default: 127.0.0.1 (the Web Clipper dials loopback IPv4); use "0.0.0.0" to bind all interfaces (GOJOPLIN_LISTEN_HOST)
 
 # Observability — NOT YET IMPLEMENTED. These settings are parsed and validated,
 # but no OTLP spans are exported and no /metrics endpoint is served yet. They
