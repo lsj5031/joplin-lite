@@ -289,6 +289,7 @@ type NotePassage struct {
 const (
 	EventRunStarted     = "run.started"
 	EventActivity       = "activity.updated"
+	EventThinking       = "thinking.delta"
 	EventAnswerDelta    = "answer.delta"
 	EventAnswerSnapshot = "answer.snapshot"
 	EventEvidenceRead   = "evidence.read"

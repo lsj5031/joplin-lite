@@ -3,6 +3,11 @@
 # and the whole format gate fails for reasons unrelated to the code).
 internal/models/testdata/** -text
 
+# The embedded Ask agent bundle is hashed byte-for-byte into the manifest;
+# a checkout must never rewrite its line endings.
+agent/dist/agent.js -text
+internal/assistant/bundle/agent.js -text
+
 # Keep shell scripts and Go files on their committed line endings.
 *.sh text eol=lf
 

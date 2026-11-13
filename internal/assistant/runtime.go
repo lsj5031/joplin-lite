@@ -401,6 +401,27 @@ func newAgentRuntime(m *Manager, settings Settings, conversationID string) (*age
 	return r, nil
 }
 
+// logToolCall records one agent tool call in desktop.log: what the agent
+// requested, how long it took and how much it returned, so a run can be
+// followed from the log alone.
+func (r *agentRuntime) logToolCall(tool, detail string, start time.Time, returned int, err error) {
+	elapsed := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		slog.Warn("ask tool call", "tool", tool, "detail", detail, "elapsed", elapsed, "error", err)
+		return
+	}
+	slog.Info("ask tool call", "tool", tool, "detail", detail, "elapsed", elapsed, "returned", returned)
+}
+
+// logDetail trims a tool argument for the log line.
+func logDetail(text string, limit int) string {
+	detail := strings.TrimSpace(text)
+	if len([]rune(detail)) > limit {
+		detail = string([]rune(detail)[:limit]) + "…"
+	}
+	return detail
+}
+
 func (r *agentRuntime) installHost() error {
 	rt := r.loop.Runtime()
 	host := map[string]any{
@@ -427,7 +448,14 @@ func (r *agentRuntime) installHost() error {
 				return r.resolvedError(toolErr("invalid_request", "The search arguments are invalid."))
 			}
 			return r.promise(func(ctx context.Context, run *Run) (any, error) {
-				return r.manager.searchNotes(ctx, run, input)
+				start := time.Now()
+				result, err := r.manager.searchNotes(ctx, run, input)
+				if err != nil {
+					r.logToolCall("notesSearch", logDetail(input.Query, 80), start, 0, err)
+				} else {
+					r.logToolCall("notesSearch", logDetail(input.Query, 80), start, len(result.Results), nil)
+				}
+				return result, err
 			})
 		}),
 		"notesRead": moejs.NativeFunc(func(realm *moejs.Realm, this moejs.Value, args []moejs.Value) (moejs.Value, error) {
@@ -436,17 +464,30 @@ func (r *agentRuntime) installHost() error {
 				return r.resolvedError(toolErr("invalid_request", "The read arguments are invalid."))
 			}
 			return r.promise(func(ctx context.Context, run *Run) (any, error) {
-				return r.manager.readNote(ctx, run, input)
+				start := time.Now()
+				result, err := r.manager.readNote(ctx, run, input)
+				if err != nil {
+					r.logToolCall("notesRead", input.NoteID, start, 0, err)
+				} else {
+					r.logToolCall("notesRead", logDetail(result.Title, 80), start, len(result.Text), nil)
+				}
+				return result, err
 			})
 		}),
 		"notesListNotebooks": moejs.NativeFunc(func(realm *moejs.Realm, this moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			return r.promise(func(ctx context.Context, run *Run) (any, error) {
-				return r.manager.listNotebooks(ctx, run)
+				start := time.Now()
+				result, err := r.manager.listNotebooks(ctx, run)
+				r.logToolCall("notesListNotebooks", "", start, -1, err)
+				return result, err
 			})
 		}),
 		"notesListTags": moejs.NativeFunc(func(realm *moejs.Realm, this moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			return r.promise(func(ctx context.Context, run *Run) (any, error) {
-				return r.manager.listTags(ctx, run)
+				start := time.Now()
+				result, err := r.manager.listTags(ctx, run)
+				r.logToolCall("notesListTags", "", start, -1, err)
+				return result, err
 			})
 		}),
 		"dbCall": moejs.NativeFunc(func(realm *moejs.Realm, this moejs.Value, args []moejs.Value) (moejs.Value, error) {

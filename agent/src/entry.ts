@@ -19,6 +19,7 @@ interface OpenConfig {
 interface RunState {
   requestId: string;
   text: string;
+  thinking: string;
   tools: Map<string, { name: string; status: 'running' | 'done' | 'error' }>;
 }
 
@@ -69,6 +70,7 @@ function project(event: PiEvent): void {
     case 'run_start':
       if (state) {
         state.text = '';
+        state.thinking = '';
         state.tools.clear();
       }
       emit({ type: 'activity.updated', requestId: state?.requestId, activity: { kind: 'thinking', label: 'Thinking', active: 1 } });
@@ -83,8 +85,29 @@ function project(event: PiEvent): void {
           state.text += change.delta;
           emit({ type: 'answer.delta', requestId: state.requestId, text: change.delta });
         }
+        if (change.type === 'thinking_delta' && change.delta) {
+          state.thinking += change.delta;
+          emit({ type: 'thinking.delta', requestId: state.requestId, text: change.delta });
+        }
       }
       break;
+    case 'message_end': {
+      if (!state) break;
+      const blocks = event.message?.content;
+      if (Array.isArray(blocks)) {
+        const thinking = blocks
+          .filter((block: any) => block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking)
+          .map((block: any) => block.thinking)
+          .join('\n\n');
+        if (thinking.length > state.thinking.length) {
+          // The provider delivered reasoning that never streamed as deltas.
+          emit({ type: 'thinking.delta', requestId: state.requestId, text: thinking.slice(state.thinking.length) });
+          state.thinking = thinking;
+        }
+        if (thinking) log(`thinking: ${thinking.length > 1200 ? '…' + thinking.slice(-1200) : thinking}`);
+      }
+      break;
+    }
     case 'tool_execution_start': {
       if (!state) break;
       const tool = { name: event.toolName, status: 'running' as const };

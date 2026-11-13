@@ -35157,7 +35157,7 @@ function project(event) {
   let state3 = active;
   switch (event.type) {
     case "run_start":
-      state3 && (state3.text = "", state3.tools.clear()), emit({ type: "activity.updated", requestId: state3?.requestId, activity: { kind: "thinking", label: "Thinking", active: 1 } });
+      state3 && (state3.text = "", state3.thinking = "", state3.tools.clear()), emit({ type: "activity.updated", requestId: state3?.requestId, activity: { kind: "thinking", label: "Thinking", active: 1 } });
       break;
     case "message_start":
       state3 && event.message?.role === "assistant" && (state3.text = "");
@@ -35165,8 +35165,19 @@ function project(event) {
     case "message_update":
       if (!state3) break;
       for (let change of event.changes ?? [])
-        change.type === "text_delta" && change.delta && (state3.text += change.delta, emit({ type: "answer.delta", requestId: state3.requestId, text: change.delta }));
+        change.type === "text_delta" && change.delta && (state3.text += change.delta, emit({ type: "answer.delta", requestId: state3.requestId, text: change.delta })), change.type === "thinking_delta" && change.delta && (state3.thinking += change.delta, emit({ type: "thinking.delta", requestId: state3.requestId, text: change.delta }));
       break;
+    case "message_end": {
+      if (!state3) break;
+      let blocks = event.message?.content;
+      if (Array.isArray(blocks)) {
+        let thinking = blocks.filter((block) => block.type === "thinking" && typeof block.thinking == "string" && block.thinking).map((block) => block.thinking).join(`
+
+`);
+        thinking.length > state3.thinking.length && (emit({ type: "thinking.delta", requestId: state3.requestId, text: thinking.slice(state3.thinking.length) }), state3.thinking = thinking), thinking && log(`thinking: ${thinking.length > 1200 ? "\u2026" + thinking.slice(-1200) : thinking}`);
+      }
+      break;
+    }
     case "tool_execution_start": {
       if (!state3) break;
       let tool = { name: event.toolName, status: "running" };

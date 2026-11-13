@@ -976,6 +976,17 @@ func (m *Manager) handleAgentEvent(rt *agentRuntime, raw map[string]any) {
 		run.answer += text
 		m.mu.Unlock()
 		m.publish(run, Event{Type: EventAnswerDelta, Text: text})
+	case "thinking.delta":
+		text := stringValue(raw, "text")
+		m.mu.Lock()
+		if m.active != run || run.terminal {
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Unlock()
+		// Reasoning is transient: it streams to the UI and desktop.log but is
+		// never written into the persisted transcript.
+		m.publish(run, Event{Type: EventThinking, Text: text})
 	case "answer.snapshot":
 		text := stringValue(raw, "text")
 		m.mu.Lock()
