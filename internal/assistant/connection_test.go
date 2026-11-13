@@ -40,6 +40,29 @@ func TestConnectionUsesConfiguredEndpointAndCredential(t *testing.T) {
 	}
 }
 
+func TestConnectionAllowsKeylessLocalEndpoint(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"}}]}`))
+	}))
+	defer server.Close()
+	settings := DefaultSettings()
+	settings.BaseURL = server.URL + "/v1"
+	settings.ModelID = "local-model"
+	if !settings.Configured() {
+		t.Fatal("a keyless local endpoint should be configured")
+	}
+	m := &Manager{settings: DefaultSettings()}
+	if err := m.TestConnection(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "" {
+		t.Fatalf("keyless endpoint received Authorization %q", gotAuth)
+	}
+}
+
 func TestConnectionReportsProviderFailureWithoutLeakingTheKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

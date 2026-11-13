@@ -146,8 +146,10 @@ func (s Settings) Validate() error {
 	return nil
 }
 
+// Configured allows keyless local inference endpoints. A key is optional; when
+// present it is still held only in memory and injected by the Go transport.
 func (s Settings) Configured() bool {
-	return s.BaseURL != "" && s.ModelID != "" && s.APIKey != ""
+	return s.BaseURL != "" && s.ModelID != ""
 }
 
 // AskRequest is one accepted Ask submission. The Go host owns its identity and

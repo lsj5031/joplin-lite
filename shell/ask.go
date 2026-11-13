@@ -370,7 +370,7 @@ func (a *nativeApp) saveAskSettings() {
 	a.ask.settingsOpen = false
 	a.ask.settingsErr = ""
 	a.ask.testNotice = ""
-	a.ask.notice = "Model connection saved. The API key is kept for this session only."
+	a.ask.notice = "Model connection saved. API keys are kept for this session only."
 }
 
 func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
@@ -379,7 +379,7 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 	}
 	ui.Modal(c, &a.ask.settingsOpen, func() {
 		ui.Text(c, "Ask model connection").FontSize(sizeBody).Bold()
-		ui.Text(c, "Questions and the note passages the agent reads are sent to this model endpoint, even when Joplin sync uses end-to-end encryption. The API key is held in memory for this session only.").
+		ui.Text(c, "Questions and the note passages the agent reads are sent to this model endpoint, even when Joplin sync uses end-to-end encryption. The API key, if used, is held in memory for this session only.").
 			FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(460)
 		ui.Scroll(c.Key("ask-settings-fields")).Width(480).MaxHeight(330).Children(func() {
 			ui.TextInput(c.Key("ask-base-url"), &a.ask.settings.BaseURL).
@@ -391,8 +391,8 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 				Placeholder("model-name").
 				Width(460)
 			ui.TextInput(c.Key("ask-api-key"), &a.ask.key).
-				Label("API key (session only)").
-				Placeholder("sk-…").
+				Label("API key (optional for local endpoints)").
+				Placeholder("leave empty for a keyless local endpoint").
 				Password().
 				Width(460)
 			ui.Row(c).Gap(8).Children(func() {
