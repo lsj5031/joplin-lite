@@ -110,9 +110,16 @@ func TestNativeNavigation(t *testing.T) {
 			click(t, tt, "Note actions")
 			click(t, tt, "Delete note…")
 			shot("delete-confirm")
+			if !tt.Focused("Cancel") {
+				t.Fatal("delete confirmation must initially focus Cancel")
+			}
+			tt.Key(0, ui.KeyTab)
+			if !tt.Focused("Delete") {
+				t.Fatal("Tab must focus explicit Delete")
+			}
 			tt.Key(0, ui.KeyEnter)
 			if n, _ := app.svc.GetNote(alpha.ID); n != nil || app.confirmDelete {
-				t.Fatal("Enter must confirm deletion")
+				t.Fatal("Tab then Enter must confirm deletion")
 			}
 		})
 	}

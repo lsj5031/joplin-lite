@@ -367,7 +367,13 @@ Joplin treats the missing values as defaults on import.
 
 ## Browser preview (optional)
 
-The web build is not embedded in any binary. To use it in a browser over the
+The web build is not embedded in any binary. See the [browser README](../web/README.md)
+for a complete disposable-profile setup, API mutation permissions, demo mode and
+frontend checks. It documents the supported browser scope: Reload refreshes the
+local database; sync configuration, Ask and conflict resolution remain native
+features. Browser and native appearance preferences are separate.
+
+To use it in a browser over the
 same vault, serve it from disk — the preview gets its own loopback port because
 the Data API owns the top-level paths (`/notes`, `/tags`, …):
 
@@ -382,7 +388,41 @@ cd .. && go build -o tmp/gojoplin.exe .     # the headless CLI
 `internal/webui` injects `{base, token, shell: "browser", profile}` before
 `</head>`, so the page reaches the API on its configured port; hashed assets
 are immutable and client routes fall back to `index.html`. `GOJOPLIN_WEB_DIR`
-sets the directory without the flag.
+sets the directory without the flag. Keep the preview on loopback: its HTML
+contains the API token. The example assumes a config with an API token and key;
+the browser README supplies a complete local-only trial.
+
+## Visual contract and capture scope
+
+[DESIGN.md](../DESIGN.md) describes Field Notes palette roles, spacing and platform
+exceptions. Native reading/writing use installed Avenir Next, falling back to
+bundled Overpass, at baseline 17 DIP / 1.6 line height; titles use installed Optima
+or Overpass at baseline 24 DIP. OS accessibility text scaling adjusts these
+baselines. Writing and preview share a 700 DIP maximum content measure with
+responsive padding. Compact native rows show titles and timestamps; editor/Ask
+cards float over the wash with a subtle border/shadow. Windows paper cards stay
+opaque for ClearType, while macOS normally uses translucent paper and becomes opaque
+with Reduce Transparency. Platform
+caption controls, menus and Cmd/Ctrl conventions remain native. The browser
+retains its larger editorial title and 1.95 body line height.
+
+The pinned MyGO accessibility backport carries Reduce Transparency from platform
+preferences to UI/Painter and makes glass opaque theme Surface, with a theme Border
+under High Contrast; blur/scroll edges use opaque theme Background. Custom cards and
+the wash base also become opaque. The existing macOS and Windows backends read the
+preference; Linux does not populate it. CPU material pixel tests cover light/dark
+fills and backdrop independence. Live OS toggling and actual native Mica/vibrancy
+behavior remain unverified; the native backdrop requests are unchanged. See
+[`patches/README.md`](patches/README.md) for patch scope and validation.
+
+`TestCaptureScreens` renders host-platform content and reserves its title-bar
+insets. `TestCaptureReadme` also follows the host layout: Windows captures reserve
+caption insets without inventing native controls; the Mac presentation fixture
+composites traffic lights, corners and shadow. Promo captures still explicitly
+simulate macOS layout on any host. These are design fixtures, not live macOS
+captures or proof of Windows caption removal. Native
+HWND geometry/hit-test checks and actual platform smoke tests are separate;
+rendered captures must be inspected before claiming visual sign-off.
 
 ## Validation limits
 

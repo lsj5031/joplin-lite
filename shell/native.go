@@ -85,18 +85,19 @@ type nativeApp struct {
 	savedErr      string
 	savedDelete   string
 
-	editing     bool
-	note        *models.Note
-	title       string
-	body        string
-	dirty       bool
-	saveDue     time.Time
-	saveTimer   *time.Timer
-	invalidate  func()
-	savedAt     time.Time
-	saveErr     string
-	focusBody   bool
-	focusSearch bool
+	editing         bool
+	note            *models.Note
+	title           string
+	body            string
+	dirty           bool
+	saveDue         time.Time
+	saveTimer       *time.Timer
+	invalidate      func()
+	savedAt         time.Time
+	saveErr         string
+	focusBody       bool
+	focusSearch     bool
+	announcedStatus map[string]string
 
 	// JEX export/import. The work runs off the UI thread and reports through
 	// backupBusy / backupNotice / backupErr; the pick* seams let tests avoid
@@ -462,7 +463,7 @@ func (a *nativeApp) tagDialogs(c *ui.Context, t *ui.Theme) {
 			if a.tagRename {
 				title, action = "Rename tag", "Save"
 			}
-			ui.Text(c, title).FontSize(17).Bold()
+			ui.Text(c, title).FontSize(scaledText(c, 17)).Bold()
 			input := ui.TextInput(c.Key("tag-name"), &a.tagTitle).
 				Placeholder("Tag name").
 				Label("Tag name").
@@ -472,7 +473,7 @@ func (a *nativeApp) tagDialogs(c *ui.Context, t *ui.Theme) {
 				a.submitTag()
 			}
 			if a.tagErr != "" {
-				ui.Text(c, a.tagErr).FontSize(12).TextColor(t.Danger)
+				ui.Text(c, a.tagErr).FontSize(scaledText(c, 12)).TextColor(t.Danger)
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 				if ui.Button(c, "Cancel").Clicked() {
@@ -1111,7 +1112,7 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 			if a.notebookRename {
 				title, action = "Rename notebook", "Save"
 			}
-			ui.Text(c, title).FontSize(17).Bold()
+			ui.Text(c, title).FontSize(scaledText(c, 17)).Bold()
 			parentChanged := false
 			if !a.notebookRename {
 				if nb := a.notebookByID(a.notebookCandidateParent); nb != nil {
@@ -1129,7 +1130,7 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 						}
 					}
 				} else {
-					ui.Text(c, "At top level").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "At top level").FontSize(scaledText(c, 12)).TextColor(t.TextMuted)
 				}
 			}
 			input := ui.TextInput(c.Key("notebook-name"), &a.notebookTitle).
@@ -1144,7 +1145,7 @@ func (a *nativeApp) notebookDialogs(c *ui.Context, t *ui.Theme) {
 				a.submitNotebook()
 			}
 			if a.notebookErr != "" {
-				ui.Text(c, a.notebookErr).FontSize(12).TextColor(t.Danger)
+				ui.Text(c, a.notebookErr).FontSize(scaledText(c, 12)).TextColor(t.Danger)
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 				if ui.Button(c, "Cancel").Clicked() {
@@ -1869,7 +1870,7 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &a.settingsOpen, func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, iconSettings).Size(16, 16).TextColor(routeBlue)
-			ui.Text(c, "Settings").FontSize(17).Bold()
+			ui.Text(c, "Settings").FontSize(scaledText(c, 17)).Bold()
 		})
 		_, height := c.Size()
 		ui.Scroll(c.Key("settings-fields")).Width(420).MaxHeight(max(120, height-210)).Children(func() {
@@ -1877,7 +1878,7 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 				// Group 1: Appearance, with each track named above it.
 				ui.Column(c).Width(416).Padding(8, 10).Gap(6).
 					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
-					ui.Text(c, "Appearance").FontSize(12).Bold()
+					ui.Text(c, "Appearance").FontSize(scaledText(c, 12)).Bold()
 					label(c, "Theme")
 					appearancePick := 0
 					if a.settings.Dark {
@@ -1907,7 +1908,7 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 				// as a third appearance choice.
 				ui.Column(c).Width(416).Padding(8, 10).Gap(6).
 					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
-					ui.Text(c, "Synchronization").FontSize(12).Bold()
+					ui.Text(c, "Synchronization").FontSize(scaledText(c, 12)).Bold()
 					label(c, "Sync target")
 
 					labels, targets := a.settingsTargets()
@@ -1917,19 +1918,19 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 
 					switch a.settings.Target {
 					case targetFolder:
-						ui.Text(c, "Sync folder").FontSize(12).Bold()
+						ui.Text(c, "Sync folder").FontSize(scaledText(c, 12)).Bold()
 						ui.TextInput(c.Key("settings-folder"), &a.settings.LocalDir).
 							Placeholder("Folder Joplin's File system target uses").
 							Label("Sync folder path").Width(394)
 					case targetServer:
-						ui.Text(c, "Server URL").FontSize(12).Bold()
+						ui.Text(c, "Server URL").FontSize(scaledText(c, 12)).Bold()
 						ui.TextInput(c.Key("settings-url"), &a.settings.ServerURL).
 							Placeholder("https://sync.example.com").
 							Label("Joplin Server URL").Width(394)
-						ui.Text(c, "Email").FontSize(12).Bold()
+						ui.Text(c, "Email").FontSize(scaledText(c, 12)).Bold()
 						ui.TextInput(c.Key("settings-user"), &a.settings.Username).
 							Label("Server account email").Width(394)
-						ui.Text(c, "Password").FontSize(12).Bold()
+						ui.Text(c, "Password").FontSize(scaledText(c, 12)).Bold()
 						password := ui.TextInput(c.Key("settings-pass"), &a.settings.Password).
 							Label("Server account password").Width(394)
 						if !a.settingsReveal {
@@ -1937,10 +1938,10 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 						}
 					case 7, 8:
 						ui.Text(c, targetLabel(a.settings.Target)+" is configured in the config file; this dialog keeps it.").
-							FontSize(11).TextColor(t.TextMuted)
+							FontSize(scaledText(c, 11)).TextColor(t.TextMuted)
 					case targetOff:
 						ui.Text(c, "Notes stay on this device; nothing is sent anywhere.").
-							FontSize(11).TextColor(t.TextMuted)
+							FontSize(scaledText(c, 11)).TextColor(t.TextMuted)
 					}
 				})
 
@@ -1949,7 +1950,7 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 				if a.settings.Target != targetOff {
 					ui.Column(c).Width(416).Padding(8, 10).Gap(5).
 						Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
-						ui.Text(c, "Master password (E2EE)").FontSize(12).Bold()
+						ui.Text(c, "Master password (E2EE)").FontSize(scaledText(c, 12)).Bold()
 						master := ui.TextInput(c.Key("settings-e2ee"), &a.settings.MasterPassword).
 							Placeholder("Leave empty when E2EE is off").
 							Label("E2EE master password").Width(394)
@@ -1958,14 +1959,14 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 						}
 						ui.Checkbox(c, &a.settingsReveal, "Show passwords")
 						ui.Text(c, "Decrypts synced notes on this device. Stored locally in this vault and never sent anywhere.").
-							FontSize(11).TextColor(t.TextMuted)
+							FontSize(scaledText(c, 11)).TextColor(t.TextMuted)
 					})
 				}
 
 				// Group 3: Web Clipper Token
 				ui.Column(c).Width(416).Padding(8, 10).Gap(5).
 					Background(paperSunken.Alpha(0.55)).Border(1, hairline).Radius(radiusControl).Children(func() {
-					ui.Text(c, "Clipper token").FontSize(12).Bold()
+					ui.Text(c, "Clipper token").FontSize(scaledText(c, 12)).Bold()
 					ui.Row(c).Width(394).Gap(6).AlignItems(ui.Center).Children(func() {
 						ui.TextInput(c.Key("settings-token"), &a.settings.APIToken).
 							Label("Clipper API token").Grow(1).MinWidth(0)
@@ -1978,13 +1979,13 @@ func (a *nativeApp) settingsDialog(c *ui.Context, t *ui.Theme) {
 						}
 					})
 					ui.Text(c, "Paste this into the Joplin Web Clipper. Saving signs out any old token.").
-						FontSize(11).TextColor(t.TextMuted)
+						FontSize(scaledText(c, 11)).TextColor(t.TextMuted)
 				})
 			})
 		})
 
 		if a.settingsErr != "" {
-			ui.Text(c, a.settingsErr).FontSize(12).TextColor(t.Danger)
+			ui.Text(c, a.settingsErr).FontSize(scaledText(c, 12)).TextColor(t.Danger)
 		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "Cancel").Label("Cancel settings").Clicked() {
@@ -2692,7 +2693,7 @@ func openNativeWindow(be *backend) (*mygo.Window, *nativeApp) {
 		mygo.App.Dock.SetMenu(app.dockMenu())
 	}
 	view := app.view
-	if windowsChrome {
+	if windowsChrome || runtime.GOOS == "darwin" {
 		appearance := mygo.ThemeLight
 		if app.dark {
 			appearance = mygo.ThemeDark
@@ -2728,10 +2729,7 @@ func openNativeWindow(be *backend) (*mygo.Window, *nativeApp) {
 		opts.TrafficLightPosition = &mygo.Point{X: 16, Y: 16}
 		opts.Vibrancy = mygo.VibrancySidebar
 	} else if windowsChrome {
-		opts.TitleBarStyle = mygo.TitleBarHidden
-		opts.TitleBarHeight = 48
-		opts.Vibrancy = mygo.VibrancyMica
-		opts.AutoHideMenuBar = true
+		configureWindowsChrome(&opts)
 	}
 	win := mygo.NewWindow(opts)
 	win.OnClosed(func() {

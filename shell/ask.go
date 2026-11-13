@@ -39,13 +39,14 @@ type askState struct {
 	historyScroll ui.ScrollState
 	showThinking  bool
 
-	busy     bool
-	runID    string
-	answer   string
-	thinking string
-	activity string
-	err      string
-	notice   string
+	busy         bool
+	runID        string
+	answer       string
+	thinking     string
+	activity     string
+	err          string
+	notice       string
+	announcement string // terminal run event; never streamed answer/thinking text
 
 	messages       []assistant.Message
 	citations      []assistant.Citation
@@ -237,6 +238,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 			}
 		}
 	case "run.completed":
+		a.ask.announcement = "Ask response ready"
 		a.ask.busy = false
 		a.ask.activity = ""
 		a.ask.runID = ""
@@ -248,6 +250,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		a.ask.thinking = ""
 		a.ask.citations = nil
 	case "run.cancelled":
+		a.ask.announcement = "Ask stopped"
 		a.ask.busy = false
 		a.ask.activity = ""
 		a.ask.runID = ""
@@ -256,6 +259,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		a.ask.answer = ""
 		a.ask.thinking = ""
 	case "run.failed":
+		a.ask.announcement = "Ask failed: " + event.Message
 		a.ask.busy = false
 		a.ask.activity = ""
 		a.ask.runID = ""
@@ -702,7 +706,7 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 	panel.Children(func() {
 		var historyButton ui.Element
 		ui.Row(c).Height(44).Shrink(0).Padding(0, 10, 0, 14).AlignItems(ui.Center).Gap(4).Children(func() {
-			ui.Text(c, "Ask").Font(fontHeading).FontSize(18).TextColor(inkNavy)
+			ui.Text(c, "Ask").Font(fontHeading).FontSize(scaledText(c, 18)).TextColor(inkNavy)
 			ui.Spacer(c)
 			historyButton = chromeButton(c, "History").Tooltip("Open saved Ask chats")
 			if historyButton.Clicked() {

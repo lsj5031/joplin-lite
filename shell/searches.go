@@ -125,8 +125,8 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	ui.Modal(c, &a.savedOpen, func() {
-		ui.Text(c, "Save this search").FontSize(17).Bold()
-		ui.Text(c, "Saving \""+clip(a.query, 60)+"\"").FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, "Save this search").FontSize(scaledText(c, 17)).Bold()
+		ui.Text(c, "Saving \""+clip(a.query, 60)+"\"").FontSize(scaledText(c, 12)).TextColor(t.TextMuted)
 		input := ui.TextInput(c.Key("saved-search-name"), &a.savedName).
 			Placeholder("Name, e.g. Work TODOs").
 			Label("Saved search name").
@@ -136,7 +136,7 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 		for _, s := range a.savedSearches {
 			if strings.EqualFold(s.Name, strings.TrimSpace(a.savedName)) {
 				replacing = true
-				ui.Text(c, "This replaces “"+s.Name+"” ("+clip(s.Query, 60)+").").MaxWidth(280).FontSize(12).TextColor(amberInk)
+				ui.Text(c, "This replaces “"+s.Name+"” ("+clip(s.Query, 60)+").").MaxWidth(280).FontSize(scaledText(c, 12)).TextColor(amberInk)
 				break
 			}
 		}
@@ -144,7 +144,7 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 			a.submitSavedSearch()
 		}
 		if a.savedErr != "" {
-			ui.Text(c, a.savedErr).FontSize(12).TextColor(t.Danger)
+			ui.Text(c, a.savedErr).FontSize(scaledText(c, 12)).TextColor(t.Danger)
 		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "Cancel").Clicked() {
@@ -165,9 +165,9 @@ func (a *nativeApp) savedSearchDialog(c *ui.Context, t *ui.Theme) {
 // has its own delete action, so a row is never both.
 func (a *nativeApp) savedSearchMenu(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Width(238).Gap(2).Children(func() {
-		ui.Text(c, "Saved searches").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, "Saved searches").FontSize(scaledText(c, 11)).TextColor(t.TextMuted)
 		if len(a.savedSearches) == 0 {
-			ui.Text(c, "No saved searches yet").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "No saved searches yet").FontSize(scaledText(c, 12)).TextColor(t.TextMuted)
 		} else {
 			height := min(float32(len(a.savedSearches))*40, float32(240))
 			ui.Scroll(c).Height(height).Shrink(0).Children(func() {
@@ -197,7 +197,7 @@ func (a *nativeApp) savedSearchMenu(c *ui.Context, t *ui.Theme) {
 		}
 		ui.Divider(c)
 		if strings.TrimSpace(a.query) == "" {
-			ui.Text(c, "Search first to save it").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "Search first to save it").FontSize(scaledText(c, 12)).TextColor(t.TextMuted)
 			return
 		}
 		entry := ui.Row(c.Key("save-current-search")).

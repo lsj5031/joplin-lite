@@ -3,7 +3,8 @@
 The shell pins MyGO v0.5.5 and replaces it with `tmp/mygo-patched`.
 `bash shell/prepare-mygo.sh` copies that release from the verified Go module
 cache and applies `mygo-large-layouts.patch`, `mygo-inline-transforms.patch`,
-`mygo-list-estimate.patch`, and `mygo-task-checkboxes.patch`.
+`mygo-list-estimate.patch`, `mygo-task-checkboxes.patch`,
+`mygo-glass-accessibility.patch`, and `mygo-tooltip-modal.patch`.
 `shell/build.sh` runs this step
 automatically. Go and Git are required, with Bash as for the existing build.
 Nothing changes in the shared module cache. Direct shell `go build`, `go test`,
@@ -13,6 +14,70 @@ The preparation is repeatable. An existing copy must have the matching patch
 stamp and pass a reverse-patch check. A stale or conflicting copy is never
 overwritten: move `tmp/mygo-patched` aside and rerun preparation. Unrelated
 local edits are preserved.
+
+## Modal tooltip dismissal
+
+The sixth patch restricts tooltip candidates to the active modal's scope.
+Previously a pointer parked on the window toolbar could revive its background
+tooltip after Escape dismissed a dialog's focused tooltip. This disrupted focus
+and allowed the focused tooltip to return, repeatedly consuming Escape instead
+of letting the next Escape dismiss the dialog. Background controls are already
+inert while a modal is open; their tooltips now follow the same rule.
+
+`TestWindowsHeaderBrandAndActions` leaves the pointer on the toolbar while
+reopening the compact notebook drawer with the keyboard. Escape dismisses the
+focused tooltip, the next Escape closes the drawer, and search accepts input.
+The scenario failed without this patch and passes with it, without relocating
+the pointer. Ordinary hover/focus tooltip behavior is covered by MyGO's UI suite.
+The demo tour uses the current `Note tags` label and host caption insets.
+
+Validation on Windows/amd64: the full shell suite passed with `CAPTURE_DIR`
+enabled, including the complete demo tour and all five header width/text-scale
+cases. MyGO's full `ui` suite and UI/shell vet passed; `ui` cross-builds for
+Darwin/Linux and a full Darwin shell build passed with CGO disabled. Repeat
+preparation and all six reverse-patch checks passed. Stripped example sizes
+were unchanged: native counter 9,466,880 bytes; webview 9,672,192 bytes.
+
+## Glass accessibility
+
+The fifth patch carries the platform's existing Reduce Transparency preference
+through `ui.Preferences`, `Painter.Preferences`, and `Tester.SetPreferences`.
+Glass paints opaque theme Surface; Blur and both ScrollEdge styles paint opaque
+theme Background. High Contrast strengthens the shader rim and adds an opaque
+border to opaque glass. This changes no shader programs or glass call-site API.
+The shell also makes its custom reading cards and base wash opaque when requested.
+
+The pinned backend supplies Reduce Transparency on macOS, Windows, and native-UI
+browser builds where the media query is supported. Linux does not supply it.
+Native Mica/vibrancy requests are unchanged; their live system behavior still
+needs platform smoke testing. No current-guide `Clarity` or native webview glass
+API is introduced by this backport.
+
+`go test -run 'TestGlassAccessibilityFallbacks|TestFieldNotesThemeFollowsPreferences'`
+from `shell/` checks light/dark material opacity against changing backdrops and
+live text/contrast preferences. `TestWorkspaceEnlargedText` checks the real view
+at 2x text scale; `TestDeleteConfirmationStartsWithCancel` exercises deletion
+through a disposable vault and the real dialog.
+
+Validation on Windows/amd64 (Go 1.27.1, 13 November 2026): the five dedicated
+shell accessibility tests, `go test ./plugins/glass ./ui` in the prepared
+dependency, and shell `go vet ./...` passed. Changed `ui` and `plugins/glass`
+packages built for Windows, Darwin and Linux with `CGO_ENABLED=0`. The prepared
+five-patch reverse check and repeat preparation passed; the fifth patch also
+applied cleanly to an isolated copy carrying only the original four patches.
+
+With `-trimpath -tags mygo_noinspector -ldflags '-s -w -X
+github.com/egoist/mygo.production=1'`, the Windows native counter changed from
+9,466,368 to 9,466,880 bytes (+512); the webview example remained 9,672,192
+bytes. The baseline was an isolated copy with only the fifth patch reversed.
+The native counter already reaches the engine's preference conversion (confirmed
+with `-dumpdep`), which now copies one more platform preference; it does not
+reach the opt-in glass painter. No package dependency was added. These are
+fresh before/after measurements, separate from the older preview-patch numbers.
+
+The enlarged Settings capture was generated, but image inspection failed due to
+the monthly upload quota. CPU pixel tests establish material behavior; they do
+not establish live GPU output, real OS preference toggles, or macOS appearance.
 
 ## Policy
 

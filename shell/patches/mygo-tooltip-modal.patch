@@ -1,0 +1,16 @@
+diff --git a/ui/tooltip.go b/ui/tooltip.go
+--- a/ui/tooltip.go
++++ b/ui/tooltip.go
+@@ -128,9 +128,11 @@ func (rt *engine) showTooltip(c *context) uint64 {
+ 		// The tip of the last frame showed until now.
+ 		t.lastShown = now
+ 	}
++	// Background anchors are inert while a dialog is open, including their
++	// tooltips. A parked pointer must not revive them after focus-tip dismissal.
+ 	tipped := func(id uint64) bool {
+ 		s := rt.states[id]
+-		return s != nil && s.tip && s.flags&flagDisabled == 0
++		return s != nil && s.tip && s.flags&flagDisabled == 0 && (rt.modal == 0 || s.scope == rt.modal)
+ 	}
+ 	var hover uint64
+ 	for _, id := range rt.hover {

@@ -122,7 +122,7 @@ var (
 const fontMono = "Overpass Mono"
 
 // Spacious reading text, compact controls, and quiet sentence-case labels.
-const (
+var (
 	sizeDisplay = float32(36)
 	sizeTitle   = float32(24)
 	sizeBody    = float32(17)
@@ -132,6 +132,31 @@ const (
 	sizeMono    = float32(11)
 	sizeMonoSm  = float32(10)
 )
+
+var designPreferences ui.Preferences
+
+// applyDesignPreferences follows applyPalette on each frame, so preferences
+// can change live without compounding the palette or typography adjustments.
+func applyDesignPreferences(c *ui.Context) {
+	designPreferences = c.Preferences()
+	sizeDisplay, sizeTitle, sizeBody = scaledText(c, 36), scaledText(c, 24), scaledText(c, 17)
+	sizeUI, sizeSmall, sizeLabel = scaledText(c, 13), scaledText(c, 12), scaledText(c, 11)
+	sizeMono, sizeMonoSm = scaledText(c, 11), scaledText(c, 10)
+	if designPreferences.HighContrast {
+		inkSoft = inkSoft.Mix(inkNavy, 0.4)
+		hairline = hairline.Mix(inkNavy, 0.45)
+		hairlineStrong = hairlineStrong.Mix(inkNavy, 0.45)
+		navyLine, navyText = hairline, inkSoft
+	}
+}
+
+// scaledText is for literal font sizes; the shared size tokens already scale.
+func scaledText(c *ui.Context, size float32) float32 {
+	if scale := c.Preferences().TextScale; scale > 0 {
+		return size * scale
+	}
+	return size
+}
 
 // Two panes by default; notebook management opens on demand.
 const (
@@ -214,6 +239,9 @@ func designTheme() *ui.Theme {
 	t.Success = moss
 	t.Selection = violet.Alpha(0.25)
 	t.Focus = routeBlue.Alpha(0.6)
+	if designPreferences.HighContrast {
+		t.Focus = routeBlue
+	}
 	t.Inverse = inkNavy
 	t.InverseText = paper
 	t.Scrollbar = hairlineStrong
@@ -223,6 +251,9 @@ func designTheme() *ui.Theme {
 	t.FontSize = sizeUI
 	if windowsChrome {
 		t.FontSize = 14
+		if scale := designPreferences.TextScale; scale > 0 {
+			t.FontSize *= scale
+		}
 	}
 	return t
 }
@@ -279,10 +310,10 @@ func dangerTheme() *ui.Theme {
 	return t
 }
 
-// confirmDialog asks for one explicit choice in a modal. The action button
-// holds the focus when the dialog opens, so Enter confirms and Escape
-// cancels, the way a save panel works; the action's label names what it
-// destroys, and Cancel is one Tab away. It returns 1 for the action, 0 for
+// confirmDialog asks for one explicit choice in a modal. It initially
+// focuses Cancel so Enter cannot destroy work unintentionally.
+// The action's label names what it destroys, and it is one Tab away.
+// It returns 1 for the action, 0 for
 // Cancel, or -1 otherwise.
 func confirmDialog(c *ui.Context, theme func() *ui.Theme, open *bool, title, message, action string) int {
 	chosen := -1
@@ -290,11 +321,11 @@ func confirmDialog(c *ui.Context, theme func() *ui.Theme, open *bool, title, mes
 		ui.Text(c, title).FontSize(sizeBody).Bold()
 		ui.Text(c, message).MaxWidth(320).TextColor(inkSoft)
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "Cancel").Clicked() {
+			if ui.Button(c, "Cancel").AutoFocus().Clicked() {
 				chosen = 0
 				*open = false
 			}
-			act := underTheme(c, theme, func() ui.Element { return ui.PrimaryButton(c, action) }).AutoFocus()
+			act := underTheme(c, theme, func() ui.Element { return ui.PrimaryButton(c, action) })
 			if act.Clicked() {
 				chosen = 1
 				*open = false
@@ -400,7 +431,7 @@ func backdrop(c *ui.Context, root ui.Element) {
 		id = "sage"
 	}
 	base, glow := washes(id, darkPalette)
-	if c.Vibrancy() {
+	if c.Vibrancy() && !designPreferences.ReduceTransparency {
 		for i := range base.Stops {
 			base.Stops[i].Color = base.Stops[i].Color.Alpha(0.95)
 		}
@@ -446,7 +477,7 @@ func iconButton(c *ui.Context, key string, icon *ui.SVG, label, tip string) ui.E
 // edge refraction, and press expansion).
 func toolbarIconButton(c *ui.Context, key string, icon *ui.SVG, text, label, tip string) ui.Element {
 	btn := ui.ButtonBase(c.Key(key)).
-		Height(28).
+		MinHeight(28).
 		Padding(4, 11).
 		Gap(5).
 		Radius(14).
@@ -480,7 +511,7 @@ func elevateCard(p ui.Element) ui.Element {
 	if darkPalette {
 		fill = paperRaised.Alpha(0.90)
 	}
-	if windowsChrome {
+	if windowsChrome || designPreferences.ReduceTransparency {
 		fill = paperRaised
 	}
 	p = p.Background(fill).Radius(radiusCard).Clip()
@@ -554,15 +585,15 @@ func chosenPill(row ui.Element, chosen, hovered bool) ui.Element {
 // segmentedControl renders a sunken pill track whose selected segment uses a
 // high-contrast accent fill and bold text so the active option stands out clearly.
 func segmentedControl(c *ui.Context, groupLabel string, selected *int, labels ...string) bool {
-	changed := false
-	track := ui.Row(c.Key("seg-track:"+groupLabel)).FillWidth().AlignItems(ui.Stretch).
+	parts := ui.SegmentedBase(c.Key("seg-track:"+groupLabel), selected, len(labels))
+	track := parts.Track.FillWidth().AlignItems(ui.Stretch).
 		Padding(3).Gap(4).Radius(radiusControl+2).
 		Background(paperSunken).Border(1, hairline).Label(groupLabel)
 	track.Children(func() {
 		for i, text := range labels {
 			i, text := i, text
 			active := selected != nil && i == *selected
-			seg := ui.ButtonBase(c.Key("seg:"+groupLabel+":"+text)).
+			seg := parts.Segment(i).
 				Label(text).
 				Grow(1).
 				Justify(ui.Center).
@@ -574,10 +605,6 @@ func segmentedControl(c *ui.Context, groupLabel string, selected *int, labels ..
 					Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.18))
 			} else if seg.Hovered() {
 				seg.Background(paperRaised.Alpha(0.65))
-			}
-			if seg.Clicked() && selected != nil && *selected != i {
-				*selected = i
-				changed = true
 			}
 			seg.Children(func() {
 				lbl := ui.Text(c, text).FontSize(sizeSmall).SingleLine()
@@ -591,7 +618,7 @@ func segmentedControl(c *ui.Context, groupLabel string, selected *int, labels ..
 			})
 		}
 	})
-	return changed
+	return track.Changed()
 }
 
 // label renders a quiet 11px sentence-case section heading (DESIGN.md).

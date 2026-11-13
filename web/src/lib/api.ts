@@ -15,9 +15,9 @@
 //   VITE_GOJOPLIN_URL=http://127.0.0.1:41888
 //   VITE_GOJOPLIN_TOKEN=<api token>
 //
-// The desktop shell (shell/) starts the API on an OS-assigned port with a
-// per-session token and injects both before this module loads, so the same
-// build runs in a browser (env) and in the app (runtime config) unchanged.
+// `gojoplin serve --web-dir` injects the API address, token and profile before
+// this module loads. Vite development can use the environment values above.
+// The native desktop calls service/ directly and does not load this SPA.
 import type { Note, Notebook, Tag } from './mock-data'
 
 const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {}

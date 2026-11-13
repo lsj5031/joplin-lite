@@ -10,8 +10,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      // The webview adopts document.title as the native window title; SH-01
-      // expects the product name there, not the npm-style slug.
+      // Use the product name for the browser tab and installed-site title.
       { title: 'Joplin Lite' },
       {
         name: 'description',

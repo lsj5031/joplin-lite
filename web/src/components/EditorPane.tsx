@@ -6,8 +6,7 @@ import { useVault } from '~/lib/vault'
 import { IconBack, IconConflict, IconTodo, Mark } from './icons'
 
 const md = new MarkdownIt({ linkify: true })
-// Links leave the app: the desktop shell opens a new-window request in the
-// system browser, and the explicit target keeps the same behavior in a tab.
+// External links open separately so the browser workspace stays available.
 md.renderer.rules.link_open = (tokens, idx, options, _env, self) => {
   const token = tokens[idx]
   const href = String(token.attrGet('href') ?? '')

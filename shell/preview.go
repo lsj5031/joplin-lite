@@ -20,16 +20,16 @@ func (a *nativeApp) previewContent(c *ui.Context) {
 	if len(a.previewChunks) > 0 {
 		ui.List(c.Key("preview-pages"), &a.previewList, len(a.previewChunks), func(row int) {
 			ui.Row(c).FillWidth().Children(func() {
-				ui.Column(c).Grow(1).MaxWidth(700).Children(func() {
+				ui.Column(c).Grow(1).MaxWidth(contentMeasure).Children(func() {
 					a.previewMarkdown(c, a.previewChunks[row], a.previewChunkStarts[row])
 				})
 			})
-		}).Fill().Gap(0).Padding(20, 48, 48, 48).Label("Note preview")
+		}).Fill().Gap(0).Padding(20, a.contentPadding(), 48, a.contentPadding()).Label("Note preview")
 		return
 	}
-	ui.Scroll(c).Fill().Padding(20, 48, 48, 48).Children(func() {
+	ui.Scroll(c).Fill().Padding(20, a.contentPadding(), 48, a.contentPadding()).Children(func() {
 		ui.Row(c).FillWidth().Children(func() {
-			ui.Column(c).Grow(1).MaxWidth(700).Gap(20).Children(func() {
+			ui.Column(c).Grow(1).MaxWidth(contentMeasure).Gap(20).Children(func() {
 				if body == "" {
 					ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
 					return

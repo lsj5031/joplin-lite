@@ -62,10 +62,9 @@ func TestWithJEXExtension(t *testing.T) {
 	}
 }
 
-// TestImportDialogReturnConfirms drives the confirmation the way a keyboard
-// user does: Return answers Import, so the archive lands without touching the
-// mouse. Cancel stays reachable with Escape.
-func TestImportDialogReturnConfirms(t *testing.T) {
+// TestImportDialogRequiresExplicitConfirmation checks that Return initially
+// cancels, while Tab then Return deliberately imports without using the mouse.
+func TestImportDialogRequiresExplicitConfirmation(t *testing.T) {
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
 	nb := &models.Folder{Title: "Inbox"}
@@ -99,14 +98,33 @@ func TestImportDialogReturnConfirms(t *testing.T) {
 		return n
 	}
 	before := notes()
+	if !tt.Focused("Cancel") {
+		t.Fatal("import confirmation must initially focus Cancel")
+	}
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
 
 	if app.confirmImport {
 		t.Fatal("Return left the confirmation open")
 	}
+	if got := notes(); got != before || app.backupBusy != "" {
+		t.Fatal("initial Return started an import instead of cancelling")
+	}
+	app.importPath = archive
+	app.importPlan = &service.ImportResult{Notes: 1, Folders: 1}
+	app.confirmImport = true
+	tt.Frame()
+	tt.Key(0, ui.KeyTab)
+	if !tt.Focused("Import") {
+		t.Fatal("Tab from Cancel must focus Import")
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if app.confirmImport {
+		t.Fatal("explicit Import left the confirmation open")
+	}
 	if app.importPath != "" || app.importPlan != nil {
-		t.Fatal("Return did not approve the import")
+		t.Fatal("explicit Import did not approve the import")
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for notes() <= before && time.Now().Before(deadline) {
@@ -133,9 +151,8 @@ func TestImportDialogReturnConfirms(t *testing.T) {
 	}
 }
 
-// TestDeleteDialogReturnDeletes pins the confirmation keys: the destructive
-// button holds the focus, so Return confirms the deletion and Escape cancels.
-func TestDeleteDialogReturnDeletes(t *testing.T) {
+// TestDeleteDialogReturnCancels pins the safe initial confirmation key.
+func TestDeleteDialogReturnCancels(t *testing.T) {
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
 	nb := &models.Folder{Title: "Inbox"}
@@ -160,8 +177,8 @@ func TestDeleteDialogReturnDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNote: %v", err)
 	}
-	if got != nil {
-		t.Fatal("Return did not delete the note")
+	if got == nil || got.Body != "body" {
+		t.Fatal("initial Return deleted or changed the note")
 	}
 }
 

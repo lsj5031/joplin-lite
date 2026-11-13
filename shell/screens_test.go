@@ -47,6 +47,16 @@ func forceMacChrome(t *testing.T) {
 	t.Cleanup(func() { windowsChrome = previous })
 }
 
+// Captures reserve the same caption area as the host's native window. These
+// are content captures; native HWND geometry is checked separately on Windows.
+func setCaptureTitleBar(tt *ui.Tester) {
+	if windowsChrome {
+		tt.SetTitleBar(ui.TitleBar{Height: 48, Right: 138})
+	} else {
+		tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 76})
+	}
+}
+
 // screen renders the state three times: the first frame mounts whatever
 // transient surface just opened and starts its entrance, the advance runs that
 // entrance out, and the last frame is the settled screen the audit reads.
@@ -276,12 +286,11 @@ func seedReadme(t *testing.T, svc *service.Service) *models.Note {
 	return selected
 }
 
-// TestCaptureReadme uses short, synthetic everyday notes for public screenshots,
-// rendered at 2x Retina with macOS TitleBarHiddenInset traffic lights, window
-// vibrancy, rounded window corners, and WindowServer drop shadow.
+// TestCaptureReadme uses short, synthetic everyday notes for public screenshots.
+// Windows captures show app content with real caption insets, without invented
+// native controls. The Mac presentation fixture adds simulated window chrome.
 func TestCaptureReadme(t *testing.T) {
 	dir := captureDir(t)
-	forceMacChrome(t)
 	registerFonts()
 	app, db := openNativeTestApp(t)
 	svc := service.New(db)
@@ -302,26 +311,29 @@ func TestCaptureReadme(t *testing.T) {
 	tt.SetSize(1280, 800)
 	tt.SetScale(2)
 	tt.SetVibrancy(true)
-	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 76})
+	setCaptureTitleBar(tt)
 
-	captureMacWindow(t, dir, "native-workspace", tt, app.dark)
+	capturePlatformWindow(t, dir, "native-workspace", tt, app.dark)
 	app.dark = true
-	captureMacWindow(t, dir, "native-dark", tt, app.dark)
+	capturePlatformWindow(t, dir, "native-dark", tt, app.dark)
 	app.dark = false
 	app.railOpen = false
 	click(t, tt, "Edit")
-	captureMacWindow(t, dir, "native-writing", tt, app.dark)
+	capturePlatformWindow(t, dir, "native-writing", tt, app.dark)
 	click(t, tt, "Preview")
 	app.narrowEditor = true
 	tt.SetSize(900, 700)
-	captureMacWindow(t, dir, "native-narrow", tt, app.dark)
+	capturePlatformWindow(t, dir, "native-narrow", tt, app.dark)
 }
 
-func captureMacWindow(t *testing.T, dir, name string, tt *ui.Tester, dark bool) {
+func capturePlatformWindow(t *testing.T, dir, name string, tt *ui.Tester, dark bool) {
 	t.Helper()
 	raw := screen(tt)
-	framed := macOSWindow(raw, dark)
-	writeCapture(t, dir, name, framed, tt)
+	if windowsChrome {
+		writeCapture(t, dir, name, raw, tt)
+	} else {
+		writeCapture(t, dir, name, macOSWindow(raw, dark), tt)
+	}
 }
 
 // macOSWindow composites a 2x Retina window surface with the macOS
@@ -550,6 +562,7 @@ func TestCaptureScreens(t *testing.T) {
 
 	tt := ui.NewTester(app.view, 1280, 800)
 	tt.SetSize(1280, 800)
+	setCaptureTitleBar(tt)
 
 	// 1. The workspace with a note open in the editor.
 	app.selectedNotebook = work.ID
@@ -664,6 +677,7 @@ func TestCaptureScreens(t *testing.T) {
 	// 18. An empty vault.
 	empty, db2 := openNativeTestApp(t)
 	ttEmpty := ui.NewTester(empty.view, 1280, 800)
+	setCaptureTitleBar(ttEmpty)
 	capture(t, dir, "18-empty-vault", ttEmpty)
 	_ = db2
 

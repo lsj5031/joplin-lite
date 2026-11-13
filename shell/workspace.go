@@ -21,6 +21,64 @@ import (
 
 const navRowHeight = float32(32)
 
+const contentMeasure = float32(700)
+
+func (a *nativeApp) contentPadding() float32 {
+	if a.narrow {
+		return 24
+	}
+	return 48
+}
+
+// Announce transitions, not every frame or streaming token. Snapshot keys may
+// include timestamps/revisions while the spoken text stays short and useful.
+func (a *nativeApp) announceWorkspaceStatus(c *ui.Context) {
+	initial := a.announcedStatus == nil
+	if initial {
+		a.announcedStatus = make(map[string]string)
+	}
+	announce := func(channel, key, text string, important bool) {
+		if a.announcedStatus[channel] != key && text != "" && (!initial || important) {
+			c.Announce(text)
+		}
+		a.announcedStatus[channel] = key
+	}
+	if a.saveErr != "" {
+		announce("save", a.saveErr, a.statusText(), true)
+	} else if !a.dirty && !a.savedAt.IsZero() {
+		announce("save", a.savedAt.String(), "Note saved", false)
+	}
+	st := a.syncState()
+	notice := syncNoticeFor(st)
+	if st.Running || st.Pending {
+		announce("sync", "running", "Syncing notes", false)
+	} else {
+		announce("sync", fmt.Sprintf("%d:%s:%s", st.Revision, st.Last, notice.Line+notice.Hint),
+			strings.TrimSpace(notice.Line+". "+notice.Hint), st.Err != "")
+	}
+	backup, _ := a.backupStatus()
+	if a.backupBusy != "" {
+		backup = "Import or export in progress"
+	}
+	announce("backup", backup, backup, a.backupErr != "")
+	ask := a.ask.err
+	if ask == "" {
+		ask = a.ask.notice
+	}
+	if a.ask.busy {
+		ask = "Ask is working"
+	}
+	if a.ask.announcement != "" {
+		c.Announce(a.ask.announcement)
+		a.ask.announcement = ""
+		a.announcedStatus["ask"] = ask
+	} else {
+		announce("ask", ask, ask, a.ask.err != "")
+	}
+	announce("ask-settings", a.ask.settingsErr+"\n"+a.ask.testNotice,
+		strings.TrimSpace(a.ask.settingsErr+" "+a.ask.testNotice), a.ask.settingsErr != "")
+}
+
 // boolF is a bool as the 0/1 an animation moves by.
 func boolF(b bool) float32 {
 	if b {
@@ -37,7 +95,9 @@ func (a *nativeApp) view(c *ui.Context) {
 	}
 	// DESIGN.md's palette and type scale, applied to every widget.
 	applyPalette(a.dark)
+	applyDesignPreferences(c)
 	c.SetTheme(designTheme())
+	defer a.announceWorkspaceStatus(c)
 	if a.pendingOpen != "" {
 		c.OpenURL(a.pendingOpen)
 		a.pendingOpen = ""
@@ -212,17 +272,32 @@ func (a *nativeApp) paneSplitter(c *ui.Context, key string, w *float32, def, min
 		width = 4
 	}
 	split := ui.Column(c.Key("splitter:" + key)).Width(width).Shrink(0).
-		Cursor(ui.CursorResizeColumn)
+		Cursor(ui.CursorResizeColumn).Focusable().Role(ui.RoleSplitter).
+		Label(map[string]string{"rail": "Notebook pane width", "list": "Note list width", "ask": "Ask pane width"}[key]).
+		Description("Left and Right resize; Home resets the width")
+	step := float32(10)
+	direction := float32(1)
+	if key == "ask" {
+		// Ask is on the right: moving its left divider right narrows it.
+		direction = -1
+	}
 	if drawLine {
 		split.BorderStartWidth(1).BorderColor(hairline)
 	}
 	if dx, _, ok := split.Dragged(); ok {
-		*w = min(max(*w+dx, minW), maxW)
+		*w = min(max(*w+direction*dx, minW), maxW)
 	}
-	if split.DoubleClicked() {
-		*w = def
+	if split.Shortcut(0, ui.KeyLeft) {
+		*w = min(max(*w-direction*step, minW), maxW)
 	}
-	if split.Hovered() || split.Pressed() {
+	if split.Shortcut(0, ui.KeyRight) {
+		*w = min(max(*w+direction*step, minW), maxW)
+	}
+	if split.DoubleClicked() || split.Shortcut(0, ui.KeyHome) {
+		*w = min(max(def, minW), maxW)
+	}
+	split.Range(float64(minW), float64(maxW), float64(*w)).Step(float64(step)).Value(fmt.Sprintf("%.0f DIP", *w))
+	if split.Hovered() || split.Pressed() || split.FocusVisible() {
 		split.Background(routeBlue.Alpha(0.24))
 	}
 }
@@ -248,7 +323,7 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 				AlignItems(ui.Center).DragWindow().Children(func() {
 				if !a.railOpen && bar.Left == 0 {
 					mark(c)
-					ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(19).TextColor(inkNavy)
+					ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(scaledText(c, 19)).TextColor(inkNavy)
 				}
 				ui.Spacer(c)
 				if !a.railOpen {
@@ -291,7 +366,7 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		if bar.Left == 0 {
 			mark(c)
 			ui.Column(c).Gap(0).Shrink(0).Children(func() {
-				ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(20).TextColor(inkNavy)
+				ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(scaledText(c, 20)).TextColor(inkNavy)
 			})
 		}
 		a.searchField(c, t)
@@ -562,7 +637,7 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 				if bar.Left == 0 {
 					mark(c)
 					ui.Spacer(c).Width(6)
-					ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(18).TextColor(inkNavy)
+					ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(scaledText(c, 18)).TextColor(inkNavy)
 				}
 				ui.Spacer(c)
 				if iconButton(c, "close-notebooks", iconSidebar, "Close notebooks", "Hide notebooks sidebar (Cmd/Ctrl+\\)").Clicked() {
@@ -608,7 +683,7 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 // moving it there.
 func (a *nativeApp) notebookRows(c *ui.Context, t *ui.Theme) {
 	ui.Scroll(c).Grow(1).Padding(4, 8).Children(func() {
-		ui.Column(c).Gap(1).Children(func() {
+		ui.Column(c).Gap(1).Role(ui.RoleTree).Label("Notebooks").Children(func() {
 			a.railRow(c, t, "all", "", "All notes", "", -1, 0)
 			// Zero conflicts are not news: the row appears when one does, so
 			// its amber count reads as a signal rather than permanent noise.
@@ -641,7 +716,7 @@ func (a *nativeApp) tagRows(c *ui.Context, t *ui.Theme) {
 		height = 176
 	}
 	ui.Scroll(c).Height(height).Shrink(0).Padding(4, 8, 6, 8).Children(func() {
-		ui.Column(c).Gap(1).Children(func() {
+		ui.Column(c).Gap(1).Role(ui.RoleTree).Label("Tags").Children(func() {
 			if len(a.tags) == 0 {
 				ui.Text(c, "No tags yet").FontSize(sizeLabel).TextColor(inkSoft).Padding(4, 6)
 				return
@@ -665,7 +740,8 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 
 	row := ui.Row(c.Key("rail:" + key)).Height(navRowHeight).MinHeight(navRowHeight).
 		Radius(radiusControl).AlignItems(ui.Center).Gap(6).Shrink(0).
-		PaddingStart(8 + float32(depth)*14).PaddingEnd(8)
+		PaddingStart(8 + float32(depth)*14).PaddingEnd(8).
+		Role(ui.RoleTreeItem).Level(depth + 1).Selected(chosen).TextColor(inkNavy)
 	hover := row.Animate("hover", boolF(row.Hovered()), motionHover.Duration)
 	chosenPill(row, chosen, hover > 0.002)
 
@@ -728,7 +804,7 @@ func (a *nativeApp) railRow(c *ui.Context, t *ui.Theme, key, id, text, flag stri
 		})
 	}
 	if !renaming {
-		row.Label(text)
+		row.Label(text).Focusable()
 	}
 	doubleClicked := !renaming && row.DoubleClicked()
 	clicked := !renaming && row.Clicked()
@@ -1300,10 +1376,11 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 				Font(fontSans).
 				FontSize(sizeBody).
 				LineHeight(1.6).
-				Padding(18, 48, 32, 48).
+				Padding(18, a.contentPadding(), 32, a.contentPadding()).
 				Background(paperRaised).
 				Border(0, ui.Transparent).
 				FillWidth().
+				MaxWidth(contentMeasure + 2*a.contentPadding()).
 				Grow(1)
 			a.askEditorFocus(editor, &a.ask.bodyFocus)
 			editor.OnPaste(func(text string) bool {
@@ -1360,7 +1437,7 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 	// One spine for the context row, the title, and the body; the narrow
 	// layout still has the full window width for the editor.
-	pad := float32(48)
+	pad := a.contentPadding()
 	if a.note == nil {
 		// The empty sheet's centered prompt already names the state, so only
 		// the narrow back path remains here.

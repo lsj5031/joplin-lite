@@ -109,6 +109,7 @@ func TestCaptureDemo(t *testing.T) {
 
 	tt := ui.NewTester(app.view, 1280, 800)
 	tt.SetSize(1280, 800)
+	setCaptureTitleBar(tt)
 	d := &demo{t: t, tt: tt, dir: frames}
 	d.hold(0.2)
 
@@ -168,9 +169,9 @@ func TestCaptureDemo(t *testing.T) {
 	d.extraDir = ""
 
 	// The tag menu, then settings.
-	d.click("Tags")
+	d.click("Note tags")
 	d.hold(1.2)
-	d.click("Tags")
+	d.click("Note tags")
 	d.click("Settings")
 	d.hold(1.8)
 	d.click("Cancel")

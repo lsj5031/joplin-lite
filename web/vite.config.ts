@@ -20,8 +20,8 @@ export default defineConfig({
       spa: {
         enabled: true,
         // Write the app shell to index.html rather than Start's _shell.html:
-        // the embedded static server uses index.html as its client-route
-        // fallback for every path the webview asks for.
+        // the optional browser server uses index.html as its client-route
+        // fallback. The native desktop does not load these assets.
         prerender: {
           outputPath: '/index',
         },

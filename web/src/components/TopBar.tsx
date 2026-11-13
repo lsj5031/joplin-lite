@@ -16,7 +16,9 @@ type Props = {
 export function TopBar({ query, onQuery, source, canWrite, reloading, onReload, onNewNote, searchRef }: Props) {
   const settingsRef = React.useRef<HTMLDialogElement>(null)
   const [theme, setTheme] = React.useState<string | null>(null)
+  const [searchShortcut, setSearchShortcut] = React.useState<string | null>(null)
   React.useEffect(() => {
+    setSearchShortcut(/Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? '⌘K' : 'Ctrl+K')
     try {
       const value = localStorage.getItem('joplin-lite:theme')
       setTheme(value === 'light' || value === 'dark' ? value : 'system')
@@ -53,9 +55,10 @@ export function TopBar({ query, onQuery, source, canWrite, reloading, onReload, 
           onChange={(e) => onQuery(e.target.value)}
           placeholder="Search all notes…"
           aria-label="Search notes"
-          className="h-11 w-full rounded-lg border border-line bg-paper pr-8 pl-10 text-[16px] text-ink placeholder:text-ink-soft focus:border-route focus:outline-none md:pr-14 md:text-[13px]"
+          aria-keyshortcuts="Control+K Meta+K"
+          className="h-11 w-full rounded-lg border border-line bg-paper pr-8 pl-10 text-[16px] text-ink placeholder:text-ink-soft focus:border-route focus:outline-none md:pr-20 md:text-[13px]"
         />
-        <kbd className="mono pointer-events-none absolute top-1/2 right-3 hidden -translate-y-1/2 rounded border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-soft md:block">⌘K</kbd>
+        {searchShortcut && <kbd className="mono pointer-events-none absolute top-1/2 right-3 hidden -translate-y-1/2 rounded border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-soft md:block">{searchShortcut}</kbd>}
       </div>
 
       <div className="header-actions ml-auto flex shrink-0 items-center gap-1.5 md:ml-0">
