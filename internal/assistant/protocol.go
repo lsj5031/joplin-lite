@@ -15,9 +15,10 @@ import (
 const APIVersion = 1
 
 var (
-	ErrBusy         = errors.New("an Ask run is already active")
-	ErrUnconfigured = errors.New("Ask has no model connection configured")
-	ErrClosed       = errors.New("Ask is closed")
+	ErrBusy           = errors.New("an Ask run is already active")
+	ErrUnconfigured   = errors.New("Ask has no model connection configured")
+	ErrClosed         = errors.New("Ask is closed")
+	ErrSecretNotFound = errors.New("saved Ask credential not found")
 )
 
 // ToolError is a structured, model-visible failure. It deliberately contains
@@ -84,8 +85,9 @@ func DefaultLimits() Limits {
 	}
 }
 
-// Settings are the non-secret connection fields plus the session-only key.
-// Only BaseURL, ModelID, ContextWindow, MaxOutput and TimeoutMS are persisted.
+// Settings are the non-secret connection fields plus the session key. The key
+// itself is never written to assistant.sqlite; RememberKey only records whether
+// the shell may keep it in the operating system's credential store.
 type Settings struct {
 	Provider      string `json:"provider"`
 	BaseURL       string `json:"baseUrl"`
@@ -93,6 +95,7 @@ type Settings struct {
 	ContextWindow int    `json:"contextWindow"`
 	MaxOutput     int    `json:"maxOutput"`
 	TimeoutMS     int    `json:"timeoutMs"`
+	RememberKey   bool   `json:"rememberKey,omitempty"`
 	APIKey        string `json:"-"`
 }
 
@@ -203,14 +206,34 @@ type Citation struct {
 // ConversationSnapshot is the read-only projection the panel renders.
 type ConversationSnapshot struct {
 	ConversationID string    `json:"conversationId"`
+	Title          string    `json:"title,omitempty"`
 	Messages       []Message `json:"messages"`
 	Running        bool      `json:"running"`
 	RunID          string    `json:"runId,omitempty"`
 }
 
+// ConversationSummary is the metadata the history menu needs without loading
+// every transcript.
+type ConversationSummary struct {
+	ConversationID string `json:"conversationId"`
+	Title          string `json:"title,omitempty"`
+	Preview        string `json:"preview,omitempty"`
+	MessageCount   int    `json:"messageCount"`
+	UpdatedTime    int64  `json:"updatedTime"`
+}
+
 type Message struct {
-	Role string `json:"role"`
-	Text string `json:"text"`
+	Role      string     `json:"role"`
+	Text      string     `json:"text"`
+	Citations []Citation `json:"citations,omitempty"`
+}
+
+// SecretStore is the shell-owned operating-system keychain. Implementations
+// must never write the key into assistant.sqlite or a log.
+type SecretStore interface {
+	Load() (string, error)
+	Save(string) error
+	Delete() error
 }
 
 // SearchInput is validated at the host boundary before it reaches SQL.

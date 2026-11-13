@@ -51,6 +51,11 @@ func openAssistantDB(dataDir string) (*assistantDB, error) {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS jl_ask_settings (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
+	); CREATE TABLE IF NOT EXISTS jl_ask_conversations (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL DEFAULT '',
+		created_time INTEGER NOT NULL,
+		updated_time INTEGER NOT NULL
 	); CREATE TABLE IF NOT EXISTS jl_ask_runs (
 		id TEXT PRIMARY KEY,
 		conversation_id TEXT NOT NULL,
@@ -65,10 +70,26 @@ func openAssistantDB(dataDir string) (*assistantDB, error) {
 		seq INTEGER NOT NULL,
 		role TEXT NOT NULL,
 		text TEXT NOT NULL,
+		citations_json TEXT NOT NULL DEFAULT '[]',
 		PRIMARY KEY (conversation_id, seq)
 	)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create assistant lifecycle schema: %w", err)
+	}
+	if err := ensureColumn(db, "jl_ask_messages", "citations_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate Ask messages: %w", err)
+	}
+	now := time.Now().UnixMilli()
+	// Keep the pre-history installation's one thread visible after upgrading.
+	if _, err := db.Exec(`INSERT OR IGNORE INTO jl_ask_conversations (id, title, created_time, updated_time)
+		SELECT conversation_id, '', ?, ? FROM jl_ask_messages GROUP BY conversation_id`, now, now); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate Ask conversations: %w", err)
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO jl_ask_conversations (id, title, created_time, updated_time) VALUES (?, '', ?, ?)`, defaultConversationID, now, now); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create the default Ask conversation: %w", err)
 	}
 	// A run that was admitted before the process ended has no live worker now.
 	// Never replay it; the user can ask again explicitly.
@@ -79,6 +100,36 @@ func openAssistantDB(dataDir string) (*assistantDB, error) {
 		return nil, fmt.Errorf("reconcile interrupted Ask runs: %w", err)
 	}
 	return &assistantDB{db: db, path: path, txs: make(map[string]*sql.Tx)}, nil
+}
+
+// ensureColumn applies additive schema changes to databases created by an
+// earlier build without requiring a migration framework.
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query(`PRAGMA table_info("` + table + `")`)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE "` + table + `" ADD COLUMN "` + column + `" ` + definition)
+	return err
 }
 
 func (a *assistantDB) loadSettings() (Settings, error) {
@@ -106,6 +157,7 @@ func (a *assistantDB) saveSettings(s Settings) error {
 		"contextWindow": s.ContextWindow,
 		"maxOutput":     s.MaxOutput,
 		"timeoutMs":     s.TimeoutMS,
+		"rememberKey":   s.RememberKey,
 	})
 	if err != nil {
 		return err
@@ -153,7 +205,7 @@ func (a *assistantDB) loadScope() (Scope, bool, error) {
 }
 
 func (a *assistantDB) loadMessages(conversationID string) ([]Message, error) {
-	rows, err := a.db.Query(`SELECT role, text FROM jl_ask_messages WHERE conversation_id = ? ORDER BY seq ASC`, conversationID)
+	rows, err := a.db.Query(`SELECT role, text, citations_json FROM jl_ask_messages WHERE conversation_id = ? ORDER BY seq ASC`, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,8 +213,12 @@ func (a *assistantDB) loadMessages(conversationID string) ([]Message, error) {
 	var out []Message
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.Role, &message.Text); err != nil {
+		var citations string
+		if err := rows.Scan(&message.Role, &message.Text, &citations); err != nil {
 			return nil, err
+		}
+		if citations != "" {
+			_ = json.Unmarshal([]byte(citations), &message.Citations)
 		}
 		out = append(out, message)
 	}
@@ -170,8 +226,88 @@ func (a *assistantDB) loadMessages(conversationID string) ([]Message, error) {
 }
 
 func (a *assistantDB) clearMessages(conversationID string) error {
-	_, err := a.db.Exec(`DELETE FROM jl_ask_messages WHERE conversation_id = ?`, conversationID)
+	tx, err := a.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM jl_ask_messages WHERE conversation_id = ?`, conversationID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE jl_ask_conversations SET updated_time = ? WHERE id = ?`, time.Now().UnixMilli(), conversationID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (a *assistantDB) ensureConversation(conversationID string) error {
+	now := time.Now().UnixMilli()
+	_, err := a.db.Exec(`INSERT OR IGNORE INTO jl_ask_conversations (id, title, created_time, updated_time) VALUES (?, '', ?, ?)`, conversationID, now, now)
 	return err
+}
+
+func (a *assistantDB) conversationExists(conversationID string) (bool, error) {
+	var one int
+	err := a.db.QueryRow(`SELECT 1 FROM jl_ask_conversations WHERE id = ?`, conversationID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (a *assistantDB) latestConversationID() (string, error) {
+	var id string
+	err := a.db.QueryRow(`SELECT id FROM jl_ask_conversations ORDER BY updated_time DESC, rowid DESC LIMIT 1`).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+
+func (a *assistantDB) listConversations() ([]ConversationSummary, error) {
+	rows, err := a.db.Query(`SELECT c.id,
+		COALESCE(NULLIF(c.title, ''), (SELECT text FROM jl_ask_messages m WHERE m.conversation_id = c.id AND m.role = 'user' ORDER BY m.seq ASC LIMIT 1), ''),
+		c.created_time, c.updated_time,
+		COALESCE((SELECT text FROM jl_ask_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1), ''),
+		(SELECT COUNT(*) FROM jl_ask_messages m WHERE m.conversation_id = c.id)
+		FROM jl_ask_conversations c ORDER BY c.updated_time DESC, c.rowid DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ConversationSummary
+	for rows.Next() {
+		var summary ConversationSummary
+		var created int64
+		if err := rows.Scan(&summary.ConversationID, &summary.Title, &created, &summary.UpdatedTime, &summary.Preview, &summary.MessageCount); err != nil {
+			return nil, err
+		}
+		out = append(out, summary)
+	}
+	return out, rows.Err()
+}
+
+func (a *assistantDB) renameConversation(conversationID, title string) error {
+	_, err := a.db.Exec(`UPDATE jl_ask_conversations SET title = ?, updated_time = ? WHERE id = ?`, title, time.Now().UnixMilli(), conversationID)
+	return err
+}
+
+func (a *assistantDB) deleteConversation(conversationID string) error {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, statement := range []string{
+		`DELETE FROM jl_ask_messages WHERE conversation_id = ?`,
+		`DELETE FROM jl_ask_runs WHERE conversation_id = ?`,
+		`DELETE FROM jl_ask_conversations WHERE id = ?`,
+	} {
+		if _, err := tx.Exec(statement, conversationID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // clearAgentState drops only Pi's own tables. Settings and Joplin Lite
@@ -210,19 +346,47 @@ func (a *assistantDB) clearAgentState() error {
 }
 
 func (a *assistantDB) appendMessage(conversationID, role, text string) error {
+	return a.appendMessageWithCitations(conversationID, role, text, nil)
+}
+
+func (a *assistantDB) appendMessageWithCitations(conversationID, role, text string, citations []Citation) error {
 	tx, err := a.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	now := time.Now().UnixMilli()
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO jl_ask_conversations (id, title, created_time, updated_time) VALUES (?, '', ?, ?)`, conversationID, now, now); err != nil {
+		return err
+	}
 	var seq int
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM jl_ask_messages WHERE conversation_id = ?`, conversationID).Scan(&seq); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO jl_ask_messages (conversation_id, seq, role, text) VALUES (?, ?, ?, ?)`, conversationID, seq, role, text); err != nil {
+	rawCitations, err := json.Marshal(citations)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO jl_ask_messages (conversation_id, seq, role, text, citations_json) VALUES (?, ?, ?, ?, ?)`, conversationID, seq, role, text, string(rawCitations)); err != nil {
+		return err
+	}
+	if role == "user" {
+		if _, err := tx.Exec(`UPDATE jl_ask_conversations SET title = CASE WHEN title = '' THEN ? ELSE title END, updated_time = ? WHERE id = ?`, conversationTitle(text), now, conversationID); err != nil {
+			return err
+		}
+	} else if _, err := tx.Exec(`UPDATE jl_ask_conversations SET updated_time = ? WHERE id = ?`, now, conversationID); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func conversationTitle(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) > 56 {
+		return string(runes[:55]) + "…"
+	}
+	return text
 }
 
 func (a *assistantDB) close() error {

@@ -33,6 +33,7 @@ type Manager struct {
 	mu           sync.Mutex
 	emitMu       sync.Mutex
 	settings     Settings
+	secret       SecretStore
 	active       *Run
 	runtime      *agentRuntime
 	closed       bool
@@ -42,6 +43,10 @@ type Manager struct {
 	conversation ConversationSnapshot
 	lastScope    Scope
 	scopeKnown   bool
+	// agentConversation names the transcript currently inside the durable Pi
+	// context. Switching chats clears Pi state, so a resumed chat gets a compact
+	// transcript recap for reference while citations still require read_note.
+	agentConversation string
 }
 
 // Run is one admitted Ask request and its whole-run state.
@@ -57,6 +62,8 @@ type Run struct {
 	budget         *runBudget
 	done           chan struct{}
 	answer         string
+	prompt         string
+	citations      []Citation
 	terminal       bool
 	resetAgent     bool
 	tools          map[string]bool
@@ -78,10 +85,35 @@ func NewManager(vault *store.DB, dataDir string, emit func(Event)) (*Manager, er
 		_ = asst.close()
 		return nil, err
 	}
-	messages, err := asst.loadMessages(defaultConversationID)
+	conversations, err := asst.listConversations()
+	if err != nil {
+		_ = asst.close()
+		return nil, fmt.Errorf("load Ask conversations: %w", err)
+	}
+	latest := defaultConversationID
+	if latestID, idErr := asst.latestConversationID(); idErr != nil {
+		_ = asst.close()
+		return nil, fmt.Errorf("load latest Ask conversation: %w", idErr)
+	} else if latestID != "" {
+		latest = latestID
+	}
+	if len(conversations) > 0 {
+		latest = conversations[0].ConversationID
+	} else if err := asst.ensureConversation(latest); err != nil {
+		_ = asst.close()
+		return nil, err
+	}
+	messages, err := asst.loadMessages(latest)
 	if err != nil {
 		_ = asst.close()
 		return nil, fmt.Errorf("load Ask history: %w", err)
+	}
+	title := ""
+	for _, conversation := range conversations {
+		if conversation.ConversationID == latest {
+			title = conversation.Title
+			break
+		}
 	}
 	lastScope, scopeKnown, err := asst.loadScope()
 	if err != nil {
@@ -93,7 +125,7 @@ func NewManager(vault *store.DB, dataDir string, emit func(Event)) (*Manager, er
 		asst:         asst,
 		emit:         emit,
 		settings:     settings,
-		conversation: ConversationSnapshot{ConversationID: defaultConversationID, Messages: messages},
+		conversation: ConversationSnapshot{ConversationID: latest, Title: title, Messages: messages},
 		lastScope:    lastScope,
 		scopeKnown:   scopeKnown,
 	}
@@ -104,6 +136,253 @@ func (m *Manager) Settings() Settings {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.settings
+}
+
+// SetSecretStore attaches the shell's operating-system credential store. The
+// manager only holds the key in memory; this store is the sole persistence path.
+func (m *Manager) SetSecretStore(store SecretStore) {
+	m.mu.Lock()
+	m.secret = store
+	m.mu.Unlock()
+}
+
+// RestoreStoredKey loads an opted-in key without writing it back to SQLite.
+func (m *Manager) RestoreStoredKey() error {
+	m.mu.Lock()
+	store := m.secret
+	remember := m.settings.RememberKey
+	m.mu.Unlock()
+	if !remember || store == nil {
+		return nil
+	}
+	key, err := store.Load()
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return nil
+	}
+	m.mu.Lock()
+	m.settings.APIKey = key
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) CurrentConversationID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.conversation.ConversationID
+}
+
+// ListConversations returns newest-first metadata for the history menu.
+func (m *Manager) ListConversations() []ConversationSummary {
+	conversations, err := m.asst.listConversations()
+	if err == nil {
+		return conversations
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.conversation.ConversationID == "" {
+		return nil
+	}
+	return []ConversationSummary{{ConversationID: m.conversation.ConversationID, Title: m.conversation.Title, MessageCount: len(m.conversation.Messages)}}
+}
+
+// SelectConversation loads a saved transcript. The Pi context is deliberately
+// cleared: evidence from another chat must never become implicit context for
+// this one. The next question receives a compact, non-evidence recap instead.
+func (m *Manager) SelectConversation(ctx context.Context, conversationID string) (ConversationSnapshot, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ConversationSnapshot{}, errors.New("choose an Ask chat")
+	}
+	m.mu.Lock()
+	if m.conversation.ConversationID == conversationID && m.active == nil {
+		snapshot := m.snapshotLocked()
+		m.mu.Unlock()
+		return snapshot, nil
+	}
+	m.mu.Unlock()
+	exists, err := m.asst.conversationExists(conversationID)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	if !exists {
+		return ConversationSnapshot{}, errors.New("that Ask chat no longer exists")
+	}
+	return m.activateConversation(ctx, conversationID)
+}
+
+func (m *Manager) NewConversation(ctx context.Context) (ConversationSnapshot, error) {
+	id := uuid()
+	if err := m.asst.ensureConversation(id); err != nil {
+		return ConversationSnapshot{}, err
+	}
+	return m.activateConversation(ctx, id)
+}
+
+func (m *Manager) RenameConversation(conversationID, title string) error {
+	title = strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
+	if title == "" {
+		return errors.New("a chat title cannot be empty")
+	}
+	if len([]rune(title)) > 80 {
+		return errors.New("a chat title is limited to 80 characters")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrClosed
+	}
+	if m.active != nil {
+		return ErrBusy
+	}
+	if err := m.asst.renameConversation(conversationID, title); err != nil {
+		return err
+	}
+	if m.conversation.ConversationID == conversationID {
+		m.conversation.Title = title
+	}
+	return nil
+}
+
+func (m *Manager) DeleteConversation(ctx context.Context, conversationID string) (ConversationSnapshot, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ConversationSnapshot{}, errors.New("choose an Ask chat")
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return ConversationSnapshot{}, ErrClosed
+	}
+	if m.active != nil {
+		m.mu.Unlock()
+		return ConversationSnapshot{}, ErrBusy
+	}
+	current := m.conversation.ConversationID == conversationID
+	m.mu.Unlock()
+
+	target := ""
+	if current {
+		conversations, err := m.asst.listConversations()
+		if err != nil {
+			return ConversationSnapshot{}, err
+		}
+		for _, conversation := range conversations {
+			if conversation.ConversationID != conversationID {
+				target = conversation.ConversationID
+				break
+			}
+		}
+		if target == "" {
+			target = uuid()
+			if err := m.asst.ensureConversation(target); err != nil {
+				return ConversationSnapshot{}, err
+			}
+		}
+	}
+	if err := m.asst.deleteConversation(conversationID); err != nil {
+		return ConversationSnapshot{}, err
+	}
+	if !current {
+		return m.Snapshot(""), nil
+	}
+	return m.activateConversation(ctx, target)
+}
+
+func (m *Manager) activateConversation(ctx context.Context, conversationID string) (ConversationSnapshot, error) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return ConversationSnapshot{}, ErrClosed
+	}
+	if m.active != nil {
+		m.mu.Unlock()
+		return ConversationSnapshot{}, ErrBusy
+	}
+	if m.resetting {
+		m.mu.Unlock()
+		return ConversationSnapshot{}, errors.New("Ask is already switching chats")
+	}
+	m.resetting = true
+	rt := m.runtime
+	m.runtime = nil
+	m.agentConversation = ""
+	if m.idle != nil {
+		m.idle.Stop()
+		m.idle = nil
+	}
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.resetting = false
+		m.mu.Unlock()
+	}()
+
+	if rt != nil {
+		rt.close(ctx)
+	}
+	if err := m.asst.clearAgentState(); err != nil {
+		return ConversationSnapshot{}, fmt.Errorf("clear the previous Ask context: %w", err)
+	}
+	messages, err := m.asst.loadMessages(conversationID)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	conversations, _ := m.asst.listConversations()
+	title := ""
+	for _, conversation := range conversations {
+		if conversation.ConversationID == conversationID {
+			title = conversation.Title
+			break
+		}
+	}
+	m.mu.Lock()
+	m.conversation = ConversationSnapshot{ConversationID: conversationID, Title: title, Messages: messages}
+	m.mu.Unlock()
+	return m.Snapshot(""), nil
+}
+
+// resumedPrompt gives a switched-to chat enough conversational context to
+// resolve "that" without turning the old transcript into note evidence.
+func resumedPrompt(messages []Message, question string) string {
+	start := len(messages) - 8
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	b.WriteString("Earlier messages in this Ask chat, for conversational context only. Do not treat them as note evidence and do not cite their tokens; use the note tools for every claim.\n")
+	wrote := false
+	budget := 6000
+	for _, message := range messages[start:] {
+		if message.Role != "user" && message.Role != "assistant" {
+			continue
+		}
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		runes := []rune(text)
+		if len(runes) > 700 {
+			text = string(runes[:700]) + "…"
+		}
+		if budget-len([]rune(text)) < 0 {
+			break
+		}
+		budget -= len([]rune(text))
+		label := "User"
+		if message.Role == "assistant" {
+			label = "Assistant"
+		}
+		b.WriteString(label + ": " + text + "\n")
+		wrote = true
+	}
+	if !wrote {
+		return question
+	}
+	b.WriteString("\nCurrent question: " + question)
+	return b.String()
 }
 
 // ApplySettings validates, persists non-secret fields, and keeps the API key in
@@ -130,7 +409,24 @@ func (m *Manager) ApplySettings(settings Settings) error {
 	}
 	m.mu.Lock()
 	m.settings = settings
+	store := m.secret
 	m.mu.Unlock()
+	if settings.RememberKey {
+		if store == nil {
+			return errors.New("this build has no operating-system keychain available")
+		}
+		if settings.APIKey == "" {
+			if err := store.Delete(); err != nil && !errors.Is(err, ErrSecretNotFound) {
+				return fmt.Errorf("remove the saved API key: %w", err)
+			}
+		} else if err := store.Save(settings.APIKey); err != nil {
+			return fmt.Errorf("save the API key in the keychain: %w", err)
+		}
+	} else if store != nil {
+		if err := store.Delete(); err != nil && !errors.Is(err, ErrSecretNotFound) {
+			return fmt.Errorf("remove the saved API key: %w", err)
+		}
+	}
 	m.dropRuntime()
 	return nil
 }
@@ -249,21 +545,35 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 		m.mu.Unlock()
 		return RunHandle{}, errors.New("Ask is starting a fresh conversation; try again in a moment")
 	}
+	if req.ConversationID != m.conversation.ConversationID {
+		m.mu.Unlock()
+		return RunHandle{}, errors.New("open that Ask chat before asking in it")
+	}
 	if m.idle != nil {
 		m.idle.Stop()
 		m.idle = nil
 	}
+	priorMessages := append([]Message(nil), m.conversation.Messages...)
 	// A different note or notebook is a different evidence boundary even when
 	// the segmented scope kind did not change. Reset the durable agent context
 	// before admission so an earlier answer cannot carry wider-scope evidence
 	// into this run.
 	scopeChanged := (m.scopeKnown && !sameScope(m.lastScope, req.Scope)) ||
 		(!m.scopeKnown && len(m.conversation.Messages) > 0)
+	needsRecap := !scopeChanged && len(priorMessages) > 0 && m.agentConversation != req.ConversationID
+	if scopeChanged {
+		priorMessages = nil
+	}
+	prompt := text
+	if needsRecap {
+		prompt = resumedPrompt(priorMessages, text)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), settings.deadline())
 	run := &Run{
 		ID:             uuid(),
 		ConversationID: req.ConversationID,
 		Text:           text,
+		prompt:         prompt,
 		Scope:          req.Scope,
 		limits:         DefaultLimits(),
 		ctx:            ctx,
@@ -276,7 +586,7 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 		search:         make(map[string][]store.AssistantSearchHit),
 	}
 	if scopeChanged {
-		m.conversation = ConversationSnapshot{ConversationID: req.ConversationID}
+		m.conversation.Messages = nil
 	}
 	m.lastScope = req.Scope
 	m.scopeKnown = true
@@ -324,6 +634,7 @@ func (m *Manager) drive(run *Run) {
 			return
 		}
 	}
+	m.setAgentConversation(run.ConversationID)
 	if err := runtime.submit(run); err != nil {
 		m.failRun(run, "runtime_failed", "The Ask runtime could not accept the question: "+err.Error())
 		return
@@ -404,6 +715,10 @@ func (m *Manager) Cancel(runID string) error {
 func (m *Manager) Snapshot(conversationID string) ConversationSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.snapshotLocked()
+}
+
+func (m *Manager) snapshotLocked() ConversationSnapshot {
 	snapshot := m.conversation
 	snapshot.Messages = append([]Message(nil), m.conversation.Messages...)
 	snapshot.Running = m.active != nil
@@ -413,21 +728,17 @@ func (m *Manager) Snapshot(conversationID string) ConversationSnapshot {
 	return snapshot
 }
 
-func (m *Manager) ListConversations() []ConversationSnapshot {
+func (m *Manager) setAgentConversation(conversationID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.conversation.Messages) == 0 {
-		return nil
-	}
-	out := m.conversation
-	out.Messages = append([]Message(nil), m.conversation.Messages...)
-	return []ConversationSnapshot{out}
+	m.agentConversation = conversationID
+	m.mu.Unlock()
 }
 
 func (m *Manager) dropRuntime() {
 	m.mu.Lock()
 	rt := m.runtime
 	m.runtime = nil
+	m.agentConversation = ""
 	if m.idle != nil {
 		m.idle.Stop()
 		m.idle = nil
@@ -470,11 +781,15 @@ func (m *Manager) ResetConversation(ctx context.Context) error {
 	if err := m.asst.clearAgentState(); err != nil {
 		return fmt.Errorf("reset the Ask conversation: %w", err)
 	}
-	if err := m.asst.clearMessages(defaultConversationID); err != nil {
+	conversationID := m.CurrentConversationID()
+	if err := m.asst.clearMessages(conversationID); err != nil {
 		return fmt.Errorf("clear Ask history: %w", err)
 	}
 	m.mu.Lock()
-	m.conversation = ConversationSnapshot{ConversationID: defaultConversationID}
+	m.agentConversation = ""
+	m.conversation.Messages = nil
+	m.conversation.Running = false
+	m.conversation.RunID = ""
 	m.mu.Unlock()
 	m.publish(nil, Event{Type: "conversation.reset"})
 	return nil
@@ -511,6 +826,7 @@ func (m *Manager) scheduleIdleClose() {
 		rt := m.runtime
 		m.runtime = nil
 		m.idle = nil
+		m.agentConversation = ""
 		m.mu.Unlock()
 		if rt != nil {
 			slog.Info("closing idle Ask runtime")
@@ -667,6 +983,9 @@ func (m *Manager) completeRun(run *Run, text string) {
 	run.answer = text
 	m.mu.Unlock()
 	citations := run.evidence.cite(text)
+	m.mu.Lock()
+	run.citations = citations
+	m.mu.Unlock()
 	for _, citation := range citations {
 		c := citation
 		m.publish(run, Event{Type: EventCitation, Citation: &c})
@@ -731,6 +1050,7 @@ func (m *Manager) finish(run *Run, status, message string, failed bool) {
 	if failed && answer == "" {
 		answer = ""
 	}
+	citations := run.citations
 	// A late terminal event from an old run must not append to a newer run's
 	// transcript or clear its running marker.
 	ownsConversation := m.active == nil
@@ -754,7 +1074,7 @@ func (m *Manager) finish(run *Run, status, message string, failed bool) {
 		slog.Error("save Ask run outcome", "error", err)
 	}
 	if ownsConversation && answer != "" {
-		if err := m.asst.appendMessage(run.ConversationID, "assistant", answer); err != nil {
+		if err := m.asst.appendMessageWithCitations(run.ConversationID, "assistant", answer, citations); err != nil {
 			slog.Error("save Ask answer", "error", err)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/lsj5031/joplin-lite/internal/assistant"
 )
@@ -35,26 +36,43 @@ type askState struct {
 	err      string
 	notice   string
 
-	messages  []assistant.Message
-	citations []assistant.Citation
+	messages       []assistant.Message
+	citations      []assistant.Citation
+	citationStatus map[string]bool
+	conversationID string
+	conversations  []assistant.ConversationSummary
+
+	historyOpen bool
+	historyBusy bool
+	historyErr  string
+	renameID    string
+	renameText  string
+	deleteID    string
 
 	settingsOpen bool
 	settings     assistant.Settings
 	key          string
+	rememberKey  bool
 	contextText  string
 	maxText      string
 	settingsErr  string
 	testNotice   string
 	testing      bool
+	connection   string
+	connected    bool
+
+	md      *markdown.Options
+	mdTheme *markdown.Theme
 }
 
 func newAskState() askState {
 	s := assistant.DefaultSettings()
 	return askState{
-		width:       askPanelWidth,
-		settings:    s,
-		contextText: strconv.Itoa(s.ContextWindow),
-		maxText:     strconv.Itoa(s.MaxOutput),
+		width:          askPanelWidth,
+		settings:       s,
+		contextText:    strconv.Itoa(s.ContextWindow),
+		maxText:        strconv.Itoa(s.MaxOutput),
+		citationStatus: make(map[string]bool),
 	}
 }
 
@@ -78,11 +96,23 @@ func (a *nativeApp) refreshAsk() {
 		a.ask.err = "Ask is unavailable in this build."
 		return
 	}
-	snapshot := mgr.Snapshot("")
+	id := mgr.CurrentConversationID()
+	snapshot := mgr.Snapshot(id)
+	a.ask.conversationID = snapshot.ConversationID
 	a.ask.messages = snapshot.Messages
+	a.ask.conversations = mgr.ListConversations()
 	a.ask.busy = snapshot.Running
 	if !snapshot.Running {
 		a.ask.runID = ""
+	}
+	a.ask.citationStatus = make(map[string]bool)
+	for _, message := range snapshot.Messages {
+		for _, citation := range message.Citations {
+			current, err := mgr.CitationCurrent(citation)
+			if err == nil {
+				a.ask.citationStatus[askCitationKey(citation)] = current
+			}
+		}
 	}
 }
 
@@ -142,6 +172,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		}
 		a.refreshAsk()
 		a.ask.answer = ""
+		a.ask.citations = nil
 	case "run.cancelled":
 		a.ask.busy = false
 		a.ask.activity = ""
@@ -186,7 +217,7 @@ func (a *nativeApp) askScope() (assistant.Scope, error) {
 }
 
 func (a *nativeApp) askSend() {
-	if a.ask.busy {
+	if a.ask.busy || a.ask.historyBusy {
 		return
 	}
 	mgr := a.askManager()
@@ -211,7 +242,7 @@ func (a *nativeApp) askSend() {
 	// The scoped reader sees saved notes, so an unsaved draft is written first
 	// through the normal editor path. The agent never receives a save tool.
 	a.flush()
-	handle, err := mgr.Start(assistant.AskRequest{Text: question, Scope: scope})
+	handle, err := mgr.Start(assistant.AskRequest{ConversationID: a.ask.conversationID, Text: question, Scope: scope})
 	if err != nil {
 		a.ask.err = err.Error()
 		return
@@ -237,33 +268,148 @@ func (a *nativeApp) askSend() {
 	}
 }
 
-// resetAskConversation enforces the scope rule: a conversation that may hold
-// evidence from a wider scope is discarded before the next question.
+// resetAskConversation preserves the old scope's chat and starts a new thread;
+// an old answer can never become evidence for a different note boundary.
 func (a *nativeApp) resetAskConversation() {
-	a.ask.messages = nil
-	a.ask.answer = ""
-	a.ask.citations = nil
-	a.ask.err = ""
-	a.ask.notice = "Starting a fresh conversation for this scope."
+	if len(a.ask.messages) == 0 {
+		a.ask.notice = ""
+		return
+	}
+	a.newAskChat("Scope changed. Started a new chat; the previous one is in History.")
+}
+
+func (a *nativeApp) currentAskTitle() string {
+	title := ""
+	for _, conversation := range a.ask.conversations {
+		if conversation.ConversationID == a.ask.conversationID {
+			title = conversation.Title
+			break
+		}
+	}
+	if strings.TrimSpace(title) == "" {
+		for _, message := range a.ask.messages {
+			if message.Role == "user" && strings.TrimSpace(message.Text) != "" {
+				return clip(strings.Join(strings.Fields(message.Text), " "), 42)
+			}
+		}
+		return "New chat"
+	}
+	return title
+}
+
+func (a *nativeApp) newAskChat(notice string) {
+	if a.ask.historyBusy {
+		return
+	}
 	mgr := a.askManager()
 	if mgr == nil {
 		return
 	}
 	if _, active := mgr.ActiveRun(); active {
-		a.ask.err = "Stop the current Ask run before changing scope."
+		a.ask.err = "Stop the current Ask run before starting a new chat."
 		return
 	}
-	a.ask.busy = true
-	a.ask.activity = "Starting a fresh conversation"
+	a.ask.historyOpen = false
+	a.ask.historyBusy = true
+	a.ask.historyErr = ""
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		err := mgr.ResetConversation(ctx)
+		snapshot, err := mgr.NewConversation(ctx)
 		mygo.RunOnMain(func() {
-			a.ask.busy = false
-			a.ask.activity = ""
+			a.ask.historyBusy = false
 			if err != nil {
-				a.ask.err = err.Error()
+				a.ask.historyErr = err.Error()
+			} else {
+				a.ask.messages = snapshot.Messages
+				a.ask.answer = ""
+				a.ask.citations = nil
+				a.ask.notice = notice
+				a.refreshAsk()
+			}
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		})
+	}()
+}
+
+func (a *nativeApp) selectAskChat(id string) {
+	mgr := a.askManager()
+	if mgr == nil || id == a.ask.conversationID {
+		a.ask.historyOpen = false
+		return
+	}
+	if _, active := mgr.ActiveRun(); active {
+		a.ask.historyErr = "Stop the current Ask run before switching chats."
+		return
+	}
+	a.ask.historyOpen = false
+	a.ask.historyBusy = true
+	a.ask.historyErr = ""
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		snapshot, err := mgr.SelectConversation(ctx, id)
+		mygo.RunOnMain(func() {
+			a.ask.historyBusy = false
+			if err != nil {
+				a.ask.historyErr = err.Error()
+			} else {
+				a.ask.messages = snapshot.Messages
+				a.ask.answer = ""
+				a.ask.citations = nil
+				a.ask.notice = "Loaded saved chat."
+				a.refreshAsk()
+			}
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		})
+	}()
+}
+
+func (a *nativeApp) renameAskChat() {
+	mgr := a.askManager()
+	if mgr == nil || a.ask.renameID == "" {
+		return
+	}
+	if err := mgr.RenameConversation(a.ask.renameID, a.ask.renameText); err != nil {
+		a.ask.historyErr = err.Error()
+		return
+	}
+	a.ask.renameID = ""
+	a.ask.renameText = ""
+	a.ask.historyErr = ""
+	a.refreshAsk()
+}
+
+func (a *nativeApp) deleteAskChat() {
+	mgr := a.askManager()
+	if mgr == nil || a.ask.deleteID == "" {
+		return
+	}
+	if _, active := mgr.ActiveRun(); active {
+		a.ask.historyErr = "Stop the current Ask run before deleting a chat."
+		return
+	}
+	id := a.ask.deleteID
+	a.ask.historyBusy = true
+	a.ask.deleteID = ""
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		snapshot, err := mgr.DeleteConversation(ctx, id)
+		mygo.RunOnMain(func() {
+			a.ask.historyBusy = false
+			if err != nil {
+				a.ask.historyErr = err.Error()
+			} else {
+				a.ask.messages = snapshot.Messages
+				a.ask.answer = ""
+				a.ask.citations = nil
+				a.ask.notice = "Chat deleted."
+				a.refreshAsk()
 			}
 			if a.invalidate != nil {
 				a.invalidate()
@@ -290,6 +436,7 @@ func (a *nativeApp) openAskSettings() {
 	settings := mgr.Settings()
 	a.ask.settings = settings
 	a.ask.key = settings.APIKey
+	a.ask.rememberKey = settings.RememberKey
 	a.ask.contextText = strconv.Itoa(settings.ContextWindow)
 	a.ask.maxText = strconv.Itoa(settings.MaxOutput)
 	a.ask.settingsErr = ""
@@ -301,6 +448,7 @@ func (a *nativeApp) openAskSettings() {
 func (a *nativeApp) askSettingsDraft() (assistant.Settings, error) {
 	settings := a.ask.settings
 	settings.APIKey = strings.TrimSpace(a.ask.key)
+	settings.RememberKey = a.ask.rememberKey
 	contextWindow, err := strconv.Atoi(strings.TrimSpace(a.ask.contextText))
 	if err != nil {
 		return settings, fmt.Errorf("context window must be a number")
@@ -340,8 +488,11 @@ func (a *nativeApp) testAskSettings() {
 		err := mgr.TestConnection(ctx, settings)
 		mygo.RunOnMain(func() {
 			a.ask.testing = false
+			a.ask.connected = err == nil
+			a.ask.connection = "Last test: connected to " + settings.ModelID + " · " + time.Now().Format("15:04")
 			if err != nil {
 				a.ask.settingsErr = err.Error()
+				a.ask.connection = "Last test failed · " + clip(err.Error(), 110)
 			} else {
 				a.ask.testNotice = "Connection succeeded. Save to use this endpoint."
 			}
@@ -370,7 +521,13 @@ func (a *nativeApp) saveAskSettings() {
 	a.ask.settingsOpen = false
 	a.ask.settingsErr = ""
 	a.ask.testNotice = ""
-	a.ask.notice = "Model connection saved. API keys are kept for this session only."
+	if settings.RememberKey {
+		a.ask.notice = "Model connection saved. The API key is in your OS keychain."
+	} else {
+		a.ask.notice = "Model connection saved. The API key is kept for this session only."
+	}
+	a.ask.connection = "Connection saved; run Test connection to verify it."
+	a.ask.connected = false
 }
 
 func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
@@ -379,7 +536,7 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 	}
 	ui.Modal(c, &a.ask.settingsOpen, func() {
 		ui.Text(c, "Ask model connection").FontSize(sizeBody).Bold()
-		ui.Text(c, "Questions and the note passages the agent reads are sent to this model endpoint, even when Joplin sync uses end-to-end encryption. The API key, if used, is held in memory for this session only.").
+		ui.Text(c, "Questions and the note passages the agent reads are sent to this model endpoint, even when Joplin sync uses end-to-end encryption. The API key is never written to the note database.").
 			FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(460)
 		ui.Scroll(c.Key("ask-settings-fields")).Width(480).MaxHeight(330).Children(func() {
 			ui.TextInput(c.Key("ask-base-url"), &a.ask.settings.BaseURL).
@@ -395,6 +552,9 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 				Placeholder("leave empty for a keyless local endpoint").
 				Password().
 				Width(460)
+			ui.Checkbox(c, &a.ask.rememberKey, "Remember API key in the OS keychain")
+			ui.Text(c, "Use this only on a trusted device. Leaving it off keeps the key in memory for this session only.").
+				FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(460)
 			ui.Row(c).Gap(8).Children(func() {
 				ui.TextInput(c.Key("ask-context"), &a.ask.contextText).
 					Label("Context window (tokens)").Width(210)
@@ -444,15 +604,25 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 		panel.Width(a.ask.width)
 	}
 	panel.Children(func() {
-		ui.Row(c).Height(44).Shrink(0).Padding(0, 10, 0, 14).AlignItems(ui.Center).Gap(6).Children(func() {
+		var historyButton ui.Element
+		ui.Row(c).Height(44).Shrink(0).Padding(0, 10, 0, 14).AlignItems(ui.Center).Gap(4).Children(func() {
 			ui.Text(c, "Ask").Font(fontHeading).FontSize(18).TextColor(inkNavy)
 			ui.Spacer(c)
+			historyButton = ui.Button(c, "History").Tooltip("Open saved Ask chats")
+			if historyButton.Clicked() {
+				a.ask.historyOpen = !a.ask.historyOpen
+			}
+			if ui.Button(c, "New").Tooltip("Start a new Ask chat").Clicked() {
+				a.ask.historyOpen = false
+				a.newAskChat("Started a new chat.")
+			}
 			if ui.Button(c, "Model…").Clicked() {
 				a.openAskSettings()
 			}
 			if iconButton(c, "ask-close", iconClose, "Close Ask", "Close the Ask panel").Clicked() {
 				a.ask.open = false
 			}
+			a.askHistoryMenu(c, historyButton, innerWidth)
 		})
 		ui.Column(c).Shrink(0).Padding(0, 14, 6, 14).Gap(4).Children(func() {
 			if ui.Segmented(c, &a.ask.scope, "This note", "Notebook", "All notes").Label("Search scope").Changed() {
@@ -463,33 +633,35 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 			}
 			ui.Text(c, "Only readable, non-conflict notes are included. Notes never change.").
 				FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(innerWidth)
+			if a.ask.connection != "" {
+				color := inkSoft
+				if !a.ask.connected {
+					color = amberInk
+				}
+				ui.Text(c, a.ask.connection).FontSize(sizeSmall).TextColor(color).MaxWidth(innerWidth)
+			}
 		})
 		ui.Scroll(c.Key("ask-scroll")).Grow(1).MinHeight(0).Padding(0, 14, 10, 14).Children(func() {
 			ui.Column(c).Gap(10).Width(innerWidth).Children(func() {
-				for _, message := range a.ask.messages {
+				for i, message := range a.ask.messages {
 					role, color := "You", inkSoft
-					text := message.Text
 					if message.Role == "assistant" {
 						role, color = "Answer", inkNavy
 					} else if message.Role == "error" {
 						role, color = "Could not answer", signalRed
 					}
 					ui.Text(c, role).FontSize(sizeSmall).Bold().TextColor(color)
-					ui.Text(c, text).FontSize(sizeUI).LineHeight(1.5).TextColor(inkNavy).MaxWidth(innerWidth)
+					if message.Role == "assistant" {
+						a.askAnswer(c, message.Text, message.Citations, strconv.Itoa(i), innerWidth)
+						a.askCitationButtons(c, message.Citations, innerWidth)
+					} else {
+						ui.Text(c, message.Text).FontSize(sizeUI).LineHeight(1.5).TextColor(inkNavy).MaxWidth(innerWidth)
+					}
 				}
 				if a.ask.answer != "" {
 					ui.Text(c, "Answer").FontSize(sizeSmall).Bold().TextColor(inkNavy)
-					ui.Text(c, a.ask.answer).FontSize(sizeUI).LineHeight(1.5).MaxWidth(innerWidth)
-				}
-				if len(a.ask.citations) > 0 {
-					ui.Text(c, "Sources").FontSize(sizeSmall).Bold().TextColor(inkSoft)
-					for i := range a.ask.citations {
-						citation := a.ask.citations[i]
-						label := fmt.Sprintf("[%s] %s", citation.Token, clip(citation.Title, 34))
-						if ui.Button(c, label).Tooltip(citation.Excerpt).Clicked() {
-							a.openAskCitation(citation)
-						}
-					}
+					a.askAnswer(c, a.ask.answer, a.ask.citations, "live", innerWidth)
+					a.askCitationButtons(c, a.ask.citations, innerWidth)
 				}
 				if a.ask.activity != "" {
 					ui.Text(c, a.ask.activity+"…").FontSize(sizeSmall).TextColor(amberInk)

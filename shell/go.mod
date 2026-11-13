@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/egoist/mygo v0.5.5
 	github.com/lsj5031/joplin-lite v0.0.0
+	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.46.0
 )
@@ -33,6 +34,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.6 // indirect
 	github.com/aws/smithy-go v1.22.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-chi/chi/v5 v5.2.1 // indirect
@@ -40,6 +42,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

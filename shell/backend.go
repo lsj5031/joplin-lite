@@ -381,6 +381,10 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string, lau
 		slog.Warn("Ask is unavailable", "error", askErr)
 	} else {
 		b.ask = ask
+		ask.SetSecretStore(newAskKeychain())
+		if err := ask.RestoreStoredKey(); err != nil && !errors.Is(err, assistant.ErrSecretNotFound) {
+			slog.Warn("Ask keychain restore failed", "error", err)
+		}
 	}
 
 	srv := clipper.NewServer(db, token, cfg.APIKey, b, clipper.NewPolicy(&uiCfg), authPrompt{})

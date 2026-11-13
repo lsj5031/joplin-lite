@@ -214,7 +214,11 @@ func (r *agentRuntime) submit(run *Run) error {
 	if err != nil {
 		return err
 	}
-	payload := map[string]any{"requestId": run.ID, "text": run.Text}
+	prompt := run.prompt
+	if prompt == "" {
+		prompt = run.Text
+	}
+	payload := map[string]any{"requestId": run.ID, "text": prompt}
 	ok := r.loop.RunOnLoop(func(rt *moejs.Runtime) {
 		arg, err := rt.FromGo(payload)
 		if err != nil {

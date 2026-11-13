@@ -1,0 +1,32 @@
+name: ask
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Materialize MyGO dependency
+        run: bash shell/prepare-mygo.sh
+      - name: Root tests
+        run: CGO_ENABLED=0 go test ./...
+      - name: Native shell tests
+        run: cd shell && go test ./... -count=1
+      - name: Build native binary
+        run: cd shell && CGO_ENABLED=0 go build -trimpath -tags mygo_noinspector -o ../tmp/joplin-lite .
+      - name: Embedded agent tests
+        run: |
+          cd agent
+          npm ci
+          npm test
+          npm run check:bundle
