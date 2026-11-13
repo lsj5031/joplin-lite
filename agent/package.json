@@ -1,0 +1,22 @@
+{
+  "name": "joplin-lite-ask-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Embedded Ask agent for Joplin Lite. Built as a single ESM bundle and executed by moejs.",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check:bundle": "node build.mjs --check"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

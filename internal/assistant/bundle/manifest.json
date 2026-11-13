@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "entry": "agent.js",
+  "sha256": "3dd704e84831df29799f7efc1d281f76fe0e1ae2f43e5fb925aec40259d08539",
+  "bytes": 1710575,
+  "packages": {
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/chord": "1.4.0",
+    "typebox": "1.3.27"
+  }
+}

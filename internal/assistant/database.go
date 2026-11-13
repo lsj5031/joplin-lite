@@ -1,0 +1,455 @@
+package assistant
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+// assistantDB owns assistant.sqlite. The Pi durable tables live in their own
+// `pi` prefix and are migrated by Pi itself; Joplin Lite lifecycle data uses the
+// separate jl_ask_ namespace.
+type assistantDB struct {
+	db   *sql.DB
+	path string
+
+	txMu sync.Mutex
+	txs  map[string]*sql.Tx
+}
+
+func openAssistantDB(dataDir string) (*assistantDB, error) {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create assistant data directory: %w", err)
+	}
+	path := filepath.Join(dataDir, "assistant.sqlite")
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open assistant database: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("connect assistant database: %w", err)
+	}
+	_ = os.Chmod(path, 0o600)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS jl_ask_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	); CREATE TABLE IF NOT EXISTS jl_ask_runs (
+		id TEXT PRIMARY KEY,
+		conversation_id TEXT NOT NULL,
+		request_id TEXT NOT NULL,
+		scope TEXT NOT NULL,
+		status TEXT NOT NULL,
+		answer TEXT NOT NULL DEFAULT '',
+		created_time INTEGER NOT NULL,
+		finished_time INTEGER NOT NULL DEFAULT 0
+	); CREATE TABLE IF NOT EXISTS jl_ask_messages (
+		conversation_id TEXT NOT NULL,
+		seq INTEGER NOT NULL,
+		role TEXT NOT NULL,
+		text TEXT NOT NULL,
+		PRIMARY KEY (conversation_id, seq)
+	)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create assistant lifecycle schema: %w", err)
+	}
+	// A run that was admitted before the process ended has no live worker now.
+	// Never replay it; the user can ask again explicitly.
+	if _, err := db.Exec(`UPDATE jl_ask_runs SET status = 'interrupted',
+		finished_time = CASE WHEN finished_time = 0 THEN created_time ELSE finished_time END
+		WHERE status = 'running'`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("reconcile interrupted Ask runs: %w", err)
+	}
+	return &assistantDB{db: db, path: path, txs: make(map[string]*sql.Tx)}, nil
+}
+
+func (a *assistantDB) loadSettings() (Settings, error) {
+	s := DefaultSettings()
+	var raw string
+	err := a.db.QueryRow(`SELECT value FROM jl_ask_settings WHERE key = 'model'`).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return s, nil
+	}
+	if err != nil {
+		return s, err
+	}
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return DefaultSettings(), nil
+	}
+	s.Normalize()
+	return s, nil
+}
+
+func (a *assistantDB) saveSettings(s Settings) error {
+	raw, err := json.Marshal(map[string]any{
+		"provider":      s.Provider,
+		"baseUrl":       s.BaseURL,
+		"modelId":       s.ModelID,
+		"contextWindow": s.ContextWindow,
+		"maxOutput":     s.MaxOutput,
+		"timeoutMs":     s.TimeoutMS,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = a.db.Exec(`INSERT OR REPLACE INTO jl_ask_settings (key, value) VALUES ('model', ?)`, string(raw))
+	return err
+}
+
+func (a *assistantDB) saveRun(runID, conversationID, requestID string, scope Scope, status, answer string) error {
+	scopeJSON, _ := json.Marshal(scope)
+	now := time.Now().UnixMilli()
+	finished := now
+	if status == "running" {
+		finished = 0
+	}
+	_, err := a.db.Exec(`INSERT OR REPLACE INTO jl_ask_runs
+		(id, conversation_id, request_id, scope, status, answer, created_time, finished_time)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, runID, conversationID, requestID, string(scopeJSON), status, answer, now, finished)
+	return err
+}
+
+func (a *assistantDB) saveScope(scope Scope) error {
+	raw, err := json.Marshal(scope)
+	if err != nil {
+		return err
+	}
+	_, err = a.db.Exec(`INSERT OR REPLACE INTO jl_ask_settings (key, value) VALUES ('scope', ?)`, string(raw))
+	return err
+}
+
+func (a *assistantDB) loadScope() (Scope, bool, error) {
+	var raw string
+	err := a.db.QueryRow(`SELECT value FROM jl_ask_settings WHERE key = 'scope'`).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return Scope{}, false, nil
+	}
+	if err != nil {
+		return Scope{}, false, err
+	}
+	var scope Scope
+	if err := json.Unmarshal([]byte(raw), &scope); err != nil {
+		return Scope{}, false, nil
+	}
+	return scope, true, nil
+}
+
+func (a *assistantDB) loadMessages(conversationID string) ([]Message, error) {
+	rows, err := a.db.Query(`SELECT role, text FROM jl_ask_messages WHERE conversation_id = ? ORDER BY seq ASC`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var message Message
+		if err := rows.Scan(&message.Role, &message.Text); err != nil {
+			return nil, err
+		}
+		out = append(out, message)
+	}
+	return out, rows.Err()
+}
+
+func (a *assistantDB) clearMessages(conversationID string) error {
+	_, err := a.db.Exec(`DELETE FROM jl_ask_messages WHERE conversation_id = ?`, conversationID)
+	return err
+}
+
+// clearAgentState drops only Pi's own tables. Settings and Joplin Lite
+// lifecycle records survive a conversation reset.
+func (a *assistantDB) clearAgentState() error {
+	rows, err := a.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'pi\_%' ESCAPE '\'`)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	if _, err := a.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer a.db.Exec(`PRAGMA foreign_keys = ON`)
+	for _, name := range names {
+		if _, err := a.db.Exec(`DROP TABLE IF EXISTS "` + strings.ReplaceAll(name, `"`, `""`) + `"`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *assistantDB) appendMessage(conversationID, role, text string) error {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var seq int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM jl_ask_messages WHERE conversation_id = ?`, conversationID).Scan(&seq); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO jl_ask_messages (conversation_id, seq, role, text) VALUES (?, ?, ?, ?)`, conversationID, seq, role, text); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (a *assistantDB) close() error {
+	a.txMu.Lock()
+	for id, tx := range a.txs {
+		_ = tx.Rollback()
+		delete(a.txs, id)
+	}
+	a.txMu.Unlock()
+	return a.db.Close()
+}
+
+type dbRequest struct {
+	Op     string            `json:"op"`
+	SQL    string            `json:"sql"`
+	Params []json.RawMessage `json:"params"`
+	Tx     string            `json:"tx"`
+}
+
+type taggedValue struct {
+	T string          `json:"t"`
+	V json.RawMessage `json:"v"`
+}
+
+func decodeDBParams(params []json.RawMessage) ([]any, error) {
+	out := make([]any, 0, len(params))
+	for _, raw := range params {
+		var value taggedValue
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, err
+		}
+		switch value.T {
+		case "n", "":
+			out = append(out, nil)
+		case "s":
+			var s string
+			if err := json.Unmarshal(value.V, &s); err != nil {
+				return nil, err
+			}
+			out = append(out, s)
+		case "f":
+			var f float64
+			if err := json.Unmarshal(value.V, &f); err != nil {
+				return nil, err
+			}
+			out = append(out, f)
+		case "i":
+			var text string
+			if err := json.Unmarshal(value.V, &text); err != nil {
+				return nil, err
+			}
+			n, err := strconv.ParseInt(text, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("integer parameter is out of range")
+			}
+			out = append(out, n)
+		case "b":
+			var text string
+			if err := json.Unmarshal(value.V, &text); err != nil {
+				return nil, err
+			}
+			b, err := base64.StdEncoding.DecodeString(text)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b)
+		default:
+			return nil, fmt.Errorf("unknown SQLite parameter tag %q", value.T)
+		}
+	}
+	return out, nil
+}
+
+func encodeDBValue(value any) taggedValue {
+	switch v := value.(type) {
+	case nil:
+		return taggedValue{T: "n"}
+	case int64:
+		return taggedValue{T: "i", V: json.RawMessage(strconv.FormatInt(v, 10))}
+	case int:
+		return taggedValue{T: "i", V: json.RawMessage(strconv.Itoa(v))}
+	case float64:
+		return taggedValue{T: "f", V: json.RawMessage(strconv.FormatFloat(v, 'g', -1, 64))}
+	case bool:
+		if v {
+			return taggedValue{T: "i", V: json.RawMessage("1")}
+		}
+		return taggedValue{T: "i", V: json.RawMessage("0")}
+	case []byte:
+		return taggedValue{T: "b", V: mustJSON(base64.StdEncoding.EncodeToString(v))}
+	case time.Time:
+		return taggedValue{T: "s", V: mustJSON(v.UTC().Format(time.RFC3339Nano))}
+	case string:
+		return taggedValue{T: "s", V: mustJSON(v)}
+	default:
+		return taggedValue{T: "s", V: mustJSON(fmt.Sprint(v))}
+	}
+}
+
+func mustJSON(value any) json.RawMessage {
+	raw, _ := json.Marshal(value)
+	return raw
+}
+
+func newHandle() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// execute runs one portable SQLite request. JavaScript serializes operations,
+// so a transaction and unrelated statements are never interleaved; the single
+// Go connection also enforces that at the driver boundary.
+func (a *assistantDB) execute(ctx context.Context, req dbRequest) (map[string]any, error) {
+	switch req.Op {
+	case "begin":
+		tx, err := a.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		id := newHandle()
+		a.txMu.Lock()
+		a.txs[id] = tx
+		a.txMu.Unlock()
+		return map[string]any{"tx": id}, nil
+	case "commit", "rollback":
+		a.txMu.Lock()
+		tx := a.txs[req.Tx]
+		delete(a.txs, req.Tx)
+		a.txMu.Unlock()
+		if tx == nil {
+			return nil, errors.New("unknown or finished transaction")
+		}
+		if req.Op == "commit" {
+			return map[string]any{}, tx.Commit()
+		}
+		return map[string]any{}, tx.Rollback()
+	}
+	if req.SQL == "" {
+		return nil, errors.New("empty SQL")
+	}
+	params, err := decodeDBParams(req.Params)
+	if err != nil {
+		return nil, err
+	}
+	var tx *sql.Tx
+	if req.Tx != "" {
+		a.txMu.Lock()
+		tx = a.txs[req.Tx]
+		a.txMu.Unlock()
+		if tx == nil {
+			return nil, errors.New("unknown or finished transaction")
+		}
+	}
+	switch req.Op {
+	case "exec":
+		if tx != nil {
+			_, err = tx.ExecContext(ctx, req.SQL)
+		} else {
+			_, err = a.db.ExecContext(ctx, req.SQL)
+		}
+		return map[string]any{}, err
+	case "run":
+		var result sql.Result
+		if tx != nil {
+			result, err = tx.ExecContext(ctx, req.SQL, params...)
+		} else {
+			result, err = a.db.ExecContext(ctx, req.SQL, params...)
+		}
+		if err != nil {
+			return nil, err
+		}
+		id, _ := result.LastInsertId()
+		n, _ := result.RowsAffected()
+		return map[string]any{"lastInsertId": id, "rowsAffected": n}, nil
+	case "get", "all":
+		var rows *sql.Rows
+		if tx != nil {
+			rows, err = tx.QueryContext(ctx, req.SQL, params...)
+		} else {
+			rows, err = a.db.QueryContext(ctx, req.SQL, params...)
+		}
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		cols, err := rows.Columns()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]map[string]taggedValue, 0, 8)
+		for rows.Next() {
+			values := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range values {
+				ptrs[i] = &values[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return nil, err
+			}
+			row := make(map[string]taggedValue, len(cols))
+			for i, col := range cols {
+				row[col] = encodeDBValue(values[i])
+			}
+			out = append(out, row)
+			if req.Op == "get" {
+				break
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if req.Op == "get" {
+			if len(out) == 0 {
+				return map[string]any{}, nil
+			}
+			return map[string]any{"row": out[0]}, nil
+		}
+		return map[string]any{"rows": out}, nil
+	default:
+		return nil, fmt.Errorf("unsupported database operation %q", req.Op)
+	}
+}
+
+func (a *assistantDB) status() string {
+	if a == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.path)
+}

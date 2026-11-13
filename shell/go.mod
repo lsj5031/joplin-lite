@@ -5,11 +5,15 @@ go 1.27.1
 require (
 	github.com/egoist/mygo v0.5.5
 	github.com/lsj5031/joplin-lite v0.0.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/image v0.46.0
 )
 
 require (
 	github.com/JohannesKaufmann/dom v0.2.0 // indirect
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.3.0 // indirect
+	github.com/MoeForge/moego v0.1.0-alpha.1 // indirect
+	github.com/MoeForge/moejs v0.1.1-0.20261109125924-934171643e14 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.36.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.28.8 // indirect
@@ -44,8 +48,6 @@ require (
 	go.opentelemetry.io/otel v1.40.0 // indirect
 	go.opentelemetry.io/otel/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.43.0 // indirect

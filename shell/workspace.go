@@ -66,6 +66,9 @@ func (a *nativeApp) view(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyComma) {
 		a.openSettings()
 	}
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyA) {
+		a.toggleAsk()
+	}
 	if c.Shortcut(ui.Cmd, ui.KeyS) {
 		a.flush()
 	}
@@ -82,6 +85,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.notebookDialogs(c, t)
 	a.tagDialogs(c, t)
 	a.settingsDialog(c, t)
+	a.askSettingsDialog(c, t)
 	a.savedSearchDialog(c, t)
 	a.conflictDialog(c, t)
 	a.backupDialogs(c, t)
@@ -157,6 +161,12 @@ func (a *nativeApp) view(c *ui.Context) {
 			ui.Column(c).Grow(1).MinWidth(0).Padding(cardGap, cardGap, cardGap, 0).Children(func() {
 				a.editorPane(c, t)
 			})
+			if a.ask.open {
+				a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, askMaxWidth, true)
+				a.askPanel(c, t)
+			}
+		case a.ask.open:
+			a.askPanel(c, t)
 		case a.narrowEditor:
 			a.editorPane(c, t)
 		default:
@@ -231,6 +241,9 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 				if iconButton(c, "top-new-note", iconPlus, "New note", "Create a new note (Cmd/Ctrl+N)").Clicked() {
 					a.newNote()
 				}
+				if chromeButton(c, "Ask").Tooltip("Ask across your notes (Cmd/Ctrl+Shift+A)").Clicked() {
+					a.toggleAsk()
+				}
 				if iconButton(c, "top-settings", iconSettings, "Settings", "Sync target, master password and clipper token (Cmd/Ctrl+,)").Clicked() {
 					a.openSettings()
 				}
@@ -271,6 +284,9 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		}
 		if primary.Clicked() {
 			a.newNote()
+		}
+		if chromeButton(c, "Ask").Clicked() {
+			a.toggleAsk()
 		}
 		if iconButton(c, "narrow-settings", iconSettings, "Settings", "Sync target, master password and clipper token").Clicked() {
 			a.openSettings()

@@ -101,12 +101,12 @@ type nativeApp struct {
 	// JEX export/import. The work runs off the UI thread and reports through
 	// backupBusy / backupNotice / backupErr; the pick* seams let tests avoid
 	// native panels.
-	backupBusy    string
-	backupNotice  string
-	backupErr     string
-	importPath    string
-	importPlan    *service.ImportResult
-	confirmImport bool
+	backupBusy     string
+	backupNotice   string
+	backupErr      string
+	importPath     string
+	importPlan     *service.ImportResult
+	confirmImport  bool
 	pickExportPath func() (string, error)
 	pickImportPath func() (string, error)
 
@@ -217,6 +217,9 @@ type nativeApp struct {
 	wordCountVal        int
 	wordCountReady      bool
 	metrics             *uiMetrics
+
+	// ask is the native Ask panel state. The manager lives on the backend.
+	ask askState
 }
 
 // targetLabel names the sync target for the status strip: the backend's own
@@ -249,6 +252,7 @@ func newNativeApp(db *store.DB) *nativeApp {
 		railW:        railWidth,
 		listW:        listWidth,
 		metrics:      newUIMetrics(),
+		ask:          newAskState(),
 	}
 	// Screenshot attachments can decode to hundreds of MB; load one at a time.
 	var imageMu sync.Mutex
@@ -2680,6 +2684,7 @@ func openNativeWindow(be *backend) (*mygo.Window, *nativeApp) {
 	}
 	app.loadSettings = be.Settings
 	app.applySettings = be.ApplySettings
+	be.setAskNotify(app.onAskEvent)
 	app.target, app.targetSet = be.Settings().Target, true
 	mygo.App.SetMenu(app.appMenu())
 	if runtime.GOOS == "darwin" {
@@ -2731,6 +2736,7 @@ func openNativeWindow(be *backend) (*mygo.Window, *nativeApp) {
 	win.OnClosed(func() {
 		if app.be != nil {
 			app.be.setNotify(nil)
+			app.be.setAskNotify(nil)
 		}
 		app.flush()
 		if app.saveTimer != nil {

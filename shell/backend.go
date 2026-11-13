@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/lsj5031/joplin-lite/internal/assistant"
 	"github.com/lsj5031/joplin-lite/internal/clipper"
 	"github.com/lsj5031/joplin-lite/internal/config"
 	"github.com/lsj5031/joplin-lite/internal/store"
@@ -61,6 +62,13 @@ type backend struct {
 	notify  func()
 	metrics *uiMetrics
 	launch  launchSettings
+
+	// ask is the embedded Ask agent. It owns assistant.sqlite and is closed
+	// before the vault store so no admitted note read can outlive the DB.
+	ask       *assistant.Manager
+	askMu     sync.Mutex
+	askNotify func(assistant.Event)
+	askQueue  []assistant.Event
 
 	// logRestore closes the desktop log file and puts the previous default
 	// logger back; nil for a backend that never opened one.
@@ -367,6 +375,13 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string, lau
 		launch:     launch,
 		logRestore: logRestore,
 	}
+	if ask, askErr := assistant.NewManager(db, cfg.DataDir, b.onAskEvent); askErr != nil {
+		// Ask is optional: an unavailable assistant database must not stop the
+		// note app from opening. The panel reports the failure when used.
+		slog.Warn("Ask is unavailable", "error", askErr)
+	} else {
+		b.ask = ask
+	}
 
 	srv := clipper.NewServer(db, token, cfg.APIKey, b, clipper.NewPolicy(&uiCfg), authPrompt{})
 	b.srv = srv
@@ -388,6 +403,11 @@ func startBackend(cfgPath, dataDir string, noSync bool, addrOverride string, lau
 	if startErr != nil {
 		cancel()
 		_ = httpSrv.Close()
+		if b.ask != nil {
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = b.ask.Close(closeCtx)
+			closeCancel()
+		}
 		db.Close()
 		return nil, startErr
 	}
@@ -562,6 +582,47 @@ func (b *backend) SyncNow() bool {
 
 // TriggerSync satisfies clipper.SyncTrigger: a mutation queues a pass.
 func (b *backend) TriggerSync() { b.SyncNow() }
+
+// AskManager returns the embedded Ask manager, or nil when its database could
+// not be opened.
+func (b *backend) AskManager() *assistant.Manager {
+	if b == nil {
+		return nil
+	}
+	return b.ask
+}
+
+func (b *backend) onAskEvent(event assistant.Event) {
+	b.askMu.Lock()
+	fn := b.askNotify
+	if fn == nil {
+		if len(b.askQueue) < 512 {
+			b.askQueue = append(b.askQueue, event)
+		}
+		b.askMu.Unlock()
+		return
+	}
+	b.askMu.Unlock()
+	fn(event)
+}
+
+// setAskNotify installs the native panel's event sink and drains any events
+// admitted before the window existed.
+func (b *backend) setAskNotify(fn func(assistant.Event)) {
+	if b == nil {
+		return
+	}
+	b.askMu.Lock()
+	b.askNotify = fn
+	queued := b.askQueue
+	b.askQueue = nil
+	b.askMu.Unlock()
+	if fn != nil {
+		for _, event := range queued {
+			fn(event)
+		}
+	}
+}
 
 // setNotify registers a callback invoked whenever sync state changes.
 func (b *backend) setNotify(fn func()) {
@@ -865,6 +926,15 @@ func (b *backend) Close() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = b.httpSrv.Shutdown(ctx)
+		// Stop admission and drain the agent before its note reads can reach a
+		// closed vault store.
+		if b.ask != nil {
+			askCtx, askCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := b.ask.Close(askCtx); err != nil {
+				slog.Warn("Ask shutdown failed", "error", err)
+			}
+			askCancel()
+		}
 		if b.db != nil {
 			_ = b.db.Close()
 		}
