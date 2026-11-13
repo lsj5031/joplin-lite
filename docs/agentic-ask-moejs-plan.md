@@ -323,7 +323,7 @@ A future shared Accanto agent package should follow demonstrated shared behavior
 
 Deliver implementation commits, exact reviewed/tested SHAs, bundle manifest, dependency notices, deterministic test output, native screenshot sequence, footprint table and retrieval evaluation report. Clearly separate fixtures from live-model results. List any omitted platform validation and a concrete follow-up.
 
-Current evidence only: prior local Joplin store/service/clipper tests and Accanto build/research fixtures passed. This plan's moejs bundle, host bridge, SQLite integration and UI have not been implemented or run. The detailed contracts above are proposed application interfaces; the named moejs eventloop/webapi and Pi SqliteStorage APIs were checked against their current documentation/types.
+Implementation and review status (2026-11-13): the embedded bundle, Go host bridge, portable SQLite integration, scoped retrieval and native Ask UI are implemented. See [the corrective review and gate reconciliation](ask-review-20261113.md) for fresh Linux/Mitori validation, resolved findings and remaining acceptance gates. This design document is not itself proof that every proposed gate passed; footprint measurements, complete visual inspection, adversarial fault coverage and hosted/platform checks remain explicitly qualified in that report.
 
 Source anchors:
 - https://github.com/MoeForge/moejs/blob/934171643e14a785a9c03e8bee10f82e5e1de478/docs/guide.md

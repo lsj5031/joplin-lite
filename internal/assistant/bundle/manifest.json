@@ -1,8 +1,8 @@
 {
   "apiVersion": 1,
   "entry": "agent.js",
-  "sha256": "da4c76bc08f4daa6a88b3e60f77c0cb283a038095fabdd94fc23cfad7fdb754c",
-  "bytes": 1710642,
+  "sha256": "83e9f639b22c3e9f1c1f7141bfdf65e90994148fb4241c4489696a52baa0b135",
+  "bytes": 1710894,
   "packages": {
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-durable": "1.4.0",

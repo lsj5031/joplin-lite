@@ -90,17 +90,18 @@ func (m *Manager) searchNotes(ctx context.Context, run *Run, input SearchInput) 
 	run.searchMu.Lock()
 	hits := run.search[key]
 	run.searchMu.Unlock()
+	// Keep cursor positions stable, but never retain the authority or content
+	// of a cached candidate across calls. The scoped query returns one current
+	// permitted snapshot, including updated snippets and titles.
+	found, err := m.vault.AssistantSearch(ctx, store.AssistantSearchQuery{
+		Query: query, TagID: input.TagID,
+		Scope: store.AssistantScope{Kind: run.Scope.Kind, NoteID: run.Scope.NoteID, NotebookID: run.Scope.NotebookID, IncludeDescendants: run.Scope.IncludeDescendants},
+		Limit: run.limits.SearchCandidates,
+	})
+	if err != nil {
+		return SearchPage{}, toolErr("storage_failed", "The note search could not run.")
+	}
 	if hits == nil {
-		found, err := m.vault.AssistantSearch(ctx, store.AssistantSearchQuery{
-			Query:  query,
-			TagID:  input.TagID,
-			Scope:  store.AssistantScope{Kind: run.Scope.Kind, NoteID: run.Scope.NoteID, NotebookID: run.Scope.NotebookID, IncludeDescendants: run.Scope.IncludeDescendants},
-			Limit:  run.limits.SearchCandidates,
-			Offset: 0,
-		})
-		if err != nil {
-			return SearchPage{}, toolErr("storage_failed", "The note search could not run.")
-		}
 		hits = found
 		run.searchMu.Lock()
 		if run.search == nil {
@@ -109,13 +110,21 @@ func (m *Manager) searchNotes(ctx context.Context, run *Run, input SearchInput) 
 		run.search[key] = hits
 		run.searchMu.Unlock()
 	}
+	current := make(map[string]store.AssistantSearchHit, len(found))
+	for _, hit := range found {
+		current[hit.NoteID] = hit
+	}
 	page := SearchPage{Query: query, Evidence: "Search snippets are candidates only. Read a note with read_note before citing it."}
 	if offset < len(hits) {
 		end := offset + limit
 		if end > len(hits) {
 			end = len(hits)
 		}
-		for _, hit := range hits[offset:end] {
+		for _, candidate := range hits[offset:end] {
+			hit, ok := current[candidate.NoteID]
+			if !ok {
+				continue
+			}
 			page.Results = append(page.Results, SearchResult{
 				NoteID:      hit.NoteID,
 				Title:       hit.Title,
@@ -234,7 +243,8 @@ func (m *Manager) readNote(ctx context.Context, run *Run, input ReadInput) (Note
 		Type: EventEvidenceRead,
 		Citation: &Citation{
 			Token: item.Token, NoteID: item.NoteID, Title: item.Title,
-			Excerpt: excerpt(item.Text, 240), Version: item.Version, Verified: true,
+			Excerpt: item.Text, Version: item.Version, Verified: true,
+			StartByte: item.StartByte, EndByte: item.EndByte,
 		},
 	})
 	return result, nil

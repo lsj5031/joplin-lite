@@ -2,7 +2,6 @@ package assistant
 
 import (
 	"regexp"
-	"strings"
 	"sync"
 )
 
@@ -69,24 +68,17 @@ func (r *evidenceRegistry) cite(answer string) []Citation {
 		}
 		seen[token] = true
 		out = append(out, Citation{
-			Token:    token,
-			NoteID:   item.NoteID,
-			Title:    item.Title,
-			Excerpt:  excerpt(item.Text, 1200),
-			Version:  item.Version,
-			Verified: true,
+			Token:     token,
+			NoteID:    item.NoteID,
+			Title:     item.Title,
+			Excerpt:   item.Text,
+			StartByte: item.StartByte,
+			EndByte:   item.EndByte,
+			Version:   item.Version,
+			Verified:  true,
 		})
 	}
 	return out
-}
-
-func excerpt(text string, maxRunes int) string {
-	text = strings.TrimSpace(text)
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
-		return text
-	}
-	return string(runes[:maxRunes]) + "…"
 }
 
 func itoa(n int) string {

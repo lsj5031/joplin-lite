@@ -7,6 +7,7 @@ import { createAskModels, PROVIDER_ID, type ModelConfig } from './models.js';
 import { createNoteTools } from './tools.js';
 import { ASK_INSTRUCTIONS } from './instructions.js';
 import { HostSqliteDatabase } from './sqlite.js';
+import { lastAnswer } from './answer.js';
 
 interface OpenConfig {
   apiVersion: number;
@@ -123,21 +124,6 @@ function asError(error: unknown): { code: string; message: string } {
   return { code, message: message.slice(0, 1000) };
 }
 
-async function lastAnswer(): Promise<string> {
-  if (!root) return active?.text ?? '';
-  const page = await root.entries({ order: 'ascending' }, 256, undefined, BACKGROUND_CONTEXT);
-  for (let i = page.items.length - 1; i >= 0; i--) {
-    const entry = page.items[i];
-    if (!Array.isArray(entry.model)) continue;
-    for (const message of entry.model) {
-      if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
-      const text = message.content.filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('');
-      if (text.trim()) return text;
-    }
-  }
-  return active?.text ?? '';
-}
-
 export async function open(config: OpenConfig): Promise<void> {
   try {
     if (closed) throw new Error('The agent is closed.');
@@ -211,6 +197,8 @@ export async function submit(request: { requestId: string; text: string; abortSi
   }
   active = { requestId: request.requestId, text: '', tools: new Map() };
   try {
+    const previous = await root.entries({ order: 'descending' }, 1, undefined, BACKGROUND_CONTEXT);
+    const boundary = previous.items[0]?.id;
     const submission = await root.submit({ type: 'input', content: request.text, requestId: request.requestId }, BACKGROUND_CONTEXT);
     const settled = await submission.wait(BACKGROUND_CONTEXT);
     host().log('submission settled ' + JSON.stringify(settled));
@@ -230,7 +218,7 @@ export async function submit(request: { requestId: string; text: string; abortSi
     // Tool results and the final assistant message are committed before wait()
     // resolves; give the event watcher its queued batch before reading.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const text = (await lastAnswer()) || active.text;
+    const text = (await lastAnswer(root, boundary)) || active.text;
     emit({ type: 'answer.snapshot', requestId: request.requestId, text });
     emit({
       type: 'run.completed',

@@ -13,7 +13,7 @@ func TestResetConversationDropsAgentStateAndMessages(t *testing.T) {
 	}
 	defer m.Close(context.Background())
 	m.asst.appendMessage(defaultConversationID, "user", "old question")
-	if _, err := m.asst.db.Exec(`CREATE TABLE pi_fixture (id INTEGER PRIMARY KEY)`); err != nil {
+	if _, err := m.asst.db.Exec(`CREATE TABLE pientries (id INTEGER PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.ResetConversation(context.Background()); err != nil {
@@ -23,7 +23,7 @@ func TestResetConversationDropsAgentStateAndMessages(t *testing.T) {
 		t.Fatalf("messages survived reset: %+v", got.Messages)
 	}
 	var count int
-	if err := m.asst.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pi_fixture'`).Scan(&count); err != nil {
+	if err := m.asst.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pientries'`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {

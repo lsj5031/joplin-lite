@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -51,12 +52,18 @@ func TestAskHistoryAndInlineCitationSurface(t *testing.T) {
 	if !tt.HasText("History") || !tt.HasText("New") {
 		t.Fatalf("Ask header lacks history controls: %v", tt.Texts())
 	}
+	if dir := os.Getenv("ASK_REVIEW_CAPTURE_DIR"); dir != "" {
+		capture(t, dir, "ask-cited-answer", tt)
+	}
 	if err := tt.Click("History"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	if !tt.HasText("New chat") {
 		t.Fatalf("history menu did not open: %v", tt.Texts())
+	}
+	if dir := os.Getenv("ASK_REVIEW_CAPTURE_DIR"); dir != "" {
+		capture(t, dir, "ask-history-open", tt)
 	}
 }
 

@@ -195,12 +195,14 @@ type Activity struct {
 
 // Citation is a verified passage read through read_note during this run.
 type Citation struct {
-	Token    string `json:"token"`
-	NoteID   string `json:"noteId"`
-	Title    string `json:"title"`
-	Excerpt  string `json:"excerpt"`
-	Version  string `json:"version"`
-	Verified bool   `json:"verified"`
+	Token     string `json:"token"`
+	NoteID    string `json:"noteId"`
+	Title     string `json:"title"`
+	Excerpt   string `json:"excerpt"`
+	StartByte int    `json:"startByte,omitempty"`
+	EndByte   int    `json:"endByte,omitempty"`
+	Version   string `json:"version"`
+	Verified  bool   `json:"verified"`
 }
 
 // ConversationSnapshot is the read-only projection the panel renders.

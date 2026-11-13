@@ -26,8 +26,9 @@ type assistantDB struct {
 	db   *sql.DB
 	path string
 
-	txMu sync.Mutex
-	txs  map[string]*sql.Tx
+	txMu     sync.Mutex
+	txs      map[string]*sql.Tx
+	txOwners map[string]context.Context
 }
 
 func openAssistantDB(dataDir string) (*assistantDB, error) {
@@ -99,7 +100,7 @@ func openAssistantDB(dataDir string) (*assistantDB, error) {
 		db.Close()
 		return nil, fmt.Errorf("reconcile interrupted Ask runs: %w", err)
 	}
-	return &assistantDB{db: db, path: path, txs: make(map[string]*sql.Tx)}, nil
+	return &assistantDB{db: db, path: path, txs: make(map[string]*sql.Tx), txOwners: make(map[string]context.Context)}, nil
 }
 
 // ensureColumn applies additive schema changes to databases created by an
@@ -179,18 +180,19 @@ func (a *assistantDB) saveRun(runID, conversationID, requestID string, scope Sco
 	return err
 }
 
-func (a *assistantDB) saveScope(scope Scope) error {
+func (a *assistantDB) saveScope(conversationID string, scope Scope) error {
 	raw, err := json.Marshal(scope)
 	if err != nil {
 		return err
 	}
-	_, err = a.db.Exec(`INSERT OR REPLACE INTO jl_ask_settings (key, value) VALUES ('scope', ?)`, string(raw))
+	_, err = a.db.Exec(`INSERT OR REPLACE INTO jl_ask_settings (key, value) VALUES (?, ?)`, "scope:"+conversationID, string(raw))
 	return err
 }
 
-func (a *assistantDB) loadScope() (Scope, bool, error) {
+func (a *assistantDB) loadScope(conversationID string) (Scope, bool, error) {
 	var raw string
-	err := a.db.QueryRow(`SELECT value FROM jl_ask_settings WHERE key = 'scope'`).Scan(&raw)
+	// The legacy global scope cannot establish any particular chat's boundary.
+	err := a.db.QueryRow(`SELECT value FROM jl_ask_settings WHERE key = ?`, "scope:"+conversationID).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return Scope{}, false, nil
 	}
@@ -198,7 +200,7 @@ func (a *assistantDB) loadScope() (Scope, bool, error) {
 		return Scope{}, false, err
 	}
 	var scope Scope
-	if err := json.Unmarshal([]byte(raw), &scope); err != nil {
+	if err := json.Unmarshal([]byte(raw), &scope); err != nil || scope.Validate() != nil {
 		return Scope{}, false, nil
 	}
 	return scope, true, nil
@@ -313,7 +315,7 @@ func (a *assistantDB) deleteConversation(conversationID string) error {
 // clearAgentState drops only Pi's own tables. Settings and Joplin Lite
 // lifecycle records survive a conversation reset.
 func (a *assistantDB) clearAgentState() error {
-	rows, err := a.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'pi\_%' ESCAPE '\'`)
+	rows, err := a.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB 'pi*'`)
 	if err != nil {
 		return err
 	}
@@ -501,6 +503,9 @@ func newHandle() string {
 // so a transaction and unrelated statements are never interleaved; the single
 // Go connection also enforces that at the driver boundary.
 func (a *assistantDB) execute(ctx context.Context, req dbRequest) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	switch req.Op {
 	case "begin":
 		tx, err := a.db.BeginTx(ctx, nil)
@@ -509,13 +514,20 @@ func (a *assistantDB) execute(ctx context.Context, req dbRequest) (map[string]an
 		}
 		id := newHandle()
 		a.txMu.Lock()
+		if err := ctx.Err(); err != nil {
+			a.txMu.Unlock()
+			_ = tx.Rollback()
+			return nil, err
+		}
 		a.txs[id] = tx
+		a.txOwners[id] = ctx
 		a.txMu.Unlock()
 		return map[string]any{"tx": id}, nil
 	case "commit", "rollback":
 		a.txMu.Lock()
 		tx := a.txs[req.Tx]
 		delete(a.txs, req.Tx)
+		delete(a.txOwners, req.Tx)
 		a.txMu.Unlock()
 		if tx == nil {
 			return nil, errors.New("unknown or finished transaction")
@@ -608,6 +620,20 @@ func (a *assistantDB) execute(ctx context.Context, req dbRequest) (map[string]an
 		return map[string]any{"rows": out}, nil
 	default:
 		return nil, fmt.Errorf("unsupported database operation %q", req.Op)
+	}
+}
+
+// releaseTransactions runs after the owning runtime context is cancelled.
+// A BEGIN racing disposal either registers before this lock or sees cancellation.
+func (a *assistantDB) releaseTransactions(ctx context.Context) {
+	a.txMu.Lock()
+	defer a.txMu.Unlock()
+	for id, owner := range a.txOwners {
+		if owner == ctx {
+			_ = a.txs[id].Rollback()
+			delete(a.txs, id)
+			delete(a.txOwners, id)
+		}
 	}
 }
 

@@ -25,11 +25,13 @@ const memoryLimit = 128 << 20
 // values stay on that goroutine; host workers only receive detached JSON and
 // settle results back through Loop.RunOnLoop.
 type agentRuntime struct {
-	manager *Manager
-	loop    *eventloop.Loop
-	api     *webapi.API
-	module  *moejs.Module
-	client  *http.Client
+	manager       *Manager
+	loop          *eventloop.Loop
+	api           *webapi.API
+	module        *moejs.Module
+	client        *http.Client
+	storageCtx    context.Context
+	storageCancel context.CancelFunc
 
 	mu       sync.Mutex
 	run      *Run
@@ -220,6 +222,9 @@ func (r *agentRuntime) submit(run *Run) error {
 	}
 	payload := map[string]any{"requestId": run.ID, "text": prompt}
 	ok := r.loop.RunOnLoop(func(rt *moejs.Runtime) {
+		if !r.manager.runAlive(run) {
+			return
+		}
 		arg, err := rt.FromGo(payload)
 		if err != nil {
 			r.manager.failRun(run, "invalid_request", err.Error())
@@ -307,6 +312,7 @@ func (r *agentRuntime) close(ctx context.Context) {
 			slog.Warn("ask runtime did not close gracefully")
 		}
 	}
+	r.disposeStorage()
 	r.api.Close()
 	r.loop.StopNoWait()
 	select {
@@ -314,6 +320,11 @@ func (r *agentRuntime) close(ctx context.Context) {
 	case <-time.After(5 * time.Second):
 		r.loop.Terminate()
 	}
+}
+
+func (r *agentRuntime) disposeStorage() {
+	r.storageCancel()
+	r.manager.asst.releaseTransactions(r.storageCtx)
 }
 
 func newAgentRuntime(m *Manager, settings Settings, conversationID string) (*agentRuntime, error) {
@@ -330,10 +341,11 @@ func newAgentRuntime(m *Manager, settings Settings, conversationID string) (*age
 		return nil, err
 	}
 	rt := moejs.NewRuntime(moejs.Options{MemoryLimit: memoryLimit})
+	var r *agentRuntime
 	loop, err := eventloop.New(rt, eventloop.Options{
 		OnError: func(err error) {
 			slog.Error("ask runtime loop error", "error", err)
-			m.loopError(err)
+			m.loopError(r, err)
 		},
 	})
 	if err != nil {
@@ -343,15 +355,18 @@ func newAgentRuntime(m *Manager, settings Settings, conversationID string) (*age
 	if err != nil {
 		return nil, err
 	}
-	r := &agentRuntime{
-		manager:  m,
-		loop:     loop,
-		api:      api,
-		module:   mod,
-		client:   client,
-		ready:    make(chan struct{}),
-		done:     make(chan struct{}),
-		closedCh: make(chan struct{}),
+	storageCtx, storageCancel := context.WithCancel(context.Background())
+	r = &agentRuntime{
+		manager:       m,
+		loop:          loop,
+		api:           api,
+		module:        mod,
+		client:        client,
+		ready:         make(chan struct{}),
+		done:          make(chan struct{}),
+		closedCh:      make(chan struct{}),
+		storageCtx:    storageCtx,
+		storageCancel: storageCancel,
 	}
 	if err := r.installHost(); err != nil {
 		api.Close()
@@ -442,7 +457,7 @@ func (r *agentRuntime) installHost() error {
 			// Durable storage work outlives one run: Pi may flush or read just
 			// after a terminal event, before the next run binds. It is still a
 			// runtime-owned operation, so it must not depend on currentRun().
-			return r.promiseContext(context.Background(), func(ctx context.Context) (any, error) {
+			return r.promiseContext(r.storageCtx, func(ctx context.Context) (any, error) {
 				// Do not cancel this context after BEGIN returns: database/sql
 				// rolls the transaction back when its context is canceled, and
 				// the transaction must outlive the begin request.
@@ -489,7 +504,7 @@ func (r *agentRuntime) installHost() error {
 func (r *agentRuntime) recoverHost(name string) {
 	if recovered := recover(); recovered != nil {
 		slog.Error("ask host callback panicked", "callback", name, "panic", recovered)
-		r.manager.loopError(fmt.Errorf("host callback %s panicked", name))
+		r.manager.loopError(r, fmt.Errorf("host callback %s panicked", name))
 	}
 }
 

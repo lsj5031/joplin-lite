@@ -35112,6 +35112,26 @@ var Executor = class {
   }
 };
 
+// src/answer.ts
+async function lastAnswer(root2, boundary) {
+  let cursor;
+  do {
+    let page2 = await root2.entries({ order: "descending", minEntryId: boundary }, 256, cursor, BACKGROUND_CONTEXT);
+    for (let entry2 of page2.items) {
+      if (entry2.id === boundary) return "";
+      if (Array.isArray(entry2.model))
+        for (let i = entry2.model.length - 1; i >= 0; i--) {
+          let message = entry2.model[i];
+          if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
+          let text2 = message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+          if (text2.trim()) return text2;
+        }
+    }
+    cursor = page2.next;
+  } while (cursor);
+  return "";
+}
+
 // src/entry.ts
 var keepAlive = setInterval(() => {
 }, 1 << 30);
@@ -35170,20 +35190,6 @@ function project(event) {
 function asError(error) {
   let message = error instanceof Error ? error.message : String(error), lower = message.toLowerCase();
   return { code: lower.includes("abort") || lower.includes("cancel") ? "cancelled" : lower.includes("401") || lower.includes("unauthorized") || lower.includes("auth") ? "provider_auth" : lower.includes("429") || lower.includes("rate limit") ? "provider_rate_limit" : lower.includes("database") || lower.includes("sqlite") ? "storage_failed" : "runtime_failed", message: message.slice(0, 1e3) };
-}
-async function lastAnswer() {
-  if (!root) return active?.text ?? "";
-  let page2 = await root.entries({ order: "ascending" }, 256, void 0, BACKGROUND_CONTEXT);
-  for (let i = page2.items.length - 1; i >= 0; i--) {
-    let entry2 = page2.items[i];
-    if (Array.isArray(entry2.model))
-      for (let message of entry2.model) {
-        if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
-        let text2 = message.content.filter((block) => block?.type === "text").map((block) => block.text).join("");
-        if (text2.trim()) return text2;
-      }
-  }
-  return active?.text ?? "";
 }
 async function open(config) {
   try {
@@ -35245,14 +35251,14 @@ async function submit(request2) {
   }
   active = { requestId: request2.requestId, text: "", tools: /* @__PURE__ */ new Map() };
   try {
-    let settled = await (await root.submit({ type: "input", content: request2.text, requestId: request2.requestId }, BACKGROUND_CONTEXT)).wait(BACKGROUND_CONTEXT);
+    let boundary = (await root.entries({ order: "descending" }, 1, void 0, BACKGROUND_CONTEXT)).items[0]?.id, settled = await (await root.submit({ type: "input", content: request2.text, requestId: request2.requestId }, BACKGROUND_CONTEXT)).wait(BACKGROUND_CONTEXT);
     if (host().log("submission settled " + JSON.stringify(settled)), settled.status !== "done") {
       let detail = String(settled.detail || settled.reason || "The model did not answer."), lower = detail.toLowerCase(), code = lower.includes("401") || lower.includes("unauthorized") ? "provider_auth" : lower.includes("429") || lower.includes("rate limit") ? "provider_rate_limit" : lower.includes("fetch") || lower.includes("timeout") || lower.includes("connection") ? "provider_unavailable" : "runtime_failed";
       emit({ type: "run.failed", code, message: detail.slice(0, 1e3), requestId: request2.requestId });
       return;
     }
     await new Promise((resolve2) => setTimeout(resolve2, 0));
-    let text2 = await lastAnswer() || active.text;
+    let text2 = await lastAnswer(root, boundary) || active.text;
     emit({ type: "answer.snapshot", requestId: request2.requestId, text: text2 }), emit({
       type: "run.completed",
       text: text2,

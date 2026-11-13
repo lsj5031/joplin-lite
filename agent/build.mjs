@@ -10,8 +10,10 @@ const outDir = resolve(here, 'dist');
 const embedDir = resolve(root, 'internal/assistant/bundle');
 const check = process.argv.includes('--check');
 
-await mkdir(outDir, { recursive: true });
-await mkdir(embedDir, { recursive: true });
+if (!check) {
+  await mkdir(outDir, { recursive: true });
+  await mkdir(embedDir, { recursive: true });
+}
 const result = await build({
   entryPoints: [resolve(here, 'src/entry.ts')],
   bundle: true,
@@ -41,7 +43,7 @@ if (problems.length) {
   process.exit(1);
 }
 
-const source = await readFile(resolve(outDir, 'agent.js'));
+const source = check ? Buffer.from(result.outputFiles[0].contents) : await readFile(resolve(outDir, 'agent.js'));
 const hash = createHash('sha256').update(source).digest('hex');
 const pkg = JSON.parse(await readFile(resolve(here, 'package.json'), 'utf8'));
 const manifest = {
@@ -63,7 +65,8 @@ const embeddedManifest = resolve(embedDir, 'manifest.json');
 if (check) {
   const current = await readFile(embedded, 'utf8').catch(() => '');
   const currentManifest = await readFile(embeddedManifest, 'utf8').catch(() => '');
-  if (current !== source.toString('utf8') || currentManifest !== manifestText) {
+  const dist = await readFile(resolve(outDir, 'agent.js'), 'utf8').catch(() => '');
+  if (current !== source.toString('utf8') || dist !== source.toString('utf8') || currentManifest !== manifestText) {
     console.error('embedded agent bundle is stale; run npm run build');
     process.exit(1);
   }

@@ -28,10 +28,9 @@ const (
 type Manager struct {
 	vault *store.DB
 	asst  *assistantDB
-	emit  func(Event)
 
 	mu           sync.Mutex
-	emitMu       sync.Mutex
+	events       *eventQueue
 	settings     Settings
 	secret       SecretStore
 	active       *Run
@@ -61,6 +60,7 @@ type Run struct {
 	evidence       *evidenceRegistry
 	budget         *runBudget
 	done           chan struct{}
+	setupDone      chan struct{}
 	answer         string
 	prompt         string
 	citations      []Citation
@@ -115,7 +115,7 @@ func NewManager(vault *store.DB, dataDir string, emit func(Event)) (*Manager, er
 			break
 		}
 	}
-	lastScope, scopeKnown, err := asst.loadScope()
+	lastScope, scopeKnown, err := asst.loadScope(latest)
 	if err != nil {
 		_ = asst.close()
 		return nil, fmt.Errorf("load Ask scope: %w", err)
@@ -123,12 +123,12 @@ func NewManager(vault *store.DB, dataDir string, emit func(Event)) (*Manager, er
 	m := &Manager{
 		vault:        vault,
 		asst:         asst,
-		emit:         emit,
 		settings:     settings,
 		conversation: ConversationSnapshot{ConversationID: latest, Title: title, Messages: messages},
 		lastScope:    lastScope,
 		scopeKnown:   scopeKnown,
 	}
+	m.events = newEventQueue(emit)
 	return m, nil
 }
 
@@ -330,6 +330,10 @@ func (m *Manager) activateConversation(ctx context.Context, conversationID strin
 	if err != nil {
 		return ConversationSnapshot{}, err
 	}
+	scope, known, err := m.asst.loadScope(conversationID)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
 	conversations, _ := m.asst.listConversations()
 	title := ""
 	for _, conversation := range conversations {
@@ -340,6 +344,7 @@ func (m *Manager) activateConversation(ctx context.Context, conversationID strin
 	}
 	m.mu.Lock()
 	m.conversation = ConversationSnapshot{ConversationID: conversationID, Title: title, Messages: messages}
+	m.lastScope, m.scopeKnown = scope, known
 	m.mu.Unlock()
 	return m.Snapshot(""), nil
 }
@@ -393,11 +398,6 @@ func (m *Manager) ApplySettings(settings Settings) error {
 	if err := settings.Validate(); err != nil {
 		return err
 	}
-	if settings.APIKey == "" {
-		m.mu.Lock()
-		settings.APIKey = m.settings.APIKey
-		m.mu.Unlock()
-	}
 	m.mu.Lock()
 	if m.active != nil {
 		m.mu.Unlock()
@@ -440,9 +440,6 @@ func (m *Manager) Configured() bool {
 // proof of inference, so this deliberately asks the model for a response.
 func (m *Manager) TestConnection(ctx context.Context, settings Settings) error {
 	settings.Normalize()
-	if settings.APIKey == "" {
-		settings.APIKey = m.Settings().APIKey
-	}
 	if err := settings.Validate(); err != nil {
 		return err
 	}
@@ -581,6 +578,7 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 		evidence:       newEvidenceRegistry(),
 		budget:         newRunBudget(DefaultLimits()),
 		done:           make(chan struct{}),
+		setupDone:      make(chan struct{}),
 		resetAgent:     scopeChanged,
 		tools:          make(map[string]bool),
 		search:         make(map[string][]store.AssistantSearchHit),
@@ -596,23 +594,34 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 	m.conversation.Messages = append(m.conversation.Messages, Message{Role: "user", Text: text})
 	m.mu.Unlock()
 
-	if scopeChanged {
-		if err := m.asst.clearMessages(run.ConversationID); err != nil {
-			m.failRun(run, "storage_failed", "The Ask conversation could not be reset.")
-			return RunHandle{ID: run.ID, ConversationID: run.ConversationID}, nil
+	setupFailure := func() string {
+		if scopeChanged {
+			if err := m.asst.clearMessages(run.ConversationID); err != nil {
+				return "The Ask conversation could not be reset."
+			}
+			m.publish(nil, Event{Type: "conversation.reset"})
 		}
-		m.publish(nil, Event{Type: "conversation.reset"})
-	}
-	if err := m.asst.appendMessage(run.ConversationID, "user", text); err != nil {
-		m.failRun(run, "storage_failed", "The question could not be saved.")
+		if err := m.asst.appendMessage(run.ConversationID, "user", text); err != nil {
+			return "The question could not be saved."
+		}
+		if err := m.asst.saveScope(run.ConversationID, run.Scope); err != nil {
+			return "The Ask scope could not be saved."
+		}
+		if err := m.asst.saveRun(run.ID, run.ConversationID, run.ID, run.Scope, "running", ""); err != nil {
+			return "The Ask run could not be saved."
+		}
+		return ""
+	}()
+	close(run.setupDone)
+	if setupFailure != "" {
+		m.failRun(run, "storage_failed", setupFailure)
 		return RunHandle{ID: run.ID, ConversationID: run.ConversationID}, nil
 	}
-	_ = m.asst.saveScope(run.Scope)
-	if err := m.asst.saveRun(run.ID, run.ConversationID, run.ID, run.Scope, "running", ""); err != nil {
-		m.failRun(run, "storage_failed", "The Ask run could not be saved.")
-		return RunHandle{ID: run.ID, ConversationID: run.ConversationID}, nil
+	m.mu.Lock()
+	if m.active == run && !run.terminal {
+		m.publishLocked(run, Event{Type: EventRunStarted, Activity: &Activity{Kind: "starting", Label: "Starting", Active: 1}})
 	}
-	m.publish(run, Event{Type: EventRunStarted, Activity: &Activity{Kind: "starting", Label: "Starting", Active: 1}})
+	m.mu.Unlock()
 	go m.drive(run)
 	return RunHandle{ID: run.ID, ConversationID: run.ConversationID}, nil
 }
@@ -624,7 +633,6 @@ func (m *Manager) drive(run *Run) {
 		m.failRun(run, "runtime_failed", "The Ask runtime could not start: "+err.Error())
 		return
 	}
-	runtime.bindRun(run)
 	if !m.runAlive(run) {
 		return
 	}
@@ -634,7 +642,7 @@ func (m *Manager) drive(run *Run) {
 			return
 		}
 	}
-	m.setAgentConversation(run.ConversationID)
+	m.setAgentConversation(run)
 	if err := runtime.submit(run); err != nil {
 		m.failRun(run, "runtime_failed", "The Ask runtime could not accept the question: "+err.Error())
 		return
@@ -664,8 +672,13 @@ func (m *Manager) runAlive(run *Run) bool {
 
 func (m *Manager) ensureRuntime(run *Run, settings Settings) (*agentRuntime, error) {
 	m.mu.Lock()
+	if m.closed || m.active != run || run.terminal {
+		m.mu.Unlock()
+		return nil, context.Canceled
+	}
 	if m.runtime != nil && !m.runtime.isClosed() {
 		rt := m.runtime
+		rt.bindRun(run)
 		m.mu.Unlock()
 		return rt, nil
 	}
@@ -675,20 +688,31 @@ func (m *Manager) ensureRuntime(run *Run, settings Settings) (*agentRuntime, err
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	if m.closed || m.active != run || run.terminal {
+		m.mu.Unlock()
+		rt.close(context.Background())
+		return nil, context.Canceled
+	}
 	rt.bindRun(run)
+	m.runtime = rt
+	m.mu.Unlock()
 	if err := rt.open(run.ctx, settings, run.ConversationID); err != nil {
-		_ = err
-		_ = rt
+		m.mu.Lock()
+		if m.runtime == rt {
+			m.runtime = nil
+		}
+		m.mu.Unlock()
+		rt.disposeStorage()
 		rt.close(context.Background())
 		return nil, err
 	}
 	m.mu.Lock()
-	if m.closed {
+	if m.closed || m.active != run || run.terminal {
 		m.mu.Unlock()
 		rt.close(context.Background())
 		return nil, ErrClosed
 	}
-	m.runtime = rt
 	m.mu.Unlock()
 	return rt, nil
 }
@@ -728,9 +752,11 @@ func (m *Manager) snapshotLocked() ConversationSnapshot {
 	return snapshot
 }
 
-func (m *Manager) setAgentConversation(conversationID string) {
+func (m *Manager) setAgentConversation(run *Run) {
 	m.mu.Lock()
-	m.agentConversation = conversationID
+	if m.active == run && !run.terminal {
+		m.agentConversation = run.ConversationID
+	}
 	m.mu.Unlock()
 }
 
@@ -821,21 +847,31 @@ func (m *Manager) scheduleIdleClose() {
 	if m.idle != nil {
 		m.idle.Stop()
 	}
-	m.idle = time.AfterFunc(idleRuntimeLifetime, func() {
-		m.mu.Lock()
-		rt := m.runtime
-		m.runtime = nil
-		m.idle = nil
-		m.agentConversation = ""
-		m.mu.Unlock()
-		if rt != nil {
-			slog.Info("closing idle Ask runtime")
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			rt.close(ctx)
-		}
-	})
+	var timer *time.Timer
+	timer = time.AfterFunc(idleRuntimeLifetime, func() { m.expireIdleRuntime(timer) })
+	m.idle = timer
 	m.mu.Unlock()
+}
+
+// A stopped timer may already be waiting for the manager lock. It can only
+// dispose the runtime while it still owns the current idle period.
+func (m *Manager) expireIdleRuntime(timer *time.Timer) {
+	m.mu.Lock()
+	if m.idle != timer || m.active != nil || m.closed {
+		m.mu.Unlock()
+		return
+	}
+	rt := m.runtime
+	m.runtime = nil
+	m.idle = nil
+	m.agentConversation = ""
+	m.mu.Unlock()
+	if rt != nil {
+		slog.Info("closing idle Ask runtime")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		rt.close(ctx)
+	}
 }
 
 // Close stops admission, cancels the active run, drains the agent, then closes
@@ -847,6 +883,7 @@ func (m *Manager) Close(ctx context.Context) error {
 		return nil
 	}
 	m.closed = true
+	m.events.close()
 	run := m.active
 	rt := m.runtime
 	m.runtime = nil
@@ -870,22 +907,30 @@ func (m *Manager) Close(ctx context.Context) error {
 	if rt != nil {
 		rt.close(ctx)
 	}
+	if run != nil {
+		m.forceCancelled(run, "The application is closing.")
+		<-run.done
+	}
 	return m.asst.close()
 }
 
-func (m *Manager) loopError(err error) {
-	m.mu.Lock()
-	run := m.active
-	m.mu.Unlock()
+func (m *Manager) loopError(rt *agentRuntime, err error) {
+	run := rt.currentRun()
 	if run != nil {
 		m.failRun(run, "runtime_failed", "The Ask runtime stopped unexpectedly: "+trimLog(err.Error()))
 	}
 }
 
 func (m *Manager) publish(run *Run, event Event) {
-	m.emitMu.Lock()
-	defer m.emitMu.Unlock()
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if run != nil && (m.active != run || run.terminal) {
+		return
+	}
+	m.publishLocked(run, event)
+}
+
+func (m *Manager) publishLocked(run *Run, event Event) {
 	m.seq++
 	event.Sequence = m.seq
 	event.APIVersion = APIVersion
@@ -893,10 +938,7 @@ func (m *Manager) publish(run *Run, event Event) {
 		event.RunID = run.ID
 		event.ConversationID = run.ConversationID
 	}
-	m.mu.Unlock()
-	if m.emit != nil {
-		m.emit(event)
-	}
+	m.events.enqueue(event)
 }
 
 func (m *Manager) handleAgentEvent(rt *agentRuntime, raw map[string]any) {
@@ -956,7 +998,7 @@ func (m *Manager) handleAgentEvent(rt *agentRuntime, raw map[string]any) {
 		if reason == "" {
 			reason = "Stopped."
 		}
-		m.finish(run, "cancelled", reason, false)
+		m.finish(run, Event{Type: EventRunCancelled, Code: "cancelled", Message: reason, Status: "cancelled"})
 	case "run.failed":
 		code := normalizeCode(stringValue(raw, "code"))
 		message := stringValue(raw, "message")
@@ -966,118 +1008,90 @@ func (m *Manager) handleAgentEvent(rt *agentRuntime, raw map[string]any) {
 		if stringValue(raw, "phase") == "open" {
 			rt.failReady(errors.New(message))
 		}
-		m.publish(run, Event{Type: EventRunFailed, Code: code, Message: message})
-		m.finish(run, "failed", message, false)
+		m.failRun(run, code, message)
 	}
 }
 
 func (m *Manager) completeRun(run *Run, text string) {
-	m.mu.Lock()
-	if m.active != run || run.terminal {
-		m.mu.Unlock()
-		return
-	}
-	if text == "" {
-		text = run.answer
-	}
-	run.answer = text
-	m.mu.Unlock()
-	citations := run.evidence.cite(text)
-	m.mu.Lock()
-	run.citations = citations
-	m.mu.Unlock()
-	for _, citation := range citations {
-		c := citation
-		m.publish(run, Event{Type: EventCitation, Citation: &c})
-	}
-	m.publish(run, Event{
-		Type:      EventRunCompleted,
-		Text:      text,
-		Citations: citations,
-		Status:    "completed",
-	})
-	m.finish(run, "completed", "", false)
+	m.finish(run, Event{Type: EventRunCompleted, Text: text, Status: "completed"})
 }
 
 func (m *Manager) failRun(run *Run, code, message string) {
-	m.mu.Lock()
-	if m.active != run || run.terminal {
-		m.mu.Unlock()
-		return
-	}
-	m.mu.Unlock()
-	m.publish(run, Event{Type: EventRunFailed, Code: normalizeCode(code), Message: message})
-	m.finish(run, "failed", message, false)
+	m.finish(run, Event{Type: EventRunFailed, Code: normalizeCode(code), Message: message, Status: "failed"})
 }
 
 func (m *Manager) forceCancelled(run *Run, reason string) {
-	m.mu.Lock()
-	if m.active != run || run.terminal {
-		m.mu.Unlock()
-		return
-	}
-	m.mu.Unlock()
-	m.publish(run, Event{Type: EventRunCancelled, Code: "cancelled", Message: reason})
-	m.finish(run, "cancelled", reason, false)
-	// A run that had to be forced still has JavaScript pending inside this
-	// runtime. Discard it rather than reusing a possibly inconsistent runtime.
-	m.mu.Lock()
-	rt := m.runtime
-	m.runtime = nil
-	m.mu.Unlock()
-	if rt != nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			rt.close(ctx)
-		}()
-	}
+	m.finish(run, Event{Type: EventRunCancelled, Code: "cancelled", Message: reason, Status: "cancelled"})
 }
 
-// finish closes a run exactly once. The terminal event has already been
-// published by the caller.
-func (m *Manager) finish(run *Run, status, message string, failed bool) {
+// finish claims the outcome once, keeping admission occupied until storage and
+// the snapshot are finalized. No consumer can observe a premature terminal.
+func (m *Manager) finish(run *Run, event Event) {
 	m.mu.Lock()
-	if run.terminal {
+	if m.active != run || run.terminal {
 		m.mu.Unlock()
 		return
 	}
 	run.terminal = true
-	if m.active == run {
-		m.active = nil
+	if event.Type == EventRunCompleted && event.Text != "" {
+		run.answer = event.Text
 	}
 	answer := run.answer
-	if failed && answer == "" {
-		answer = ""
-	}
-	citations := run.citations
-	// A late terminal event from an old run must not append to a newer run's
-	// transcript or clear its running marker.
-	ownsConversation := m.active == nil
-	if ownsConversation {
-		if status == "completed" || status == "cancelled" {
-			m.conversation.Messages = append(m.conversation.Messages, Message{Role: "assistant", Text: answer, Citations: citations})
-		} else {
-			m.conversation.Messages = append(m.conversation.Messages, Message{Role: "error", Text: message})
-		}
-		m.conversation.Running = false
-		m.conversation.RunID = ""
-	}
-	if rt := m.runtime; rt != nil {
-		rt.clearRunIf(run)
+	citations := run.evidence.cite(answer)
+	run.citations = citations
+	rt := m.runtime
+	discard := event.Type != EventRunCompleted
+	if discard {
+		m.runtime = nil
+		m.agentConversation = ""
 	}
 	m.mu.Unlock()
 
-	run.cancel()
-	close(run.done)
-	if err := m.asst.saveRun(run.ID, run.ConversationID, run.ID, run.Scope, status, answer); err != nil {
-		slog.Error("save Ask run outcome", "error", err)
+	// Release runtime-owned transactions before lifecycle writes need the sole
+	// connection. Closing JavaScript itself is bounded and need not block Stop.
+	if rt != nil && discard {
+		rt.disposeStorage()
+		go rt.close(context.Background())
 	}
-	if ownsConversation && answer != "" {
-		if err := m.asst.appendMessageWithCitations(run.ConversationID, "assistant", answer, citations); err != nil {
-			slog.Error("save Ask answer", "error", err)
+	if rt != nil {
+		rt.clearRunIf(run)
+	}
+	// Stop can race Start's initial writes. Never let a late "running" write
+	// overwrite the terminal outcome, or release admission ahead of that write.
+	if run.setupDone != nil {
+		<-run.setupDone
+	}
+	saveErr := m.asst.saveRun(run.ID, run.ConversationID, run.ID, run.Scope, event.Status, answer)
+	if saveErr != nil {
+		slog.Error("save Ask run outcome", "error", saveErr)
+	}
+	message := Message{Role: "assistant", Text: answer, Citations: citations}
+	if event.Type == EventRunFailed {
+		message = Message{Role: "error", Text: event.Message}
+	}
+	appendErr := m.asst.appendMessageWithCitations(run.ConversationID, message.Role, message.Text, message.Citations)
+	if appendErr != nil {
+		slog.Error("save Ask answer", "error", appendErr)
+	}
+	if saveErr != nil || appendErr != nil {
+		event = Event{Type: EventRunFailed, Status: "failed", Code: "storage_failed", Message: "The Ask response could not be fully saved. Copy any answer you need before closing the app."}
+	}
+	m.mu.Lock()
+	m.conversation.Messages = append(m.conversation.Messages, message)
+	m.conversation.Running = false
+	m.conversation.RunID = ""
+	m.active = nil
+	if event.Type == EventRunCompleted {
+		event.Text, event.Citations = answer, citations
+		for _, citation := range citations {
+			c := citation
+			m.publishLocked(run, Event{Type: EventCitation, Citation: &c})
 		}
 	}
+	m.publishLocked(run, event)
+	run.cancel()
+	close(run.done)
+	m.mu.Unlock()
 	m.scheduleIdleClose()
 }
 
