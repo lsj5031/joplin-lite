@@ -168,16 +168,19 @@ func TestWorkspaceEnlargedText(t *testing.T) {
 	for _, windows := range []bool{false, true} {
 		t.Run(map[bool]string{false: "standard-toolbar", true: "windows-toolbar"}[windows], func(t *testing.T) {
 			windowsChrome = windows
-			testWorkspaceEnlargedText(t)
+			for name, width := range map[string]float32{"default": listWidth, "minimum": listMinWidth} {
+				t.Run(name, func(t *testing.T) { testWorkspaceEnlargedText(t, width) })
+			}
 		})
 	}
 }
 
-func testWorkspaceEnlargedText(t *testing.T) {
+func testWorkspaceEnlargedText(t *testing.T, width float32) {
 	t.Helper()
 	app, db := openNativeTestApp(t)
 	addTestNote(t, service.New(db), "", "Enlarged reading", "Readable body at the OS text size.")
 	app = newNativeApp(db)
+	app.listW = width
 	tt := ui.NewTester(app.view, 1280, 800)
 	click(t, tt, "Settings")
 	before, ok := tt.Find("Appearance")
@@ -190,6 +193,15 @@ func testWorkspaceEnlargedText(t *testing.T) {
 		t.Fatalf("Appearance text did not enlarge: %v -> %v", before, after)
 	}
 	click(t, tt, "Cancel settings")
+	if app.settingsOpen {
+		t.Fatal("Cancel did not close Settings")
+	}
+	if !windowsChrome {
+		button, ok := tt.Find("Settings")
+		if !ok || button.X < 0 || button.X+button.W > width {
+			t.Fatalf("Settings extends outside note list toolbar: %v, pane width %g", button, width)
+		}
+	}
 	click(t, tt, "Settings")
 	if !tt.HasText("Appearance") {
 		t.Fatal("Settings did not open with enlarged text")

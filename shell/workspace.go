@@ -323,7 +323,8 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 				AlignItems(ui.Center).DragWindow().Children(func() {
 				if !a.railOpen && bar.Left == 0 {
 					mark(c)
-					ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(scaledText(c, 19)).TextColor(inkNavy)
+					ui.Text(c, "Joplin Lite").Font(fontHeading).FontSize(scaledText(c, 19)).TextColor(inkNavy).
+						MinWidth(0).Shrink(1).SingleLine()
 				}
 				ui.Spacer(c)
 				if !a.railOpen {
