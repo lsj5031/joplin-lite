@@ -162,8 +162,19 @@ func (a *nativeApp) view(c *ui.Context) {
 				a.editorPane(c, t)
 			})
 			if a.ask.open {
-				a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, askMaxWidth, true)
-				a.askPanel(c, t)
+				if a.narrow {
+					a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, askMaxWidth, false)
+					a.askPanel(c, t)
+				} else {
+					a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, askMaxWidth, false)
+					// The Ask panel is a floating workspace card like the
+					// editor: it sits on the gradient backdrop with the same
+					// card gap on its top, right and bottom edges.
+					ui.Column(c).Width(a.ask.width + cardGap).Shrink(0).
+						Padding(cardGap, cardGap, cardGap, 0).Children(func() {
+						a.askPanel(c, t)
+					})
+				}
 			}
 		case a.ask.open:
 			a.askPanel(c, t)

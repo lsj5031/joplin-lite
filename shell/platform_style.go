@@ -31,6 +31,9 @@ func (a *nativeApp) windowsTitleBar(c *ui.Context, t *ui.Theme) float32 {
 		if primaryAction(c, "New note").Clicked() {
 			a.newNote()
 		}
+		if chromeButton(c, "Ask").Tooltip("Ask across your notes (Ctrl+Shift+A)").Clicked() {
+			a.toggleAsk()
+		}
 		if iconButton(c, "window-settings", iconSettings, "Settings", "Settings (Ctrl+,)").Clicked() {
 			a.openSettings()
 		}

@@ -20,6 +20,17 @@ const desktopLogName = "desktop.log"
 // grow the file forever.
 const desktopLogMax = 1 << 20 // 1 MiB
 
+// stderrWriter drops write errors. A packaged Windows build has no console,
+// so os.Stderr is an invalid handle there; io.MultiWriter stops at the first
+// failed write, which would silence the log file entirely. Writing the file
+// first and swallowing stderr errors keeps both sinks independent.
+type stderrWriter struct{ w io.Writer }
+
+func (s stderrWriter) Write(p []byte) (int, error) {
+	_, _ = s.w.Write(p)
+	return len(p), nil
+}
+
 // setupDesktopLog appends to <dataDir>/desktop.log and sends the default
 // logger's output to the file and to stderr, so a console run keeps printing
 // what the file receives. It returns a restore function that closes the file
@@ -40,7 +51,7 @@ func setupDesktopLog(dataDir string) (func(), error) {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, f), &slog.HandlerOptions{
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(f, stderrWriter{os.Stderr}), &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
 	return func() {

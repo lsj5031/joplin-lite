@@ -32,6 +32,7 @@ type askState struct {
 	busy     bool
 	runID    string
 	answer   string
+	thinking string
 	activity string
 	err      string
 	notice   string
@@ -133,6 +134,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		a.ask.runID = event.RunID
 		a.ask.busy = true
 		a.ask.answer = ""
+		a.ask.thinking = ""
 		a.ask.activity = "Starting"
 		a.ask.err = ""
 		a.ask.citations = nil
@@ -145,6 +147,14 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		}
 	case "answer.delta":
 		a.ask.answer += event.Text
+		a.ask.activity = ""
+	case "thinking.delta":
+		a.ask.thinking += event.Text
+		// Keep a bounded tail so a long reasoning trace cannot grow the
+		// panel's memory without limit.
+		if excess := len(a.ask.thinking) - 24000; excess > 0 {
+			a.ask.thinking = a.ask.thinking[excess:]
+		}
 		a.ask.activity = ""
 	case "answer.snapshot":
 		if event.Text != "" || a.ask.answer == "" {
@@ -172,6 +182,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		}
 		a.refreshAsk()
 		a.ask.answer = ""
+		a.ask.thinking = ""
 		a.ask.citations = nil
 	case "run.cancelled":
 		a.ask.busy = false
@@ -180,6 +191,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		a.ask.notice = "Stopped."
 		a.refreshAsk()
 		a.ask.answer = ""
+		a.ask.thinking = ""
 	case "run.failed":
 		a.ask.busy = false
 		a.ask.activity = ""
@@ -187,9 +199,11 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		a.ask.err = event.Message
 		a.refreshAsk()
 		a.ask.answer = ""
+		a.ask.thinking = ""
 	case "conversation.reset":
 		a.ask.messages = nil
 		a.ask.answer = ""
+		a.ask.thinking = ""
 		a.ask.citations = nil
 		a.ask.busy = false
 		a.ask.activity = ""
@@ -253,6 +267,7 @@ func (a *nativeApp) askSend() {
 	a.ask.runID = handle.ID
 	a.ask.busy = true
 	a.ask.answer = ""
+	a.ask.thinking = ""
 	a.ask.activity = "Starting"
 	a.ask.citations = nil
 	a.refreshAsk()
@@ -323,6 +338,7 @@ func (a *nativeApp) newAskChat(notice string) {
 			} else {
 				a.ask.messages = snapshot.Messages
 				a.ask.answer = ""
+				a.ask.thinking = ""
 				a.ask.citations = nil
 				a.ask.notice = notice
 				a.refreshAsk()
@@ -358,6 +374,7 @@ func (a *nativeApp) selectAskChat(id string) {
 			} else {
 				a.ask.messages = snapshot.Messages
 				a.ask.answer = ""
+				a.ask.thinking = ""
 				a.ask.citations = nil
 				a.ask.notice = "Loaded saved chat."
 				a.refreshAsk()
@@ -407,6 +424,7 @@ func (a *nativeApp) deleteAskChat() {
 			} else {
 				a.ask.messages = snapshot.Messages
 				a.ask.answer = ""
+				a.ask.thinking = ""
 				a.ask.citations = nil
 				a.ask.notice = "Chat deleted."
 				a.refreshAsk()
@@ -590,33 +608,35 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 // askPanel is the collapsible native Ask surface. It never renders HTML; the
 // answer is text and verified citations are buttons that open their note.
 func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
-	panel := ui.Column(c).Shrink(0).Background(paperRaised).BorderStartWidth(1).BorderColor(hairline)
+	panel := ui.Column(c).Shrink(0).Background(paperRaised)
 	windowWidth, _ := c.Size()
 	innerWidth := a.ask.width - 36
 	if a.narrow {
-		panel.Grow(1).MinWidth(0).Clip()
+		panel.Grow(1).MinWidth(0).Clip().BorderWidth(1, 0, 0, 0).BorderColor(hairline)
 		innerWidth = max(1, windowWidth-36)
 	} else {
 		if a.ask.width <= 0 {
 			a.ask.width = askPanelWidth
 		}
 		innerWidth = a.ask.width - 36
-		panel.Width(a.ask.width)
+		panel.Width(a.ask.width).Grow(1).MinHeight(0)
+		// Same floating card treatment as the editor pane.
+		elevateCard(panel)
 	}
 	panel.Children(func() {
 		var historyButton ui.Element
 		ui.Row(c).Height(44).Shrink(0).Padding(0, 10, 0, 14).AlignItems(ui.Center).Gap(4).Children(func() {
 			ui.Text(c, "Ask").Font(fontHeading).FontSize(18).TextColor(inkNavy)
 			ui.Spacer(c)
-			historyButton = ui.Button(c, "History").Tooltip("Open saved Ask chats")
+			historyButton = chromeButton(c, "History").Tooltip("Open saved Ask chats")
 			if historyButton.Clicked() {
 				a.ask.historyOpen = !a.ask.historyOpen
 			}
-			if ui.Button(c, "New").Tooltip("Start a new Ask chat").Clicked() {
+			if chromeButton(c, "New").Tooltip("Start a new Ask chat").Clicked() {
 				a.ask.historyOpen = false
 				a.newAskChat("Started a new chat.")
 			}
-			if ui.Button(c, "Model…").Clicked() {
+			if chromeButton(c, "Model…").Tooltip("Connect or edit the model endpoint").Clicked() {
 				a.openAskSettings()
 			}
 			if iconButton(c, "ask-close", iconClose, "Close Ask", "Close the Ask panel").Clicked() {
@@ -658,6 +678,10 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 						ui.Text(c, message.Text).FontSize(sizeUI).LineHeight(1.5).TextColor(inkNavy).MaxWidth(innerWidth)
 					}
 				}
+				if a.ask.thinking != "" {
+					ui.Text(c, "Thinking").FontSize(sizeSmall).Bold().TextColor(inkSoft)
+					ui.Text(c, a.ask.thinking).FontSize(sizeSmall).LineHeight(1.45).TextColor(inkSoft).MaxWidth(innerWidth)
+				}
 				if a.ask.answer != "" {
 					ui.Text(c, "Answer").FontSize(sizeSmall).Bold().TextColor(inkNavy)
 					a.askAnswer(c, a.ask.answer, a.ask.citations, "live", innerWidth)
@@ -688,7 +712,7 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 				if a.ask.busy {
-					if ui.Button(c, "Stop").Clicked() {
+					if chromeButton(c, "Stop").Clicked() {
 						a.askStop()
 					}
 				}
