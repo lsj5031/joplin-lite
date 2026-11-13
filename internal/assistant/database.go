@@ -88,7 +88,8 @@ func openAssistantDB(dataDir string) (*assistantDB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate Ask conversations: %w", err)
 	}
-	if _, err := db.Exec(`INSERT OR IGNORE INTO jl_ask_conversations (id, title, created_time, updated_time) VALUES (?, '', ?, ?)`, defaultConversationID, now, now); err != nil {
+	if _, err := db.Exec(`INSERT INTO jl_ask_conversations (id, title, created_time, updated_time)
+		SELECT ?, '', ?, ? WHERE NOT EXISTS (SELECT 1 FROM jl_ask_conversations)`, defaultConversationID, now, now); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create the default Ask conversation: %w", err)
 	}

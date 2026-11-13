@@ -18,11 +18,12 @@ import (
 // sseServer is a deterministic OpenAI-compatible fixture. It never contacts a
 // real provider and records the exact requests it receives.
 type sseServer struct {
-	mu       sync.Mutex
-	requests []map[string]any
-	auth     []string
-	paths    []string
-	noteID   string
+	mu        sync.Mutex
+	requests  []map[string]any
+	auth      []string
+	paths     []string
+	noteID    string
+	tagsUntil int
 }
 
 func (s *sseServer) handler(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +60,19 @@ func (s *sseServer) handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	phase := (count - 1) % 3
+	if s.tagsUntil > 0 {
+		if count <= s.tagsUntil {
+			chunk(map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{
+				"index": 0, "id": fmt.Sprintf("tags_%d", count), "type": "function",
+				"function": map[string]any{"name": "list_tags", "arguments": `{}`},
+			}}}, nil)
+			finish("tool_calls")
+		} else {
+			chunk(map[string]any{"role": "assistant", "content": "Finished listing tags."}, nil)
+			finish("stop")
+		}
+		return
+	}
 	switch phase {
 	case 0:
 		chunk(map[string]any{
@@ -87,7 +101,7 @@ func (s *sseServer) handler(w http.ResponseWriter, r *http.Request) {
 
 func waitForCompleted(t *testing.T, m *Manager, events <-chan Event, question string, scope Scope) Event {
 	t.Helper()
-	handle, err := m.Start(AskRequest{Text: question, Scope: scope})
+	handle, err := m.Start(AskRequest{ConversationID: m.CurrentConversationID(), Text: question, Scope: scope})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,6 +279,16 @@ func TestScopeChangeResetsAgentContextBeforeNextRun(t *testing.T) {
 	}
 	snapshot := m.Snapshot(defaultConversationID)
 	if len(snapshot.Messages) != 2 || snapshot.Messages[0].Text != "Second question" {
-		t.Fatalf("scope change kept old messages: %+v", snapshot.Messages)
+		t.Fatalf("scope change did not start a fresh chat: %+v", snapshot.Messages)
+	}
+	if snapshot.ConversationID == defaultConversationID {
+		t.Fatal("scope change reused the previous chat")
+	}
+	prior, err := m.SelectConversation(context.Background(), defaultConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prior.Messages) != 2 || prior.Messages[0].Text != "First question" || len(prior.Messages[1].Citations) != 1 || prior.Messages[1].Citations[0].NoteID != first.ID {
+		t.Fatalf("scope change lost saved history or citations: %+v", prior)
 	}
 }

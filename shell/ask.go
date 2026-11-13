@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -23,11 +25,19 @@ const (
 // askState is UI-thread state for the Ask panel. Assistant events arrive on a
 // background goroutine; onAskEvent posts them here with mygo.RunOnMain.
 type askState struct {
-	open        bool
-	width       float32
-	input       string
-	scope       int // 0 note, 1 notebook, 2 vault
-	includeDesc bool
+	open          bool
+	width         float32
+	input         string
+	scope         int // 0 note, 1 notebook, 2 vault
+	includeDesc   bool
+	questionFocus ui.Handle
+	bodyFocus     ui.Handle
+	titleFocus    ui.Handle
+	searchFocus   ui.Handle
+	returnFocus   *ui.Handle
+	scroll        ui.ScrollState
+	historyScroll ui.ScrollState
+	showThinking  bool
 
 	busy     bool
 	runID    string
@@ -80,7 +90,32 @@ func newAskState() askState {
 func (a *nativeApp) toggleAsk() {
 	a.ask.open = !a.ask.open
 	if a.ask.open {
+		a.focusBody, a.focusSearch = false, false
 		a.refreshAsk()
+		a.ask.questionFocus.Focus()
+	} else {
+		a.ask.historyOpen = false
+		a.ask.questionFocus.CancelFocus()
+		if a.ask.returnFocus != nil {
+			a.ask.returnFocus.Focus()
+		}
+	}
+}
+
+// Text editors take Ctrl+Shift+A as Select All before window shortcuts.
+// Route only Ask's exact chord here, preserving ordinary editing keys.
+func (a *nativeApp) askToggleKey(k ui.TextKey) bool {
+	if k.Mods != ui.Cmd|ui.Shift || k.Key != ui.KeyA {
+		return false
+	}
+	a.toggleAsk()
+	return true
+}
+
+func (a *nativeApp) askEditorFocus(e ui.Element, focus *ui.Handle) {
+	e.Bind(focus).OnTextKey(a.askToggleKey)
+	if !a.ask.open && e.Focused() {
+		a.ask.returnFocus = focus
 	}
 }
 
@@ -99,6 +134,33 @@ func (a *nativeApp) refreshAsk() {
 	}
 	id := mgr.CurrentConversationID()
 	snapshot := mgr.Snapshot(id)
+	if a.ask.conversationID != snapshot.ConversationID {
+		a.ask.scroll.Y = math.MaxFloat32
+	}
+	if a.ask.conversationID != snapshot.ConversationID && snapshot.Scope != nil {
+		// Reopening history restores its evidence boundary. Ordinary editor
+		// navigation still determines the next request's scope in askScope.
+		scope := *snapshot.Scope
+		a.ask.includeDesc = scope.IncludeDescendants
+		switch scope.Kind {
+		case "note":
+			a.ask.scope = 0
+			if a.note == nil || a.note.ID != scope.NoteID {
+				a.openExternalNote(scope.NoteID)
+			}
+		case "notebook":
+			a.ask.scope = 1
+			if a.selectedNotebook != scope.NotebookID {
+				a.flush()
+				if !a.dirty {
+					a.selectedNotebook, a.selectedTag, a.query = scope.NotebookID, "", ""
+					a.reloadNotes()
+				}
+			}
+		case "vault":
+			a.ask.scope = 2
+		}
+	}
 	a.ask.conversationID = snapshot.ConversationID
 	a.ask.messages = snapshot.Messages
 	a.ask.conversations = mgr.ListConversations()
@@ -135,6 +197,7 @@ func (a *nativeApp) applyAskEvent(event assistant.Event) {
 		a.ask.busy = true
 		a.ask.answer = ""
 		a.ask.thinking = ""
+		a.ask.showThinking = false
 		a.ask.activity = "Starting"
 		a.ask.err = ""
 		a.ask.citations = nil
@@ -264,12 +327,16 @@ func (a *nativeApp) askSend() {
 	a.ask.input = ""
 	a.ask.err = ""
 	a.ask.notice = ""
+	if handle.ConversationID != a.ask.conversationID {
+		a.ask.notice = "Scope changed. Started a new chat; the previous one is in History."
+	}
 	a.ask.runID = handle.ID
 	a.ask.busy = true
 	a.ask.answer = ""
 	a.ask.thinking = ""
 	a.ask.activity = "Starting"
 	a.ask.citations = nil
+	a.ask.scroll.Y = math.MaxFloat32
 	a.refreshAsk()
 	// Start already recorded the user message; refreshAsk brought it back.
 	if _, active := mgr.ActiveRun(); active {
@@ -557,14 +624,17 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 		ui.Text(c, "Questions and the note passages the agent reads are sent to this model endpoint, even when Joplin sync uses end-to-end encryption. The API key is never written to the note database.").
 			FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(460)
 		ui.Scroll(c.Key("ask-settings-fields")).Width(480).MaxHeight(330).Children(func() {
+			label(c, "Base URL (OpenAI-compatible, usually ends in /v1)")
 			ui.TextInput(c.Key("ask-base-url"), &a.ask.settings.BaseURL).
 				Label("Base URL (OpenAI-compatible, usually ends in /v1)").
 				Placeholder("http://127.0.0.1:8080/v1").
 				Width(460)
+			label(c, "Model ID")
 			ui.TextInput(c.Key("ask-model-id"), &a.ask.settings.ModelID).
 				Label("Model ID").
 				Placeholder("model-name").
 				Width(460)
+			label(c, "API key (optional for local endpoints)")
 			ui.TextInput(c.Key("ask-api-key"), &a.ask.key).
 				Label("API key (optional for local endpoints)").
 				Placeholder("leave empty for a keyless local endpoint").
@@ -574,10 +644,16 @@ func (a *nativeApp) askSettingsDialog(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, "Use this only on a trusted device. Leaving it off keeps the key in memory for this session only.").
 				FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(460)
 			ui.Row(c).Gap(8).Children(func() {
-				ui.TextInput(c.Key("ask-context"), &a.ask.contextText).
-					Label("Context window (tokens)").Width(210)
-				ui.TextInput(c.Key("ask-max-output"), &a.ask.maxText).
-					Label("Max output (tokens)").Width(210)
+				ui.Column(c).Gap(4).Children(func() {
+					label(c, "Context window (tokens)")
+					ui.TextInput(c.Key("ask-context"), &a.ask.contextText).
+						Label("Context window (tokens)").Width(210)
+				})
+				ui.Column(c).Gap(4).Children(func() {
+					label(c, "Max output (tokens)")
+					ui.TextInput(c.Key("ask-max-output"), &a.ask.maxText).
+						Label("Max output (tokens)").Width(210)
+				})
 			})
 			ui.Text(c, "Only the configured scheme, host, port and API base path are allowed. Redirects are rejected; no web tools are installed.").
 				FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(460)
@@ -640,7 +716,7 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 				a.openAskSettings()
 			}
 			if iconButton(c, "ask-close", iconClose, "Close Ask", "Close the Ask panel").Clicked() {
-				a.ask.open = false
+				a.toggleAsk()
 			}
 			a.askHistoryMenu(c, historyButton, innerWidth)
 		})
@@ -661,7 +737,11 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 				ui.Text(c, a.ask.connection).FontSize(sizeSmall).TextColor(color).MaxWidth(innerWidth)
 			}
 		})
-		ui.Scroll(c.Key("ask-scroll")).Grow(1).MinHeight(0).Padding(0, 14, 10, 14).Children(func() {
+		atBottom := a.ask.scroll.Y >= a.ask.scroll.MaxY-2
+		if atBottom {
+			a.ask.scroll.Y = math.MaxFloat32
+		}
+		ui.Scroll(c.Key("ask-scroll")).TrackScroll(&a.ask.scroll).Grow(1).MinHeight(0).Padding(0, 14, 10, 14).Children(func() {
 			ui.Column(c).Gap(10).Width(innerWidth).Children(func() {
 				for i, message := range a.ask.messages {
 					role, color := "You", inkSoft
@@ -679,8 +759,18 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 					}
 				}
 				if a.ask.thinking != "" {
-					ui.Text(c, "Thinking").FontSize(sizeSmall).Bold().TextColor(inkSoft)
-					ui.Text(c, a.ask.thinking).FontSize(sizeSmall).LineHeight(1.45).TextColor(inkSoft).MaxWidth(innerWidth)
+					caption := "Show reasoning"
+					if a.ask.showThinking {
+						caption = "Hide reasoning"
+					}
+					if chromeButton(c, caption).Clicked() {
+						a.ask.showThinking = !a.ask.showThinking
+					}
+					if a.ask.showThinking {
+						ui.Scroll(c.Key("ask-reasoning")).MaxHeight(120).Children(func() {
+							ui.Text(c, a.ask.thinking).FontSize(sizeSmall).LineHeight(1.45).TextColor(inkSoft).MaxWidth(innerWidth)
+						})
+					}
 				}
 				if a.ask.answer != "" {
 					ui.Text(c, "Answer").FontSize(sizeSmall).Bold().TextColor(inkNavy)
@@ -699,7 +789,13 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 			})
 		})
 		ui.Column(c).Shrink(0).Padding(0, 14, 12, 14).Gap(6).Children(func() {
+			if !atBottom {
+				if chromeButton(c, "Jump to latest").Clicked() {
+					a.ask.scroll.Y = math.MaxFloat32
+				}
+			}
 			area := ui.TextArea(c.Key("ask-input"), &a.ask.input).
+				Bind(&a.ask.questionFocus).
 				Placeholder("Ask across your notes…").
 				Label("Question").
 				Font(fontSans).
@@ -707,10 +803,17 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 				LineHeight(1.45).
 				Height(78).
 				Width(innerWidth)
-			if area.Submitted() {
+			area.OnTextKey(a.askToggleKey)
+			if area.Shortcut(ui.Cmd, ui.KeyEnter) {
 				a.askSend()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				shortcut := "Ctrl+Enter to send"
+				if runtime.GOOS == "darwin" {
+					shortcut = "⌘Enter to send"
+				}
+				ui.Text(c, shortcut).FontSize(sizeSmall).TextColor(inkSoft)
+				ui.Spacer(c)
 				if a.ask.busy {
 					if chromeButton(c, "Stop").Clicked() {
 						a.askStop()
@@ -723,7 +826,7 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 					}
 					return
 				}
-				if primaryAction(c, "Send").Clicked() {
+				if primaryAction(c, "Send").Disabled(a.ask.busy || a.ask.historyBusy || strings.TrimSpace(a.ask.input) == "").Clicked() {
 					a.askSend()
 				}
 			})

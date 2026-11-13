@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,143 @@ import (
 
 	"github.com/lsj5031/joplin-lite/internal/models"
 )
+
+func TestRestartDoesNotReuseUnownedEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("embedded runtime")
+	}
+	for _, emptyLatest := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty_latest_%v", emptyLatest), func(t *testing.T) {
+			db := openTestVault(t)
+			private := &models.Note{Title: "Camera", Body: "camera repair PRIVATE_EVIDENCE_7fa93"}
+			public := &models.Note{Title: "Camera", Body: "camera repair public"}
+			for _, note := range []*models.Note{private, public} {
+				if err := db.CreateNote(note); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fixture := &sseServer{noteID: private.ID}
+			server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+			defer server.Close()
+			root := t.TempDir()
+			events := make(chan Event, 256)
+			sink := func(event Event) { events <- event }
+			m, err := NewManager(db, root, sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = m.Close(context.Background()) }()
+			if _, err := m.DeleteConversation(context.Background(), defaultConversationID); err != nil {
+				t.Fatal(err)
+			}
+			settings := DefaultSettings()
+			settings.BaseURL, settings.ModelID = server.URL+"/v1", "test-model"
+			if err := m.ApplySettings(settings); err != nil {
+				t.Fatal(err)
+			}
+			original := m.CurrentConversationID()
+			waitForChatAnswer(t, m, events, "private camera repair", Scope{Kind: "vault"})
+			if emptyLatest {
+				// Simulate a saved empty chat becoming latest while Pi still owns
+				// the previous chat's evidence (e.g. a process ended mid-switch).
+				if err := m.asst.ensureConversation("empty"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := m.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			m, err = NewManager(db, root, sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.noteID = public.ID
+			fixture.mu.Lock()
+			before := len(fixture.requests)
+			fixture.mu.Unlock()
+			waitForChatAnswer(t, m, events, "public camera repair", Scope{Kind: "note", NoteID: public.ID})
+			fixture.mu.Lock()
+			outgoing, _ := json.Marshal(fixture.requests[before:])
+			fixture.mu.Unlock()
+			if strings.Contains(string(outgoing), "PRIVATE_EVIDENCE_7fa93") {
+				t.Fatal("unowned Pi evidence leaked after restart")
+			}
+			for _, chat := range m.ListConversations() {
+				if chat.ConversationID == defaultConversationID {
+					t.Fatal("deleted default chat was recreated")
+				}
+			}
+			prior, err := m.SelectConversation(context.Background(), original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(prior.Messages) != 2 || len(prior.Messages[1].Citations) != 1 {
+				t.Fatalf("lost saved history: %+v", prior)
+			}
+			fixture.noteID = private.ID
+			waitForChatAnswer(t, m, events, "follow up camera repair", Scope{Kind: "vault"})
+			fixture.mu.Lock()
+			last, _ := json.Marshal(fixture.requests[len(fixture.requests)-3])
+			fixture.mu.Unlock()
+			if !strings.Contains(string(last), "private camera repair") {
+				t.Fatal("same-scope resumption lost the saved recap")
+			}
+		})
+	}
+}
+
+func TestModelTurnBudgetThroughEmbeddedAgent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("embedded runtime")
+	}
+	for _, toolTurns := range []int{11, 14} {
+		t.Run(fmt.Sprintf("tool_turns_%d", toolTurns), func(t *testing.T) {
+			fixture := &sseServer{tagsUntil: toolTurns}
+			server := httptest.NewServer(http.HandlerFunc(fixture.handler))
+			defer server.Close()
+			events := make(chan Event, 256)
+			m, err := NewManager(openTestVault(t), t.TempDir(), func(event Event) { events <- event })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer m.Close(context.Background())
+			settings := DefaultSettings()
+			settings.BaseURL, settings.ModelID = server.URL+"/v1", "test-model"
+			if err := m.ApplySettings(settings); err != nil {
+				t.Fatal(err)
+			}
+			handle, err := m.Start(AskRequest{Text: "list tags", Scope: Scope{Kind: "vault"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			timeout := time.After(30 * time.Second)
+			for {
+				select {
+				case event := <-events:
+					if event.RunID != handle.ID || (event.Type != EventRunCompleted && event.Type != EventRunFailed) {
+						continue
+					}
+					if toolTurns == 11 {
+						if event.Type != EventRunCompleted || event.Text != "Finished listing tags." {
+							t.Fatalf("permitted run failed: %+v", event)
+						}
+					} else if event.Type != EventRunFailed || event.Code != "budget_exceeded" {
+						t.Fatalf("over-budget run was not rejected: %+v", event)
+					}
+					fixture.mu.Lock()
+					count := len(fixture.requests)
+					fixture.mu.Unlock()
+					if count != 12 {
+						t.Fatalf("expected exactly 12 model requests, got %d", count)
+					}
+					return
+				case <-timeout:
+					t.Fatal("model budget fixture timed out")
+				}
+			}
+		})
+	}
+}
 
 func waitForChatAnswer(t *testing.T, m *Manager, events <-chan Event, question string, scope Scope) Event {
 	t.Helper()

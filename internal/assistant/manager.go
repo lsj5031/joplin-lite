@@ -526,7 +526,7 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 		return RunHandle{}, errors.New("the question is too long")
 	}
 	if req.ConversationID == "" {
-		req.ConversationID = defaultConversationID
+		req.ConversationID = m.CurrentConversationID()
 	}
 
 	m.mu.Lock()
@@ -551,16 +551,27 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 		m.idle = nil
 	}
 	priorMessages := append([]Message(nil), m.conversation.Messages...)
-	// A different note or notebook is a different evidence boundary even when
-	// the segmented scope kind did not change. Reset the durable agent context
-	// before admission so an earlier answer cannot carry wider-scope evidence
-	// into this run.
+	// A different evidence boundary starts a separate chat. Keep the previous
+	// transcript and citations available in History, without recapping them
+	// into a request that no longer authorizes that scope.
 	scopeChanged := (m.scopeKnown && !sameScope(m.lastScope, req.Scope)) ||
 		(!m.scopeKnown && len(m.conversation.Messages) > 0)
-	needsRecap := !scopeChanged && len(priorMessages) > 0 && m.agentConversation != req.ConversationID
 	if scopeChanged {
 		priorMessages = nil
+		if len(m.conversation.Messages) > 0 {
+			id := uuid()
+			if err := m.asst.ensureConversation(id); err != nil {
+				m.mu.Unlock()
+				return RunHandle{}, fmt.Errorf("create a chat for the new scope: %w", err)
+			}
+			req.ConversationID = id
+			m.conversation = ConversationSnapshot{ConversationID: id}
+		}
 	}
+	// A restored Pi root has no proven owner in this manager. Reset it even
+	// when the visible chat is empty; only same-scope saved messages may recap.
+	resetAgent := scopeChanged || m.agentConversation != req.ConversationID
+	needsRecap := !scopeChanged && len(priorMessages) > 0 && resetAgent
 	prompt := text
 	if needsRecap {
 		prompt = resumedPrompt(priorMessages, text)
@@ -579,12 +590,9 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 		budget:         newRunBudget(DefaultLimits()),
 		done:           make(chan struct{}),
 		setupDone:      make(chan struct{}),
-		resetAgent:     scopeChanged,
+		resetAgent:     resetAgent,
 		tools:          make(map[string]bool),
 		search:         make(map[string][]store.AssistantSearchHit),
-	}
-	if scopeChanged {
-		m.conversation.Messages = nil
 	}
 	m.lastScope = req.Scope
 	m.scopeKnown = true
@@ -596,9 +604,6 @@ func (m *Manager) Start(req AskRequest) (RunHandle, error) {
 
 	setupFailure := func() string {
 		if scopeChanged {
-			if err := m.asst.clearMessages(run.ConversationID); err != nil {
-				return "The Ask conversation could not be reset."
-			}
 			m.publish(nil, Event{Type: "conversation.reset"})
 		}
 		if err := m.asst.appendMessage(run.ConversationID, "user", text); err != nil {
@@ -745,6 +750,10 @@ func (m *Manager) Snapshot(conversationID string) ConversationSnapshot {
 func (m *Manager) snapshotLocked() ConversationSnapshot {
 	snapshot := m.conversation
 	snapshot.Messages = append([]Message(nil), m.conversation.Messages...)
+	if m.scopeKnown {
+		scope := m.lastScope
+		snapshot.Scope = &scope
+	}
 	snapshot.Running = m.active != nil
 	if m.active != nil {
 		snapshot.RunID = m.active.ID
@@ -775,9 +784,8 @@ func (m *Manager) dropRuntime() {
 	}
 }
 
-// ResetConversation discards the durable agent conversation and the in-memory
-// transcript. Scope changes call it because earlier turns may already contain
-// evidence from a wider scope.
+// ResetConversation explicitly discards the current chat's transcript and
+// durable agent context. Scope changes instead preserve history in a new chat.
 func (m *Manager) ResetConversation(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed {
@@ -1042,6 +1050,11 @@ func (m *Manager) finish(run *Run, event Event) {
 	if m.active != run || run.terminal {
 		m.mu.Unlock()
 		return
+	}
+	// Stop owns the outcome once its Go context is cancelled. Pi may settle
+	// the aborted submission as unanswered before its cancellation event.
+	if event.Type != EventRunCancelled && errors.Is(run.ctx.Err(), context.Canceled) {
+		event = Event{Type: EventRunCancelled, Code: "cancelled", Message: "Stopped by the user.", Status: "cancelled"}
 	}
 	run.terminal = true
 	if event.Type == EventRunCompleted && event.Text != "" {

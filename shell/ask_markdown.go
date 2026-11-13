@@ -116,31 +116,42 @@ func (a *nativeApp) openAskMarkdownLink(link string) {
 	}
 }
 
-// askHistoryMenu is a transient surface anchored to History. It follows the
-// same popover motion as the rest of the app; opening Ask itself is immediate
-// because it is a keyboard-triggered, high-frequency action.
+// History opens immediately for this frequent keyboard action. Only its chat
+// list scrolls; management actions stay within the window below it.
 func (a *nativeApp) askHistoryMenu(c *ui.Context, anchor ui.Element, width float32) {
 	menuWidth := min(300, width-8)
-	a.menu(c, anchor, &a.ask.historyOpen, "ask-history", menuWidth, func() {
+	_, height := c.Size()
+	ui.PopoverBase(c, anchor, &a.ask.historyOpen, func(panel ui.Element) {
+		panelStyle(panel, menuWidth).Padding(6).Gap(2)
 		label(c, "Chats")
 		if a.ask.historyBusy {
 			ui.Text(c, "Loading…").FontSize(sizeSmall).TextColor(inkSoft).Padding(4, 6)
 			return
 		}
-		for _, conversation := range a.ask.conversations {
-			title := conversation.Title
-			if strings.TrimSpace(title) == "" {
-				title = "New chat"
+		ui.Scroll(c.Key("ask-history-list")).TrackScroll(&a.ask.historyScroll).
+			MaxHeight(min(280, max(80, height-360))).Shrink(1).Children(func() {
+			for _, conversation := range a.ask.conversations {
+				title := conversation.Title
+				if strings.TrimSpace(title) == "" {
+					title = "New chat"
+				}
+				chosen := conversation.ConversationID == a.ask.conversationID
+				row := menuRow(c, "ask-chat:"+conversation.ConversationID, chosen).Tooltip(title)
+				row.Children(func() {
+					ui.Text(c, title).MaxWidth(menuWidth - 46).Grow(1)
+					if chosen {
+						ui.Text(c, "✓").TextColor(violet)
+					}
+				})
+				if row.Clicked() {
+					a.selectAskChat(conversation.ConversationID)
+				}
+				if conversation.Preview != "" {
+					ui.Text(c, clip(strings.Join(strings.Fields(conversation.Preview), " "), 54)).
+						FontSize(sizeSmall).TextColor(inkSoft).SingleLine().Padding(0, 10, 0, 6)
+				}
 			}
-			chosen := conversation.ConversationID == a.ask.conversationID
-			if menuItem(c, "ask-chat:"+conversation.ConversationID, clip(title, 38), chosen) {
-				a.selectAskChat(conversation.ConversationID)
-			}
-			if conversation.Preview != "" {
-				ui.Text(c, clip(strings.Join(strings.Fields(conversation.Preview), " "), 54)).
-					FontSize(sizeSmall).TextColor(inkSoft).SingleLine().Padding(0, 10, 0, 6)
-			}
-		}
+		})
 		ui.Divider(c)
 		if menuItem(c, "ask-chat:new", "New chat", false) {
 			a.newAskChat("Started a new chat.")
@@ -164,13 +175,14 @@ func (a *nativeApp) askHistoryMenu(c *ui.Context, anchor ui.Element, width float
 		} else if menuItem(c, "ask-chat:rename", "Rename current chat…", false) {
 			a.ask.renameID = a.ask.conversationID
 			a.ask.renameText = a.currentAskTitle()
+			a.ask.deleteID = ""
 		}
 		if a.ask.deleteID != "" {
 			ui.Text(c, "Delete this chat?").FontSize(sizeSmall).Bold().TextColor(signalRed).Padding(4, 6, 0, 6)
 			ui.Text(c, "Its messages and saved citations will be removed. This cannot be undone.").
 				FontSize(sizeSmall).TextColor(inkSoft).MaxWidth(menuWidth - 12)
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if ui.Button(c, "Cancel").Clicked() {
+				if ui.Button(c.Key("ask-delete-cancel"), "Cancel").AutoFocus().Clicked() {
 					a.ask.deleteID = ""
 				}
 				if underTheme(c, dangerTheme, func() ui.Element { return ui.PrimaryButton(c, "Delete chat") }).Clicked() {
@@ -179,6 +191,7 @@ func (a *nativeApp) askHistoryMenu(c *ui.Context, anchor ui.Element, width float
 			})
 		} else if menuItem(c, "ask-chat:delete", "Delete current chat…", false) {
 			a.ask.deleteID = a.ask.conversationID
+			a.ask.renameID = ""
 		}
 	})
 }

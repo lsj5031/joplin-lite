@@ -116,6 +116,18 @@ func (a *nativeApp) view(c *ui.Context) {
 	if a.listW <= 0 {
 		a.listW = listWidth
 	}
+	// Keep at least 360 DIP of editor content beside Ask. If even the
+	// minimum Ask width cannot fit, use the existing single-pane layout.
+	askLimit := width - a.listW - 360 - 4*cardGap
+	if a.railOpen {
+		askLimit -= a.railW + 4
+	}
+	if a.ask.open {
+		a.narrow = a.narrow || askLimit < askMinWidth
+		if !a.narrow {
+			a.ask.width = min(max(a.ask.width, askMinWidth), min(askMaxWidth, askLimit))
+		}
+	}
 	// The workspace fills the window height cleanly so the floating editor card
 	// reaches the bottom edge without a full-width footer bar cutting across.
 	body := height
@@ -162,19 +174,14 @@ func (a *nativeApp) view(c *ui.Context) {
 				a.editorPane(c, t)
 			})
 			if a.ask.open {
-				if a.narrow {
-					a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, askMaxWidth, false)
+				a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, min(askMaxWidth, askLimit), false)
+				// The Ask panel is a floating workspace card like the
+				// editor: it sits on the gradient backdrop with the same
+				// card gap on its top, right and bottom edges.
+				ui.Column(c).Width(a.ask.width+cardGap).Shrink(0).
+					Padding(cardGap, cardGap, cardGap, 0).Children(func() {
 					a.askPanel(c, t)
-				} else {
-					a.paneSplitter(c, "ask", &a.ask.width, askPanelWidth, askMinWidth, askMaxWidth, false)
-					// The Ask panel is a floating workspace card like the
-					// editor: it sits on the gradient backdrop with the same
-					// card gap on its top, right and bottom edges.
-					ui.Column(c).Width(a.ask.width + cardGap).Shrink(0).
-						Padding(cardGap, cardGap, cardGap, 0).Children(func() {
-						a.askPanel(c, t)
-					})
-				}
+				})
 			}
 		case a.ask.open:
 			a.askPanel(c, t)
@@ -373,6 +380,7 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 					Border(0, ui.Transparent).
 					Padding(4, 2).
 					Grow(1)
+				a.askEditorFocus(in, &a.ask.searchFocus)
 				if a.focusSearch {
 					in.Focus()
 					a.focusSearch = false
@@ -1297,6 +1305,7 @@ func (a *nativeApp) editorPane(c *ui.Context, t *ui.Theme) {
 				Border(0, ui.Transparent).
 				FillWidth().
 				Grow(1)
+			a.askEditorFocus(editor, &a.ask.bodyFocus)
 			editor.OnPaste(func(text string) bool {
 				if text != "" {
 					return false
@@ -1469,6 +1478,7 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 			Background(ui.Transparent).
 			Border(0, ui.Transparent).
 			Grow(1)
+		a.askEditorFocus(title, &a.ask.titleFocus)
 		if title.Changed() {
 			a.markDirty()
 		}

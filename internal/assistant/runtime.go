@@ -368,6 +368,20 @@ func newAgentRuntime(m *Manager, settings Settings, conversationID string) (*age
 		storageCtx:    storageCtx,
 		storageCancel: storageCancel,
 	}
+	// Charge every outbound model request in Go, including provider retries.
+	// Fail here so JavaScript cannot turn a denied request into a successful
+	// answer or replace the authoritative budget error with a provider error.
+	client.Transport.(*endpointTransport).beforeRequest = func() error {
+		run := r.currentRun()
+		if run == nil || !m.runAlive(run) {
+			return context.Canceled
+		}
+		if err := run.budget.modelTurn(); err != nil {
+			m.failRun(run, "budget_exceeded", err.Error())
+			return err
+		}
+		return run.ctx.Err()
+	}
 	if err := r.installHost(); err != nil {
 		api.Close()
 		return nil, err

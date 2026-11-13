@@ -209,6 +209,7 @@ type Citation struct {
 type ConversationSnapshot struct {
 	ConversationID string    `json:"conversationId"`
 	Title          string    `json:"title,omitempty"`
+	Scope          *Scope    `json:"scope,omitempty"`
 	Messages       []Message `json:"messages"`
 	Running        bool      `json:"running"`
 	RunID          string    `json:"runId,omitempty"`

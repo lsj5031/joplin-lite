@@ -17,9 +17,10 @@ const maxModelResponseBytes = 32 << 20
 // path. It injects the user's credential where the SDK put its non-secret
 // placeholder; the placeholder never leaves the process.
 type endpointTransport struct {
-	base   *http.Transport
-	target *url.URL
-	key    string
+	base          *http.Transport
+	target        *url.URL
+	key           string
+	beforeRequest func() error
 }
 
 func newEndpointClient(settings Settings) (*http.Client, error) {
@@ -51,6 +52,11 @@ func newEndpointClient(settings Settings) (*http.Client, error) {
 func (t *endpointTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err := t.allowed(req.URL); err != nil {
 		return nil, err
+	}
+	if t.beforeRequest != nil {
+		if err := t.beforeRequest(); err != nil {
+			return nil, err
+		}
 	}
 	clone := req.Clone(req.Context())
 	clone.Header = req.Header.Clone()
