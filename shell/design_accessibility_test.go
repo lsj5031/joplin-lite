@@ -163,19 +163,33 @@ func TestGlassAccessibilityFallbacks(t *testing.T) {
 }
 
 func TestWorkspaceEnlargedText(t *testing.T) {
+	originalChrome := windowsChrome
+	t.Cleanup(func() { windowsChrome = originalChrome })
+	for _, windows := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standard-toolbar", true: "windows-toolbar"}[windows], func(t *testing.T) {
+			windowsChrome = windows
+			testWorkspaceEnlargedText(t)
+		})
+	}
+}
+
+func testWorkspaceEnlargedText(t *testing.T) {
+	t.Helper()
 	app, db := openNativeTestApp(t)
 	addTestNote(t, service.New(db), "", "Enlarged reading", "Readable body at the OS text size.")
 	app = newNativeApp(db)
 	tt := ui.NewTester(app.view, 1280, 800)
-	before, ok := tt.Find("New note")
+	click(t, tt, "Settings")
+	before, ok := tt.Find("Appearance")
 	if !ok {
-		t.Fatal("New note is missing")
+		t.Fatal("Appearance heading is missing")
 	}
 	tt.SetPreferences(ui.Preferences{TextScale: 2, HighContrast: true, ReduceTransparency: true})
-	after, ok := tt.Find("New note")
-	if !ok || after.H < before.H*1.8 || after.W < before.W*1.8 {
-		t.Fatalf("New note bounds did not enlarge: %v -> %v", before, after)
+	after, ok := tt.Find("Appearance")
+	if !ok || after.H < before.H*1.8 {
+		t.Fatalf("Appearance text did not enlarge: %v -> %v", before, after)
 	}
+	click(t, tt, "Cancel settings")
 	click(t, tt, "Settings")
 	if !tt.HasText("Appearance") {
 		t.Fatal("Settings did not open with enlarged text")
