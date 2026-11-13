@@ -269,10 +269,12 @@ func TestCaptureAskDemo(t *testing.T) {
 
 	d.hold(1.4)
 	d.tap("Ask")
+	d.mark("ask-open")
 	d.hold(0.8)
 	d.tap("Model…")
 	d.hold(1.5)
 	d.tap("Save connection")
+	d.mark("connection-saved")
 	d.hold(0.8)
 	d.tap("Question")
 	d.typeHuman("What did I decide about the camera repair, and what follow-up is outstanding?")
@@ -291,14 +293,33 @@ func TestCaptureAskDemo(t *testing.T) {
 	if d.failed != "" {
 		t.Fatalf("live Ask run failed: %s", d.failed)
 	}
-	d.hold(2.6)
-	if _, ok := d.tt.Find("[E1] Camera repair"); ok {
-		d.tap("[E1] Camera repair")
-		d.glideTo(880, 620, 0.4)
-		d.hold(2.0)
+	d.mark("answer-complete")
+	d.hold(2.2)
+	// Open the inline citation itself; the source chip remains a fallback for
+	// older providers that emit a token the renderer has not registered.
+	if _, ok := d.tt.Find("[E1]"); ok {
+		d.tap("[E1]")
 	}
+	// The inline link and the source chip share the same verified citation. If
+	// the link hit box was clipped by the answer scroll, use the chip so the
+	// walkthrough still demonstrates source navigation.
+	if d.app.note == nil || d.app.note.Title != "Camera repair" {
+		if _, ok := d.tt.Find("[E1] Camera repair"); ok {
+			d.tap("[E1] Camera repair")
+		}
+	}
+	d.mark("citation-opened")
+	d.glideTo(880, 620, 0.4)
+	d.hold(1.8)
+	d.tap("History")
+	d.mark("history-open")
+	d.hold(3.8)
 	d.hold(0.8)
 
 	t.Logf("Ask demo: %d frames (%.1fs at %d fps) in %s",
 		d.n, float64(d.n)/askDemoFPS, askDemoFPS, frames)
+}
+
+func (d *askDemo) mark(name string) {
+	d.t.Logf("ASK_DEMO_MARK %s frame=%d seconds=%.3f", name, d.n, float64(d.n)/askDemoFPS)
 }

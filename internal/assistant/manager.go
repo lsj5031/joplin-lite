@@ -1056,7 +1056,7 @@ func (m *Manager) finish(run *Run, status, message string, failed bool) {
 	ownsConversation := m.active == nil
 	if ownsConversation {
 		if status == "completed" || status == "cancelled" {
-			m.conversation.Messages = append(m.conversation.Messages, Message{Role: "assistant", Text: answer})
+			m.conversation.Messages = append(m.conversation.Messages, Message{Role: "assistant", Text: answer, Citations: citations})
 		} else {
 			m.conversation.Messages = append(m.conversation.Messages, Message{Role: "error", Text: message})
 		}

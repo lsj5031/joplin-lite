@@ -160,6 +160,10 @@ func TestEmbeddedAgentCompletesCitedAnswer(t *testing.T) {
 	if len(completed.Citations) != 1 || completed.Citations[0].NoteID != note.ID || !completed.Citations[0].Verified {
 		t.Fatalf("citation was not verified against read_note: %+v", completed.Citations)
 	}
+	snapshot := m.Snapshot("")
+	if len(snapshot.Messages) < 2 || len(snapshot.Messages[1].Citations) != 1 || snapshot.Messages[1].Citations[0].NoteID != note.ID {
+		t.Fatalf("completed snapshot lost its citations: %+v", snapshot.Messages)
+	}
 
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
