@@ -2553,8 +2553,8 @@ func (a *nativeApp) openNoteRow(id, parentID string, isConflict int) bool {
 func (a *nativeApp) modalOpen() bool {
 	return a.confirmDelete || a.confirmBulkDelete || a.confirmDeleteNotebook ||
 		a.confirmDeleteTag || a.notebookBlocked || a.notebookOpen || a.tagOpen ||
-		a.settingsOpen || a.savedOpen || a.savedDelete != "" || a.resolveConflict || a.paletteOpen ||
-		a.confirmImport
+		a.settingsOpen || a.ask.settingsOpen || a.savedOpen || a.savedDelete != "" ||
+		a.resolveConflict || a.paletteOpen || a.confirmImport
 }
 
 func (a *nativeApp) menuAction(fn func()) func(*mygo.MenuItem, *mygo.Window) {
@@ -2648,6 +2648,7 @@ func (a *nativeApp) appMenu() *mygo.Menu {
 			Label: "View",
 			Submenu: []*mygo.MenuItem{
 				{Label: "Toggle Edit / Preview", Accelerator: "CmdOrCtrl+E", Click: do(a.toggleEdit)},
+				{Label: "Ask Notes…", Accelerator: "CmdOrCtrl+Shift+A", Click: do(a.toggleAsk)},
 				{Label: "Toggle Notebooks Sidebar", Accelerator: "CmdOrCtrl+\\", Click: do(func() {
 					a.railOpen = !a.railOpen
 				})},
