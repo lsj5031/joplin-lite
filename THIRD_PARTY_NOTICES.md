@@ -22,6 +22,8 @@ after dependency updates, and review new or changed license terms.
 - TanStack starter source and historical starter artwork (MIT)
 - github.com/JohannesKaufmann/dom@v0.2.0
 - github.com/JohannesKaufmann/html-to-markdown/v2@v2.3.0
+- github.com/MoeForge/moego@v0.1.0-alpha.1
+- github.com/MoeForge/moejs@v0.1.1-0.20261109125924-934171643e14
 - github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream@v1.6.10
 - github.com/aws/aws-sdk-go-v2/config@v1.28.8
 - github.com/aws/aws-sdk-go-v2/credentials@v1.17.51
@@ -41,9 +43,10 @@ after dependency updates, and review new or changed license terms.
 - github.com/aws/aws-sdk-go-v2@v1.36.3
 - github.com/aws/smithy-go@v1.22.2
 - github.com/cespare/xxhash/v2@v2.3.0
+- github.com/danieljoos/wincred@v1.2.3
 - github.com/dustin/go-humanize@v1.0.1
 - github.com/ebitengine/purego@v0.11.1
-- github.com/egoist/mygo@v0.5.5
+- github.com/egoist/mygo@v0.9.0
 - github.com/go-chi/chi/v5@v5.2.1
 - github.com/go-chi/cors@v1.2.1
 - github.com/go-logr/logr@v1.4.3
@@ -56,6 +59,7 @@ after dependency updates, and review new or changed license terms.
 - github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec
 - github.com/spf13/cobra@v1.8.1
 - github.com/spf13/pflag@v1.0.5
+- github.com/zalando/go-keyring@v0.2.8
 - go.opentelemetry.io/auto/sdk@v1.2.1
 - go.opentelemetry.io/otel/metric@v1.40.0
 - go.opentelemetry.io/otel/trace@v1.40.0
@@ -93,13 +97,13 @@ Applies to: golang.org/x/text@v0.43.0
 
 Source: golang.org/x/text@v0.43.0/LICENSE
 
-Applies to: golang.org/x/image@v0.46.0
-
-Source: golang.org/x/image@v0.46.0/LICENSE
-
 Applies to: golang.org/x/net@v0.59.0
 
 Source: golang.org/x/net@v0.59.0/LICENSE
+
+Applies to: golang.org/x/image@v0.46.0
+
+Source: golang.org/x/image@v0.46.0/LICENSE
 
 Applies to: golang.org/x/crypto@v0.57.0
 
@@ -157,13 +161,13 @@ Applies to: golang.org/x/text@v0.43.0
 
 Source: golang.org/x/text@v0.43.0/PATENTS
 
-Applies to: golang.org/x/image@v0.46.0
-
-Source: golang.org/x/image@v0.46.0/PATENTS
-
 Applies to: golang.org/x/net@v0.59.0
 
 Source: golang.org/x/net@v0.59.0/PATENTS
+
+Applies to: golang.org/x/image@v0.46.0
+
+Source: golang.org/x/image@v0.46.0/PATENTS
 
 Applies to: golang.org/x/crypto@v0.57.0
 
@@ -330,6 +334,10 @@ Source: github.com/go-logr/logr@v1.4.3/LICENSE
 Applies to: github.com/ebitengine/purego@v0.11.1
 
 Source: github.com/ebitengine/purego@v0.11.1/LICENSE
+
+Applies to: github.com/egoist/mygo@v0.9.0
+
+Source: github.com/egoist/mygo@v0.9.0/internal/shader/LICENSE
 
 ~~~text
                                  Apache License
@@ -3523,6 +3531,10 @@ Applies to: github.com/aws/aws-sdk-go-v2/service/s3@v1.80.1
 
 Source: github.com/aws/aws-sdk-go-v2/service/s3@v1.80.1/LICENSE.txt
 
+Applies to: github.com/MoeForge/moejs@v0.1.1-0.20261109125924-934171643e14
+
+Source: github.com/MoeForge/moejs@v0.1.1-0.20261109125924-934171643e14/LICENSE
+
 Applies to: MingCute icon embedded in MyGO ui/combobox.go (Apache-2.0)
 
 Source: https://raw.githubusercontent.com/Richard9394/MingCute/ca98bb55513a22ff0dab713aaf7870b512944653/LICENSE
@@ -4410,9 +4422,39 @@ Source: github.com/spf13/cobra@v1.8.1/LICENSE.txt
 
 ### Notice 36
 
-Applies to: github.com/egoist/mygo@v0.5.5
+Applies to: github.com/MoeForge/moego@v0.1.0-alpha.1
 
-Source: github.com/egoist/mygo@v0.5.5/LICENSE
+Source: github.com/MoeForge/moego@v0.1.0-alpha.1/LICENSE
+
+~~~text
+MIT License
+
+Copyright (c) 2026 Calcium-Ion
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~
+
+### Notice 37
+
+Applies to: github.com/egoist/mygo@v0.9.0
+
+Source: github.com/egoist/mygo@v0.9.0/LICENSE
 
 ~~~text
 MIT License
@@ -4438,7 +4480,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ~~~
 
-### Notice 37
+### Notice 38
 
 Applies to: github.com/go-text/typesetting@v0.3.5
 
@@ -4502,7 +4544,97 @@ For more information, please refer to <https://unlicense.org/>
 ---
 ~~~
 
-### Notice 38
+### Notice 39
+
+Applies to: github.com/danieljoos/wincred@v1.2.3
+
+Source: github.com/danieljoos/wincred@v1.2.3/LICENSE
+
+~~~text
+The MIT License (MIT)
+
+Copyright (c) 2014 Daniel Joos
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~
+
+### Notice 40
+
+Applies to: github.com/zalando/go-keyring@v0.2.8
+
+Source: github.com/zalando/go-keyring@v0.2.8/LICENSE
+
+~~~text
+The MIT License (MIT)
+
+Copyright (c) 2016 Zalando SE
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~
+
+### Notice 41
+
+Applies to: github.com/zalando/go-keyring@v0.2.8
+
+Source: github.com/zalando/go-keyring@v0.2.8/internal/shellescape/LICENSE
+
+~~~text
+The MIT License (MIT)
+
+Copyright (c) 2016 Alessio Treglia
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~
+
+### Notice 42
 
 Applies to: Overpass and Overpass Mono fonts
 
@@ -4604,7 +4736,7 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ~~~
 
-### Notice 39
+### Notice 43
 
 Applies to: Historical Impeccable development tooling (Apache-2.0)
 
@@ -4804,7 +4936,7 @@ Source: https://raw.githubusercontent.com/pbakaus/impeccable/main/LICENSE
    limitations under the License.
 ~~~
 
-### Notice 40
+### Notice 44
 
 Applies to: Historical modern-screenshot development tooling (MIT)
 
@@ -4822,7 +4954,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~
 
-### Notice 41
+### Notice 45
 
 Applies to: TanStack starter source and historical starter artwork (MIT)
 

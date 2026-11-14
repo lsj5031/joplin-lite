@@ -64,10 +64,10 @@ index 0000000..71dbbc6
 +	}
 +}
 diff --git a/ui/markdown/view.go b/ui/markdown/view.go
-index 8833d95..a34e1d1 100644
+index 96fab05..e0f8600 100644
 --- a/ui/markdown/view.go
 +++ b/ui/markdown/view.go
-@@ -26,6 +26,10 @@ type Options struct {
+@@ -35,6 +35,10 @@ type Options struct {
  	// router around the view, a link to #a-heading scrolls to that
  	// heading, and links of other schemes do nothing.
  	OnLink func(url string)
@@ -75,10 +75,10 @@ index 8833d95..a34e1d1 100644
 +	// of the space or x inside the task marker in View's source. The caller
 +	// owns the edit; without this callback tasks remain display-only.
 +	OnTask func(offset int, checked bool)
- 	// LoadImage loads the image at url, on a goroutine of its own, for the
- 	// views to show; until it has, they show its description. Without
- 	// it, images show as their descriptions. FileImages loads files.
-@@ -562,7 +566,18 @@ func (st *viewState) marker(c *ui.Context, list, item *parser.Block, n, depth in
+ 	// LinkIcon, when set, makes an object at the start of a link's text,
+ 	// from its destination and the size of the text around it in DIPs:
+ 	// one on the baseline, inside the link, which stays on the line of
+@@ -830,7 +834,18 @@ func (st *viewState) marker(c *ui.Context, list, item *parser.Block, n, depth in
  			size := th.em(0.95)
  			lineH := th.FontSize * th.LineHeight * 1.2
  			checked := item.Task == parser.Checked

@@ -4,18 +4,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
-version="v0.5.5"
+version="v0.9.0"
 patches=(
-  "$root/shell/patches/mygo-large-layouts.patch"
-  "$root/shell/patches/mygo-inline-transforms.patch"
   "$root/shell/patches/mygo-list-estimate.patch"
   "$root/shell/patches/mygo-task-checkboxes.patch"
-  "$root/shell/patches/mygo-glass-accessibility.patch"
   "$root/shell/patches/mygo-tooltip-modal.patch"
 )
 dest="$root/tmp/mygo-patched"
 stamp="$version:$(git hash-object "${patches[@]}")"
-export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.1}"
+export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.3}"
 
 if [ -e "$dest" ]; then
   if [ -f "$dest/.joplin-patch" ] &&
@@ -45,4 +42,4 @@ git -C "$stage" apply "${patches[@]}"
 printf '%s\n' "$stamp" > "$stage/.joplin-patch"
 mv "$stage" "$dest"
 stage=""
-echo "Prepared MyGO $version with preview performance, task checkbox, glass accessibility and modal tooltip fixes."
+echo "Prepared MyGO $version with preview row estimates, task checkbox and modal tooltip fixes."

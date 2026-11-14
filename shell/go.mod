@@ -1,9 +1,9 @@
 module github.com/lsj5031/joplin-lite/shell
 
-go 1.27.1
+go 1.27.3
 
 require (
-	github.com/egoist/mygo v0.5.5
+	github.com/egoist/mygo v0.9.0
 	github.com/lsj5031/joplin-lite v0.0.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.57.0

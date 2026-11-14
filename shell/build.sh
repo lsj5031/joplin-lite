@@ -18,5 +18,5 @@ if [ "$(go env GOOS)" = "windows" ]; then
   LDFLAGS="-H=windowsgui $LDFLAGS"
 fi
 
-CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.1}" go build -trimpath -tags mygo_noinspector \
+CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.3}" go build -trimpath -tags mygo_noinspector \
   -ldflags="$LDFLAGS" -o "${OUT:-../tmp/Joplin Lite.exe}" .

@@ -419,7 +419,7 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
   password, clipper token) — those need the config + sync engine, not just the store.
 - Requires Go 1.27 + Bun per MyGO's requirements (pin the MyGO version).
 - **[update 2026-10-17 — desktop shell runs]** `shell/` is a Go 1.27 module pinning
-  `github.com/egoist/mygo v0.5.5` (no CLI required): a native window over the embedded
+  `github.com/egoist/mygo v0.9.0` (no CLI required): a native window over the embedded
   `web/dist/client` SPA, with the clipper/Data API in-process on the configured/OS-assigned
   loopback address. Runtime config is injected into the page, closing the build-time
   localhost coupling; closing the window shuts the API down and closes SQLite. Web-clipper

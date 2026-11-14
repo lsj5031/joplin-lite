@@ -112,11 +112,13 @@ supported Macs; this native workspace has no webview and uses shader glass.
 The [Native UI index](https://github.com/egoist/mygo/blob/main/docs/ui/README.md)
 defines the native widget, focus, overlay and accessibility contracts. Consult the
 actual pinned/patched dependency before adopting current-guide APIs. The app retains
-MyGO v0.5.5 with a narrow accessibility backport: Reduce Transparency reaches UI and
-Painter, Regular/Clear/interactive glass becomes opaque theme Surface, and Blur plus
-soft/hard ScrollEdge becomes opaque theme Background. High Contrast strengthens the
-glass rim and adds an opaque theme Border to reduced-transparency glass. App cards
-and the wash base become opaque too; decorative glow can remain above the wash.
+MyGO v0.9.0, whose glass carries the Reduce Transparency behavior this design needs:
+Reduce Transparency reaches UI and Painter, Regular and interactive glass becomes
+opaque theme Surface (an interactive tint survives), Clear becomes opaque theme
+Background, and Blur plus soft/hard ScrollEdge becomes opaque theme Background.
+High Contrast strengthens the glass rim and adds an opaque theme Border to
+reduced-transparency glass. App cards and the wash base become opaque too;
+decorative glow can remain above the wash.
 
 The pinned platform backends read macOS Reduce Transparency and Windows' transparency
 setting; Linux does not populate this preference. The MyGO native-UI browser backend

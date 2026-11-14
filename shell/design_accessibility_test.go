@@ -140,9 +140,16 @@ func TestGlassAccessibilityFallbacks(t *testing.T) {
 					t.Fatal("control: normal material must sample backdrop")
 				}
 				tt.SetPreferences(ui.Preferences{ReduceTransparency: true, HighContrast: true})
+				// MyGO v0.9.0 falls back to Background for Clear glass and
+				// keeps an interactive tint on the opaque surface.
 				want := theme.Background
-				if name == "glass" || name == "clear" || name == "interactive" {
+				if name == "glass" {
 					want = theme.Surface
+				}
+				if name == "interactive" {
+					want = theme.Surface.Mix(ui.RGB(180, 30, 20), 0.88)
+				}
+				if name == "glass" || name == "clear" || name == "interactive" {
 					border := tt.Image().RGBAAt(20, 50)
 					if border.R != theme.Border.R || border.G != theme.Border.G || border.B != theme.Border.B || border.A != 255 {
 						t.Fatalf("opaque contrast border=%v want %v", border, theme.Border)

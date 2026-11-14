@@ -1,197 +1,66 @@
-# MyGO preview patches
+# MyGO patches
 
-The shell pins MyGO v0.5.5 and replaces it with `tmp/mygo-patched`.
+The shell pins MyGO v0.9.0 and replaces it with `tmp/mygo-patched`.
 `bash shell/prepare-mygo.sh` copies that release from the verified Go module
-cache and applies `mygo-large-layouts.patch`, `mygo-inline-transforms.patch`,
-`mygo-list-estimate.patch`, `mygo-task-checkboxes.patch`,
-`mygo-glass-accessibility.patch`, and `mygo-tooltip-modal.patch`.
-`shell/build.sh` runs this step
-automatically. Go and Git are required, with Bash as for the existing build.
-Nothing changes in the shared module cache. Direct shell `go build`, `go test`,
-and editor tooling need the preparation step once after checkout.
+cache and applies `mygo-list-estimate.patch`, `mygo-task-checkboxes.patch`, and
+`mygo-tooltip-modal.patch`. `shell/build.sh` runs this step before building.
 
-The preparation is repeatable. An existing copy must have the matching patch
-stamp and pass a reverse-patch check. A stale or conflicting copy is never
-overwritten: move `tmp/mygo-patched` aside and rerun preparation. Unrelated
-local edits are preserved.
+The directory is a derived copy, not a checkout: do not edit it, and do not
+point the `replace` directive at a Git clone. To pick up upstream changes, move
+the derived copy aside and rerun the script. Unrelated changes fail `git apply`
+instead of being silently overwritten.
 
-## Modal tooltip dismissal
+## Why these three remain
 
-The sixth patch restricts tooltip candidates to the active modal's scope.
-Previously a pointer parked on the window toolbar could revive its background
-tooltip after Escape dismissed a dialog's focused tooltip. This disrupted focus
-and allowed the focused tooltip to return, repeatedly consuming Escape instead
-of letting the next Escape dismiss the dialog. Background controls are already
-inert while a modal is open; their tooltips now follow the same rule.
+v0.9.0 carries three fixes this app previously backported, so their patches were
+dropped:
 
-`TestWindowsHeaderBrandAndActions` leaves the pointer on the toolbar while
-reopening the compact notebook drawer with the keyboard. Escape dismisses the
-focused tooltip, the next Escape closes the drawer, and search accepts input.
-The scenario failed without this patch and passes with it, without relocating
-the pointer. Ordinary hover/focus tooltip behavior is covered by MyGO's UI suite.
-The demo tour uses the current `Note tags` label and host caption insets.
+- the oversized text-layout budget (`maxLargeLayoutBytes`, `roomBesideLive` in
+  `internal/text/layout.go`);
+- the hoisted inline-transform scan in `ui/paint.go`;
+- Reduce Transparency and High Contrast handling in `plugins/glass`.
 
-Validation on Windows/amd64: the full shell suite passed with `CAPTURE_DIR`
-enabled, including the complete demo tour and all five header width/text-scale
-cases. MyGO's full `ui` suite and UI/shell vet passed; `ui` cross-builds for
-Darwin/Linux and a full Darwin shell build passed with CGO disabled. Repeat
-preparation and all six reverse-patch checks passed. Stripped example sizes
-were unchanged: native counter 9,466,880 bytes; webview 9,672,192 bytes.
+The remaining patches add APIs the app needs and that upstream does not have.
 
-## Glass accessibility
+### `mygo-list-estimate.patch`
 
-The fifth patch carries the platform's existing Reduce Transparency preference
-through `ui.Preferences`, `Painter.Preferences`, and `Tester.SetPreferences`.
-Glass paints opaque theme Surface; Blur and both ScrollEdge styles paint opaque
-theme Background. High Contrast strengthens the shader rim and adds an opaque
-border to opaque glass. This changes no shader programs or glass call-site API.
-The shell also makes its custom reading cards and base wash opaque when requested.
+Adds `ui.ListState.EstimatedRowHeight`. The virtualized list assumes rows are as
+tall as the largest row it has measured. Markdown paragraphs are now cut into
+1000-rune chunks, and every chunk shares a block with settings rows and to-dos;
+without an estimate, one long paragraph reserves its maximum height for every
+chunk and the reading pane scrolls over a large blank area. The list clamps the
+estimate to measured bounds and falls back to the tallest measured row when it
+is unset.
 
-The pinned backend supplies Reduce Transparency on macOS, Windows, and native-UI
-browser builds where the media query is supported. Linux does not supply it.
-Native Mica/vibrancy requests are unchanged; their live system behavior still
-needs platform smoke testing. No current-guide `Clarity` or native webview glass
-API is introduced by this backport.
+### `mygo-task-checkboxes.patch`
 
-`go test -run 'TestGlassAccessibilityFallbacks|TestFieldNotesThemeFollowsPreferences'`
-from `shell/` checks light/dark material opacity against changing backdrops and
-live text/contrast preferences. `TestWorkspaceEnlargedText` checks the real view
-at 2x text scale; `TestDeleteConfirmationStartsWithCancel` exercises deletion
-through a disposable vault and the real dialog.
+Adds `markdown.Options.OnTask`. A checked or unchecked GFM task checkbox in the
+preview is a real control: the hit target is the box, the row, or the label; the
+click is ignored while a save is committing; failures keep the old draft and
+report the error. The rebase for v0.9.0 uses the `CheckboxBase` element API and
+`strings.Cut`/`IndexByte` for the marker span.
 
-Validation on Windows/amd64 (Go 1.27.1, 13 November 2026): the five dedicated
-shell accessibility tests, `go test ./plugins/glass ./ui` in the prepared
-dependency, and shell `go vet ./...` passed. Changed `ui` and `plugins/glass`
-packages built for Windows, Darwin and Linux with `CGO_ENABLED=0`. The prepared
-five-patch reverse check and repeat preparation passed; the fifth patch also
-applied cleanly to an isolated copy carrying only the original four patches.
+### `mygo-tooltip-modal.patch`
 
-With `-trimpath -tags mygo_noinspector -ldflags '-s -w -X
-github.com/egoist/mygo.production=1'`, the Windows native counter changed from
-9,466,368 to 9,466,880 bytes (+512); the webview example remained 9,672,192
-bytes. The baseline was an isolated copy with only the fifth patch reversed.
-The native counter already reaches the engine's preference conversion (confirmed
-with `-dumpdep`), which now copies one more platform preference; it does not
-reach the opt-in glass painter. No package dependency was added. These are
-fresh before/after measurements, separate from the older preview-patch numbers.
-
-The enlarged Settings capture was generated, but image inspection failed due to
-the monthly upload quota. CPU pixel tests establish material behavior; they do
-not establish live GPU output, real OS preference toggles, or macOS appearance.
-
-## Policy
-
-Upstream rejects every layout estimated above 8 MiB, even though it already
-allows a 64 MiB working set of smaller layouts. A large Markdown paragraph can
-therefore be shaped on every frame.
-
-The patch leaves the existing cache unchanged and lazily adds a separate
-32 MiB allowance for oversized layouts. Large layouts cannot evict ordinary
-labels. The additional cache uses frame recency for eviction and expires
-unused entries after eight global frames. Font/layout invalidation clears
-both caches. Layouts larger than 32 MiB still render, but remain uncached.
-
-The combined estimated ceiling is **96 MiB**, not a process-memory limit.
-Caret/selection reservations remain included. No text splitting, shaping,
-font fallback, or Markdown semantics change in the cache patch. First-open
-shaping of each admitted layout is unchanged.
-
-The second patch hoists the inline-transform tree scan out of the text paint
-loops. A link-heavy paragraph otherwise scans all inline nodes for each line
-and visible glyph, even when no inline transform is set. The result is reused
-only within each background/foreground paint call, never across frames.
-It changes no transform, clipping, or ClearType decisions.
-
-The third patch adds optional `ListState.EstimatedRowHeight` in DIPs. The
-ordinary default remains unchanged. Lists of tall content can now avoid
-building many rows on their first frame before any height is measured.
-Measured heights take over, with the existing anchor-based scrolling.
-
-The shell uses that estimate for long-paragraph previews, renders only visible
-chunks plus the toolkit's overscan, and reduces chunks from 12,000 to roughly
-1,000 runes. Only paragraphs above 12,000 runes enter this path; short
-paragraphs and unsplittable inline spans stay intact. Body changes reset the
-list. This retains the existing chunking limitations, but no longer shapes
-the whole long paragraph before displaying its beginning. Task checkbox edits
-preserve the list position; other body changes still reset it.
-
-The fourth patch adds opt-in `markdown.Options.OnTask`. Task markers retain
-their existing look but become focusable checkboxes with click and Space-key
-handling when a callback is supplied. The callback receives the source byte
-offset of the task's state character and its new checked state. The caller
-owns persistence; views without a callback remain display-only.
-
-The shell maps each chunk's offset back through preview-only line formatting
-to the original note, changes just the task marker, and uses normal autosave.
-It rejects callbacks for stale bodies or other notes. Tests cover nested and
-quoted lists, uppercase markers, CRLF/CJK text, duplicate task text, code
-fences, long-note scroll retention, note switching, and failed saves.
+Adds a `tipped` guard so a tooltip cannot remain above an open modal. The app
+opens confirmations and the command palette as modals; without the guard the
+tooltip for the control that opened them paints over the modal surface.
 
 ## Validation
 
 ```sh
 bash shell/prepare-mygo.sh
-cd tmp/mygo-patched
-CGO_ENABLED=0 go test ./internal/text ./ui ./ui/markdown
-CGO_ENABLED=0 go test ./ui/markdown -run '^$' \
-  -bench '^BenchmarkLargeParagraphWarmFrames$' -benchmem
+cd shell && CGO_ENABLED=0 go test ./...
+CAPTURE_DIR=../tmp/ui-audit CGO_ENABLED=0 go test -run TestCaptureScreens .
 ```
 
-Tests cover warm-layout reuse, multiple active paragraphs, label protection,
-the large-cache budget, least-recent-frame eviction, expiry, release, changed
-parameters, cache invalidation, and rejection beyond the hard limit. A
-synthetic Markdown test asserts zero new layouts on warm `ui.Tester` frames;
-the benchmark reports timings separately, without timing-based assertions.
-
-Windows/amd64 measurements on 2026-10-22 (Ryzen 5 5600X, Go 1.27.1):
-
-| Synthetic link-heavy Markdown | Warm frame | New layouts/frame |
-| --- | ---: | ---: |
-| Upstream v0.5.5 | 424.7 ms | 2 |
-| Large-layout cache only | 234.6 ms | 0 |
-| Both patches | 10.2 ms | 0 |
-
-These are local benchmark samples, not timing guarantees. The complete text,
-UI, Markdown, and shell test suites passed, as did vet for those packages and
-Linux/macOS cross-builds of the changed toolkit packages. No macOS/Linux
-runtime or interactive desktop verification was performed.
-
-Release-size checks (`mygo_noinspector`, `-trimpath`, stripped) kept the webview
-example unchanged at 9,672,192 bytes. The native counter grew from 9,464,832 to
-9,466,368 bytes (+1,536), attributable to the native text-cache/paint changes;
-the linker dependency dump shows the existing UI layout path reaches the new
-large-layout cache. No new package dependency was added.
-With the additional list-estimate patch, the native counter is 9,466,880 bytes
-(another 512 bytes for the estimate field/setup change); the webview example
-remains 9,672,192 bytes.
-The task-checkbox patch leaves both example sizes unchanged: neither example
-uses the Markdown renderer, so the opt-in interaction adds no code to them.
-
-The shell also has `BenchmarkPreviewSingleViewWarmFrames`. It deliberately
-bypasses application chunking and uses the shell's fonts and Markdown theme.
-Set `PREVIEW_BENCH_FILE` to a local Markdown file to add a private fixture;
-the benchmark never logs its body and no fixture is committed.
+Review the captured screens for clipping, blank rows, and tooltip/modal
+overlap. The patch tests in `ui/markdown` cover the task control and its save
+failure path.
 
 ## Upstream status
 
-Reported as [egoist/mygo#628](https://github.com/egoist/mygo/issues/628), with a
-synthetic reproduction, measurements, and the two local fix approaches.
-
-Checked on 2026-10-22: v0.6.2 is the latest published release. Its cache policy,
-and upstream main at `976f17c9391fb86f9afeba7a2d3b27b54e6d671a`, still reject
-entries above 8 MiB. Upgrading alone does not fix this.
-
-`BenchmarkPreviewColdOpen` measures cold layouts by varying font size slightly
-between iterations (including across sub-benchmarks). With a local large-note
-fixture, five-iteration samples measured 268 ms for the original stacked
-12,000-rune chunks and 51 ms for the virtualized first screen. This is a cold
-preview benchmark, not a guarantee for full application startup or note I/O.
-Tests cover reaching the last page, resizing, body replacement, returning from
-a short note, and pixel-equivalent reading areas in light/dark and narrow/wide
-views. The scrollbar uses estimated document height until pages are measured.
-
-Once upstream releases include equivalent fixes, remove the replacement and
-preparation step together, upgrade the pin, and retain equivalent regression
-coverage. The preview also requires the initial row-height API or an equivalent
-upstream way to bound first-frame list construction, and task checkbox callbacks
-that identify the clicked source marker.
+Checked 2026-11-14 against v0.9.0. `EstimatedRowHeight` and `Options.OnTask` are
+still absent upstream, and `ui/tooltip.go` still lacks the modal guard. If a
+later release adds them, delete the patch and its entry from
+`shell/prepare-mygo.sh`.
