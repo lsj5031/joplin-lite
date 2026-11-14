@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"image"
@@ -21,6 +22,7 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
@@ -265,50 +267,46 @@ func newNativeApp(db *store.DB) *nativeApp {
 		imageMu.Lock()
 		defer imageMu.Unlock()
 		start := time.Now()
-		id, ok := strings.CutPrefix(ref, ":/")
-		if !ok || len(id) != 32 {
-			return nil, fmt.Errorf("not a Joplin resource reference")
+		if id, ok := strings.CutPrefix(ref, ":/"); ok {
+			if len(id) != 32 {
+				return nil, fmt.Errorf("not a Joplin resource reference")
+			}
+			if _, err := hex.DecodeString(id); err != nil {
+				return nil, err
+			}
+			resource, err := db.GetResource(id)
+			if err != nil {
+				return nil, err
+			}
+			if resource == nil || resource.EncryptionApplied != 0 || resource.EncryptionBlobEncrypted != 0 {
+				return nil, fmt.Errorf("resource is missing or encrypted")
+			}
+			data, err := os.ReadFile(db.GetResourceFile(id))
+			if err != nil {
+				return nil, err
+			}
+			defer func() {
+				app.metrics.observeAttrs(spanLoadImage, start,
+					slog.String("resource_id", id),
+					slog.Int("bytes", len(data)),
+				)
+			}()
+			return decodeImageData(data, resource.Mime)
 		}
-		if _, err := hex.DecodeString(id); err != nil {
-			return nil, err
+		if strings.HasPrefix(ref, "data:image/") {
+			mime, data, err := decodeImageDataURL(ref)
+			if err != nil {
+				return nil, err
+			}
+			defer func() {
+				app.metrics.observeAttrs(spanLoadImage, start,
+					slog.String("source", "data"),
+					slog.Int("bytes", len(data)),
+				)
+			}()
+			return decodeImageData(data, mime)
 		}
-		resource, err := db.GetResource(id)
-		if err != nil {
-			return nil, err
-		}
-		if resource == nil || resource.EncryptionApplied != 0 || resource.EncryptionBlobEncrypted != 0 {
-			return nil, fmt.Errorf("resource is missing or encrypted")
-		}
-		data, err := os.ReadFile(db.GetResourceFile(id))
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			app.metrics.observeAttrs(spanLoadImage, start,
-				slog.String("resource_id", id),
-				slog.Int("bytes", len(data)),
-			)
-		}()
-		if resource.Mime == "image/svg+xml" {
-			return ui.ParseSVG(data)
-		}
-		config, _, err := image.DecodeConfig(bytes.NewReader(data))
-		if err != nil {
-			return nil, err
-		}
-		// The page is 700 DIPs wide. Keep 2x detail, but fit every supported
-		// Windows GPU's 8192px texture limit, including very tall screenshots.
-		scale := min(1.0, 1400.0/float64(config.Width), 8192.0/float64(config.Height))
-		if scale == 1 {
-			return ui.DecodeBitmap(data)
-		}
-		decoded, _, err := image.Decode(bytes.NewReader(data))
-		if err != nil {
-			return nil, err
-		}
-		preview := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(config.Width)*scale)), max(1, int(float64(config.Height)*scale))))
-		draw.ApproxBiLinear.Scale(preview, preview.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
-		return ui.NewBitmap(preview), nil
+		return nil, fmt.Errorf("not a Joplin resource reference or image data URL")
 	}}
 	app.reloadNotebooks()
 	app.reloadTags()
@@ -321,6 +319,57 @@ func newNativeApp(db *store.DB) *nativeApp {
 		slog.Int("notes", len(app.notes)),
 	)
 	return app
+}
+
+// decodeImageDataURL decodes an inline image. The web clipper keeps images
+// whose URLs are gated as data URLs, so the preview reads the embedded bytes
+// instead of fetching the page again.
+func decodeImageDataURL(ref string) (string, []byte, error) {
+	meta, payload, ok := strings.Cut(strings.TrimPrefix(ref, "data:"), ",")
+	if !ok {
+		return "", nil, fmt.Errorf("invalid image data URL")
+	}
+	mime, params, _ := strings.Cut(meta, ";")
+	if !strings.HasPrefix(mime, "image/") {
+		return "", nil, fmt.Errorf("data URL is not an image")
+	}
+	payload, err := url.PathUnescape(payload)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid image data URL: %w", err)
+	}
+	if strings.Contains(";"+params, ";base64") {
+		data, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid base64 image data: %w", err)
+		}
+		return mime, data, nil
+	}
+	return mime, []byte(payload), nil
+}
+
+// decodeImageData decodes a resource or inline image, bounded to the page
+// width and to the texture limit of the supported Windows GPUs.
+func decodeImageData(data []byte, mime string) (ui.ImageSource, error) {
+	if strings.EqualFold(mime, "image/svg+xml") {
+		return ui.ParseSVG(data)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	// The page is 700 DIPs wide. Keep 2x detail, but fit every supported
+	// Windows GPU's 8192px texture limit, including very tall screenshots.
+	scale := min(1.0, 1400.0/float64(config.Width), 8192.0/float64(config.Height))
+	if scale == 1 {
+		return ui.DecodeBitmap(data)
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	preview := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(config.Width)*scale)), max(1, int(float64(config.Height)*scale))))
+	draw.ApproxBiLinear.Scale(preview, preview.Bounds(), decoded, decoded.Bounds(), draw.Src, nil)
+	return ui.NewBitmap(preview), nil
 }
 
 func (a *nativeApp) reloadNotebooks() {

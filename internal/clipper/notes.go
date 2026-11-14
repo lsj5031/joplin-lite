@@ -61,8 +61,10 @@ func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request) {
 // createNoteRequest is the body for POST /notes; note fields plus optional tag_ids.
 type createNoteRequest struct {
 	models.Note
-	TagIDs   []string `json:"tag_ids"`
-	BodyHTML string   `json:"body_html"`
+	TagIDs       []string `json:"tag_ids"`
+	BodyHTML     string   `json:"body_html"`
+	ImageDataURL string   `json:"image_data_url"`
+	BaseURL      string   `json:"base_url"`
 }
 
 func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
@@ -111,14 +113,18 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Handle body_html conversion
+	// Handle body_html conversion. The web clipper sends page images as URLs;
+	// fetch them now so the note keeps the bytes when the URL is gated later.
 	if req.BodyHTML != "" {
 		md, err := htmlToMarkdown(req.BodyHTML)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "HTML conversion failed: "+err.Error())
 			return
 		}
-		note.Body = md
+		note.Body = inlineClippedImages(r.Context(), md, firstNonEmpty(req.BaseURL, note.SourceURL))
+	}
+	if req.ImageDataURL != "" {
+		note.Body = prependDataImage(note.Body, req.ImageDataURL)
 	}
 
 	if err := s.db.CreateNote(note); err != nil {
@@ -192,7 +198,13 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "HTML conversion failed: "+err.Error())
 				return
 			}
-			existing.Body = md
+			baseURL, _ := updates["base_url"].(string)
+			existing.Body = inlineClippedImages(r.Context(), md, firstNonEmpty(baseURL, existing.SourceURL))
+		}
+	}
+	if v, ok := updates["image_data_url"]; ok {
+		if dataURL, ok := v.(string); ok && dataURL != "" {
+			existing.Body = prependDataImage(existing.Body, dataURL)
 		}
 	}
 	if v, ok := updates["parent_id"]; ok {

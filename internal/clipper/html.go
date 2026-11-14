@@ -14,3 +14,17 @@ func htmlToMarkdown(html string) (string, error) {
 	}
 	return strings.TrimSpace(md), nil
 }
+
+// prependDataImage keeps a clipped image inline. The clipper sends images whose
+// URLs are gated as data URLs; embedding the bytes is the only copy that
+// survives, and a screenshot is the note's first content.
+func prependDataImage(body, dataURL string) string {
+	if !strings.HasPrefix(dataURL, "data:image/") || !strings.Contains(dataURL, ",") {
+		return body
+	}
+	image := "![Clipped image](" + dataURL + ")"
+	if strings.TrimSpace(body) == "" {
+		return image
+	}
+	return image + "\n\n" + body
+}
