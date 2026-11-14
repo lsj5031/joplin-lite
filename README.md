@@ -7,10 +7,10 @@
 Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a single lightweight native app (~120 MB RAM, no Electron or embedded browser) with warm Field Notes paper tones, Liquid Glass surfaces, and a fast, distraction-free Markdown editor.
 
 **[Download v0.1.0-alpha.3](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)** ·
-**[Watch the 25s demo film](docs/promo/joplin-lite-promo.mp4)** ·
+**[Watch the 80s UI walkthrough](docs/promo/joplin-lite-ui-walkthrough.mp4)** ·
 **[Technical & desktop guide](shell/README.md)**
 
-![Reading a note in Joplin Lite](docs/screenshots/native-workspace.png)
+[![Watch the 80-second native UI walkthrough](docs/promo/joplin-lite-ui-walkthrough-poster.png)](docs/promo/joplin-lite-ui-walkthrough.mp4)
 
 > **Alpha note:** Joplin Lite is an independent client used daily on macOS and Windows with encrypted Dropbox libraries. Because it is still in alpha and does not cover every official Joplin feature, **always back up your notes** before connecting an existing library.
 
@@ -164,7 +164,7 @@ What to expect:
 
 ## Build from source
 
-Requires **Go 1.27+** (`go1.27.1` is pinned and fetched automatically via `GOTOOLCHAIN=auto`). No Node.js or frontend build step is needed for the native desktop app.
+Requires **Go 1.27+** (`go1.27.3` is pinned and fetched automatically via `GOTOOLCHAIN=auto`). No Node.js or frontend build step is needed for the native desktop app.
 
 ```sh
 git clone https://github.com/lsj5031/joplin-lite.git

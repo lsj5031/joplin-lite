@@ -8,7 +8,7 @@ calls `service/` directly.
 
 ## Build
 
-Requirements: Go 1.27+ (the module pins `go1.27.1`; `GOTOOLCHAIN=auto` fetches
+Requirements: Go 1.27+ (the module pins `go1.27.3`; `GOTOOLCHAIN=auto` fetches
 it). No frontend toolchain is needed for the app.
 
 ```sh
