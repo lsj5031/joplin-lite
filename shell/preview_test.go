@@ -19,18 +19,25 @@ func longPreviewFixture() string {
 	return b.String()
 }
 
-func TestPreviewOrdinaryParagraphsRemainUnsplit(t *testing.T) {
+func TestPreviewShortAndInlineBodiesUnsplit(t *testing.T) {
 	for i, body := range []string{
 		strings.Repeat("a normal source line\n", 200),
-		strings.Repeat(strings.Repeat("ordinary paragraph text ", 100)+"\n\n", 10),
 		"**" + strings.Repeat("unsplittable text ", 2000) + "end**",
 	} {
 		app := &nativeApp{body: body, md: &markdown.Options{}}
 		app.prepareMarkdownOptions()
 		if len(app.previewChunks) != 0 {
-			t.Fatalf("fixture %d: ordinary paragraphs or an intact inline span were split", i)
+			t.Fatalf("fixture %d: a short body or an intact inline span was split", i)
 		}
 	}
+}
+
+func manyParagraphFixture() string {
+	var b strings.Builder
+	for i := range 600 {
+		fmt.Fprintf(&b, "第%03d段：这是一段中文笔记，包含标点和链接。\n\n", i)
+	}
+	return b.String()
 }
 
 func TestPreviewVirtualizedOpeningScrollingAndReplacement(t *testing.T) {
@@ -69,41 +76,57 @@ func TestPreviewVirtualizedOpeningScrollingAndReplacement(t *testing.T) {
 	if first, _ := app.previewList.Visible(); first != 0 {
 		t.Fatal("returning to a long note did not start at the top")
 	}
+} // comparePreviewFirstScreen asserts that the virtualized preview shows the
+// same first screen as one Markdown view of the whole body.
+func comparePreviewFirstScreen(t *testing.T, body string, dark bool, width, height int) {
+	t.Helper()
+	applyPalette(dark)
+	t.Cleanup(func() { applyPalette(false) })
+
+	app := &nativeApp{body: body, md: &markdown.Options{}, dark: dark}
+	rendered := app.prepareMarkdownOptions()
+	reference := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(designTheme())
+		ui.Scroll(c).Fill().Padding(20, 48, 48, 48).Children(func() {
+			ui.Row(c).FillWidth().Children(func() {
+				ui.Column(c).Grow(1).MaxWidth(700).Children(func() {
+					markdown.View(c, rendered, app.md)
+				})
+			})
+		})
+	}, width, height)
+	actual := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(designTheme())
+		app.previewContent(c)
+	}, width, height)
+	// Scrollbar geometry reflects estimated rather than fully measured content
+	// height; compare the reading area, not the scrollbar.
+	want, got := reference.Image(), actual.Image()
+	for y := 0; y < height; y++ {
+		a, z := want.PixOffset(40, y), want.PixOffset(width-40, y)
+		if !bytes.Equal(want.Pix[a:z], got.Pix[a:z]) {
+			t.Fatalf("reading area differs at y=%d", y)
+		}
+	}
 }
 
 func TestPreviewVirtualizedFirstScreenMatchesWholeDocument(t *testing.T) {
 	registerFonts()
-	for _, dark := range []bool{false, true} {
-		for _, width := range []int{520, 1000} {
-			t.Run(fmt.Sprintf("dark=%v/width=%d", dark, width), func(t *testing.T) {
-				applyPalette(dark)
-				t.Cleanup(func() { applyPalette(false) })
-				app := &nativeApp{body: longPreviewFixture(), md: &markdown.Options{}, dark: dark}
-				body := app.prepareMarkdownOptions()
-				reference := ui.NewTester(func(c *ui.Context) {
-					c.SetTheme(designTheme())
-					ui.Scroll(c).Fill().Padding(20, 48, 48, 48).Children(func() {
-						ui.Row(c).FillWidth().Children(func() {
-							ui.Column(c).Grow(1).MaxWidth(700).Children(func() {
-								markdown.View(c, body, app.md)
-							})
-						})
-					})
-				}, width, 600)
-				actual := ui.NewTester(func(c *ui.Context) {
-					c.SetTheme(designTheme())
-					app.previewContent(c)
-				}, width, 600)
-				// Scrollbar geometry reflects estimated rather than fully measured
-				// content height; compare the reading area, not the scrollbar.
-				want, got := reference.Image(), actual.Image()
-				for y := 0; y < 600; y++ {
-					a, z := want.PixOffset(40, y), want.PixOffset(width-40, y)
-					if !bytes.Equal(want.Pix[a:z], got.Pix[a:z]) {
-						t.Fatalf("reading area differs at y=%d", y)
-					}
-				}
-			})
+	for _, tc := range []struct {
+		name   string
+		body   func() string
+		height int
+	}{
+		{"one-paragraph", longPreviewFixture, 600},
+		// Tall enough to show the seam between the first two chunks.
+		{"many-paragraphs", manyParagraphFixture, 1100},
+	} {
+		for _, dark := range []bool{false, true} {
+			for _, width := range []int{520, 1000} {
+				t.Run(fmt.Sprintf("%s/dark=%v/width=%d", tc.name, dark, width), func(t *testing.T) {
+					comparePreviewFirstScreen(t, tc.body(), dark, width, tc.height)
+				})
+			}
 		}
 	}
 }

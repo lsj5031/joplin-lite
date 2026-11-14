@@ -21,7 +21,11 @@ func (a *nativeApp) previewContent(c *ui.Context) {
 		ui.List(c.Key("preview-pages"), &a.previewList, len(a.previewChunks), func(row int) {
 			ui.Row(c).FillWidth().Children(func() {
 				ui.Column(c).Grow(1).MaxWidth(contentMeasure).Children(func() {
-					a.previewMarkdown(c, a.previewChunks[row], a.previewChunkStarts[row])
+					var top float32
+					if row < len(a.previewChunkTops) {
+						top = a.previewChunkTops[row]
+					}
+					a.previewMarkdown(c, a.previewChunks[row], a.previewChunkStarts[row], top)
 				})
 			})
 		}).Fill().Gap(0).Padding(20, a.contentPadding(), 48, a.contentPadding()).Label("Note preview")
@@ -34,13 +38,13 @@ func (a *nativeApp) previewContent(c *ui.Context) {
 					ui.Text(c, "This note is empty.").FontSize(sizeBody).TextColor(inkSoft)
 					return
 				}
-				a.previewMarkdown(c, body, 0)
+				a.previewMarkdown(c, body, 0, 0)
 			})
 		})
 	})
 }
 
-func (a *nativeApp) previewMarkdown(c *ui.Context, source string, start int) {
+func (a *nativeApp) previewMarkdown(c *ui.Context, source string, start int, top float32) {
 	a.md.OnTask = nil
 	if a.note != nil && a.note.EncryptionApplied == 0 {
 		id, raw, preview := a.note.ID, a.previewRaw, a.previewBody
@@ -48,7 +52,12 @@ func (a *nativeApp) previewMarkdown(c *ui.Context, source string, start int) {
 			a.setPreviewTask(id, raw, preview, start+offset, checked)
 		}
 	}
-	markdown.View(c, source, a.md)
+	view := markdown.View(c, source, a.md)
+	if top > 0 {
+		// A chunk in its own view loses the spacing its first block gets
+		// from following the previous chunk's last block.
+		view.Margin(top, 0, 0, 0)
+	}
 }
 
 // The preview only inserts spaces before line endings. Map the clicked marker

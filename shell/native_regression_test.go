@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"github.com/lsj5031/joplin-lite/internal/models"
 )
@@ -426,5 +427,40 @@ func TestPreviewChunksShortBodyUnsplit(t *testing.T) {
 	src := formatMarkdownPreviewWithDoc(doc, "short\nbody")
 	if chunks := previewChunks(doc, src, previewChunkRunes); chunks != nil {
 		t.Fatalf("short body was split: %q", chunks)
+	}
+}
+
+// TestPreviewChunksManyParagraphs covers a long note of ordinary paragraphs,
+// which has no paragraph long enough to split: chunks start between blocks and
+// carry the block spacing the seam would otherwise lose.
+func TestPreviewChunksManyParagraphs(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 700; i++ {
+		fmt.Fprintf(&b, "第%03d段：这是一段中文笔记，包含标点和链接。\n\n", i)
+	}
+	app := &nativeApp{body: b.String(), md: &markdown.Options{}}
+	app.prepareMarkdownOptions()
+	if len(app.previewChunks) < 10 {
+		t.Fatalf("a %d-rune body of 700 paragraphs made %d chunks", len([]rune(app.body)), len(app.previewChunks))
+	}
+	if strings.Join(app.previewChunks, "") != app.previewBody {
+		t.Fatal("chunks do not rejoin to the formatted preview")
+	}
+	if len(app.previewChunkTops) != len(app.previewChunks) {
+		t.Fatalf("chunk tops = %d, chunks = %d", len(app.previewChunkTops), len(app.previewChunks))
+	}
+	for i, chunk := range app.previewChunks {
+		if n := len([]rune(chunk)); n > previewChunkRunes*2 {
+			t.Fatalf("chunk %d of %d runes is much larger than the %d-rune budget", i, n, previewChunkRunes)
+		}
+	}
+	if app.previewChunkTops[1] <= 0 {
+		t.Fatal("a block-boundary chunk lost its seam spacing")
+	}
+	for i := 1; i < len(app.previewChunks); i++ {
+		start := app.previewChunkStarts[i]
+		if start <= 0 || !strings.HasPrefix(app.previewBody[start:], "第") {
+			t.Fatalf("chunk %d does not start at a paragraph boundary", i)
+		}
 	}
 }

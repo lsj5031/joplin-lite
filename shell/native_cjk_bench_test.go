@@ -23,6 +23,19 @@ func cjkBenchBody(runes int) string {
 	return string([]rune(b.String())[:runes])
 }
 
+// cjkBenchParagraphs writes the same text as cjkBenchBody, but as many short
+// paragraphs: the shape of a real long note, which has no giant paragraph to
+// split.
+func cjkBenchParagraphs(runes int) string {
+	var b strings.Builder
+	b.Grow(runes * 3)
+	for b.Len() < runes*3 {
+		b.WriteString(cjkBenchUnit)
+		b.WriteString("\n\n")
+	}
+	return string([]rune(b.String())[:runes])
+}
+
 func seedCJKBenchVault(b *testing.B) *store.DB {
 	b.Helper()
 	db, err := store.Open(filepath.Join(b.TempDir(), "vault"))
@@ -55,6 +68,7 @@ func seedCJKBenchVault(b *testing.B) *store.DB {
 		{"50k", 50000},
 	} {
 		body := cjkBenchBody(size.runes)
+		many := cjkBenchParagraphs(size.runes)
 		for i := 0; i < 2; i++ {
 			n := &models.Note{
 				ID:             fmt.Sprintf("cjk-%s-%d", size.name, i),
@@ -62,6 +76,17 @@ func seedCJKBenchVault(b *testing.B) *store.DB {
 				Body:           body,
 				CreatedTime:    int64(5000 + size.runes + i),
 				UpdatedTime:    int64(5000 + size.runes + i),
+				MarkupLanguage: 1,
+			}
+			if err := db.UpsertNote(n); err != nil {
+				b.Fatalf("UpsertNote: %v", err)
+			}
+			n = &models.Note{
+				ID:             fmt.Sprintf("cjk-many-%s-%d", size.name, i),
+				Title:          fmt.Sprintf("长笔记 %s：多段落中文渲染测试 %d", size.name, i),
+				Body:           many,
+				CreatedTime:    int64(9000 + size.runes + i),
+				UpdatedTime:    int64(9000 + size.runes + i),
 				MarkupLanguage: 1,
 			}
 			if err := db.UpsertNote(n); err != nil {
@@ -116,6 +141,7 @@ func BenchmarkNativeLongCJK(b *testing.B) {
 		{"Show3K", []string{"cjk-3k-0", "cjk-3k-1"}},
 		{"Show12K", []string{"cjk-12k-0", "cjk-12k-1"}},
 		{"Show50K", []string{"cjk-50k-0", "cjk-50k-1"}},
+		{"ShowMany50K", []string{"cjk-many-50k-0", "cjk-many-50k-1"}},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			app.query = ""

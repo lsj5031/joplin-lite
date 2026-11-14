@@ -214,6 +214,7 @@ type nativeApp struct {
 	previewBody         string
 	previewChunks       []string
 	previewChunkStarts  []int
+	previewChunkTops    []float32
 	previewPreserveBody string
 	previewList         ui.ListState
 	previewReady        bool
@@ -741,6 +742,7 @@ func (a *nativeApp) showNote(id string) {
 	a.previewBody = ""
 	a.previewChunks = nil
 	a.previewChunkStarts = nil
+	a.previewChunkTops = nil
 	a.previewPreserveBody = ""
 	a.previewReady = false
 	a.wordCountBody = ""
@@ -2260,37 +2262,119 @@ const previewChunkRunes = 1000
 const previewVirtualizeRunes = 12000
 const previewEstimatedRowHeight = 500
 
-// previewChunks splits src inside paragraphs longer than limit runes, at line
-// ends that no inline span crosses. It returns nil when no paragraph is long
-// enough. Other blocks are never split: their layouts are small, and cutting
-// between blocks would drop the spacing a block gets from following another.
-func previewChunks(doc *parser.Document, src string, limit int) []string {
-	return previewChunksAbove(doc, src, limit, limit)
+// previewChunk is one Markdown view of a virtualized preview: its source, the
+// byte where it starts in the full preview, and the block spacing in DIPs its
+// first block loses by starting a new view.
+type previewChunk struct {
+	src   string
+	start int
+	top   float32
 }
 
-func previewChunksAbove(doc *parser.Document, src string, limit, threshold int) []string {
+// previewBlock names a top-level block for the block spacing rule.
+type previewBlock struct {
+	kind  parser.Kind
+	level int
+}
+
+// previewChunks virtualizes src for a test, without seam spacing.
+func previewChunks(doc *parser.Document, src string, limit int) []string {
+	pieces := previewChunksAbove(doc, src, limit, limit, nil)
+	if len(pieces) == 0 {
+		return nil
+	}
+	chunks := make([]string, len(pieces))
+	for i, piece := range pieces {
+		chunks[i] = piece.src
+	}
+	return chunks
+}
+
+// previewChunksAbove virtualizes a body longer than threshold runes into
+// pieces of about limit runes. It cuts between top-level blocks, so every
+// block keeps its layout, and splits a paragraph longer than threshold at line
+// ends that no inline span crosses. Each piece after the first carries the
+// block spacing its first block would have had inside one view; th resolves it
+// when non-nil.
+func previewChunksAbove(doc *parser.Document, src string, limit, threshold int, th *markdown.Theme) []previewChunk {
 	if limit <= 0 || utf8.RuneCountInString(src) <= threshold {
 		return nil
 	}
 	doc.Set(src)
-	var cuts []int
+	type cut struct {
+		at  int
+		top float32
+	}
+	var cuts []cut
+	var runes int
+	var prev previewBlock
+	hasPrev := false
 	for i := 1; i < doc.Len(); i = doc.Block(i).Next {
 		b := doc.Block(i)
-		if b.Kind != parser.Paragraph || utf8.RuneCountInString(src[b.Start:b.End]) <= threshold {
+		// The view skips footnote definitions and alert markers; leaving them
+		// with an adjacent chunk keeps a seam between blocks that render.
+		if b.Kind == parser.FootnoteDefinition || (b.Kind == parser.Paragraph && doc.LineCount(i) == 0) {
 			continue
 		}
-		cuts = append(cuts, paragraphCuts(doc, src, i, limit)...)
+		cur := previewBlock{kind: b.Kind, level: b.Level}
+		blockRunes := utf8.RuneCountInString(src[b.Start:b.End])
+		if b.Kind == parser.Paragraph && blockRunes > threshold {
+			if runes > 0 {
+				cuts = append(cuts, cut{at: b.Start, top: blockTop(th, prev, hasPrev, cur)})
+			}
+			last := b.Start
+			for _, pos := range paragraphCuts(doc, src, i, limit) {
+				cuts = append(cuts, cut{at: pos})
+				last = pos
+			}
+			runes = utf8.RuneCountInString(src[last:b.End])
+			prev, hasPrev = cur, true
+			continue
+		}
+		if hasPrev && runes > 0 && runes+blockRunes > limit {
+			cuts = append(cuts, cut{at: b.Start, top: blockTop(th, prev, hasPrev, cur)})
+			runes = blockRunes
+		} else {
+			runes += blockRunes
+		}
+		prev, hasPrev = cur, true
 	}
 	if len(cuts) == 0 {
 		return nil
 	}
-	chunks := make([]string, 0, len(cuts)+1)
-	prev := 0
-	for _, pos := range cuts {
-		chunks = append(chunks, src[prev:pos])
-		prev = pos
+	pieces := make([]previewChunk, 0, len(cuts)+1)
+	at := 0
+	var top float32
+	for _, c := range cuts {
+		if c.at <= at || c.at >= len(src) {
+			continue
+		}
+		pieces = append(pieces, previewChunk{src: src[at:c.at], start: at, top: top})
+		at, top = c.at, c.top
 	}
-	return append(chunks, src[prev:])
+	if at < len(src) {
+		pieces = append(pieces, previewChunk{src: src[at:], start: at, top: top})
+	}
+	if len(pieces) == 0 {
+		return nil
+	}
+	return pieces
+}
+
+// blockTop returns the top spacing in DIPs markdown.View gives cur after prev:
+// the block spacing, a heading's Bottom after it, and its Top before it.
+func blockTop(th *markdown.Theme, prev previewBlock, hasPrev bool, cur previewBlock) float32 {
+	if th == nil || !hasPrev {
+		return 0
+	}
+	top := th.BlockSpacing
+	if prev.kind == parser.Heading && prev.level >= 1 && prev.level <= 6 {
+		top = th.Headings[prev.level-1].Bottom
+	}
+	if cur.kind == parser.Heading && cur.level >= 1 && cur.level <= 6 {
+		top = max(top, th.Headings[cur.level-1].Top)
+	}
+	return top * th.FontSize
 }
 
 // paragraphCuts returns the offsets in src where the block's paragraph can
@@ -2399,13 +2483,14 @@ func (a *nativeApp) prepareMarkdownOptions() string {
 			a.previewDoc = parser.New(parser.Default)
 		}
 		a.previewBody = formatMarkdownPreviewWithDoc(a.previewDoc, a.body)
+		pieces := previewChunksAbove(a.previewDoc, a.previewBody, previewChunkRunes, previewVirtualizeRunes, a.mdTheme)
 		a.previewChunks = nil
-		a.previewChunks = previewChunksAbove(a.previewDoc, a.previewBody, previewChunkRunes, previewVirtualizeRunes)
 		a.previewChunkStarts = a.previewChunkStarts[:0]
-		start := 0
-		for _, chunk := range a.previewChunks {
-			a.previewChunkStarts = append(a.previewChunkStarts, start)
-			start += len(chunk)
+		a.previewChunkTops = a.previewChunkTops[:0]
+		for _, piece := range pieces {
+			a.previewChunks = append(a.previewChunks, piece.src)
+			a.previewChunkStarts = append(a.previewChunkStarts, piece.start)
+			a.previewChunkTops = append(a.previewChunkTops, piece.top)
 		}
 		if !a.previewReady || a.previewPreserveBody != a.body {
 			a.previewList = ui.ListState{EstimatedRowHeight: previewEstimatedRowHeight}
