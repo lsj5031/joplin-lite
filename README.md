@@ -7,10 +7,10 @@
 Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a single lightweight native app (~120 MB RAM, no Electron or embedded browser) with warm Field Notes paper tones, Liquid Glass surfaces, and a fast, distraction-free Markdown editor.
 
 **[Download v0.1.0-alpha.3](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)** ·
-**[Watch the 80s UI walkthrough](docs/promo/joplin-lite-ui-walkthrough.mp4)** ·
+**[Watch the 76s UI walkthrough](docs/promo/joplin-lite-ui-walkthrough.mp4)** ·
 **[Technical & desktop guide](shell/README.md)**
 
-[![Watch the 80-second native UI walkthrough](docs/promo/joplin-lite-ui-walkthrough-poster.png)](docs/promo/joplin-lite-ui-walkthrough.mp4)
+[![Watch the 76-second native UI walkthrough](docs/promo/joplin-lite-ui-walkthrough-poster.png)](docs/promo/joplin-lite-ui-walkthrough.mp4)
 
 > **Alpha note:** Joplin Lite is an independent client used daily on macOS and Windows with encrypted Dropbox libraries. Because it is still in alpha and does not cover every official Joplin feature, **always back up your notes** before connecting an existing library.
 

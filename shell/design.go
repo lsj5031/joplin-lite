@@ -65,7 +65,7 @@ func applyPalette(dark bool) {
 	darkPalette = dark
 	if dark {
 		paper = ui.Hex("#20271F")
-		paperSunken = ui.Hex("#1A2119")
+		paperSunken = ui.Hex("#151B14")
 		paperRaised = ui.Hex("#20271F")
 		inkNavy = ui.Hex("#E8ECDF")
 		inkSoft = ui.Hex("#AFBAA5")
@@ -160,20 +160,23 @@ func scaledText(c *ui.Context, size float32) float32 {
 
 // Two panes by default; notebook management opens on demand.
 const (
-	railWidth     = float32(260)
-	railMinWidth  = float32(200)
-	railMaxWidth  = float32(380)
-	listWidth     = float32(300)
-	listMinWidth  = float32(240)
-	listMaxWidth  = float32(460)
-	topBarHeight  = float32(56)
-	narrowWidth   = float32(1024)
-	rowHeight     = float32(36)
-	cardGap       = float32(8)
-	radiusControl = float32(6)
-	radiusSmall   = float32(4)
-	radiusPanel   = float32(9)
-	radiusCard    = float32(11)
+	railWidth    = float32(260)
+	railMinWidth = float32(200)
+	railMaxWidth = float32(380)
+	listWidth    = float32(300)
+	listMinWidth = float32(240)
+	listMaxWidth = float32(460)
+	topBarHeight = float32(56)
+	narrowWidth  = float32(1024)
+	// Below this much editor content, opening Ask temporarily hides the rail
+	// rather than squeezing the note into an unreadable column.
+	minEditorBesideAsk = float32(480)
+	rowHeight          = float32(36)
+	cardGap            = float32(8)
+	radiusControl      = float32(6)
+	radiusSmall        = float32(4)
+	radiusPanel        = float32(9)
+	radiusCard         = float32(11)
 )
 
 // Motion runs only in response to interaction and respects reduced motion.
@@ -559,15 +562,19 @@ func elevateSurface(p ui.Element) ui.Element {
 func chosenPill(row ui.Element, chosen, hovered bool) ui.Element {
 	if chosen {
 		tint := violet.Alpha(0.24)
+		border := violet.Alpha(0.38)
 		if darkPalette {
-			tint = violet.Alpha(0.28)
+			// The darker binding has more room than the light palette; use it
+			// so the chosen row does not disappear into the wash.
+			tint = violet.Alpha(0.34)
+			border = violet.Alpha(0.62)
 		}
 		row.Background(tint).
 			Material(glass.Glass{
 				Style: glass.Regular,
 				Tint:  tint,
 			}).
-			Border(1, violet.Alpha(0.38))
+			Border(1, border)
 		return row
 	}
 	base := ui.Color{}

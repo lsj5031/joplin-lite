@@ -276,10 +276,19 @@ func noteExcerpt(body string) string {
 	if len(body) <= maxRunes { // ASCII and short: bytes == runes, nothing to cut
 		return body
 	}
-	r := []rune(body)
-	if len(r) > maxRunes {
-		// Keep the whole excerpt inside the budget: 139 runes + ellipsis.
-		return string(r[:maxRunes-1]) + "…"
+	// Walk only to the cut instead of materializing []rune for the whole
+	// prefix. A 320-character CJK prefix is almost a kilobyte of UTF-8, and
+	// this runs once per row on every page (the benchmark tracks it).
+	count, cut := 0, 0
+	for i := range body {
+		if count == maxRunes {
+			// Keep 139 runes plus the ellipsis, matching the old slice path.
+			return body[:cut] + "…"
+		}
+		if count == maxRunes-1 {
+			cut = i
+		}
+		count++
 	}
 	return body
 }

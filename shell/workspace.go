@@ -188,6 +188,20 @@ func (a *nativeApp) view(c *ui.Context) {
 			a.ask.width = min(max(a.ask.width, askMinWidth), min(askMaxWidth, askLimit))
 		}
 	}
+	// Ask is a reading companion, not a reason to squeeze the note below a
+	// readable measure. If the rail is the pressure, hide it for the duration
+	// of Ask and put it back when Ask closes. The extra 360 is the editor
+	// floor already reserved by askLimit above.
+	if a.ask.open && a.railOpen && !a.narrow &&
+		360+(askLimit-a.ask.width) < minEditorBesideAsk {
+		a.railOpen = false
+		a.askRailCollapsed = true
+	} else if !a.ask.open && a.askRailCollapsed {
+		if !a.narrow {
+			a.railOpen = true
+		}
+		a.askRailCollapsed = false
+	}
 	// The workspace fills the window height cleanly so the floating editor card
 	// reaches the bottom edge without a full-width footer bar cutting across.
 	body := height
@@ -1304,13 +1318,18 @@ func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string,
 
 		ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(8).Children(func() {
 			name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
+			timeColor := inkSoft
 			if current || bulk {
 				name.FontWeight(600).TextColor(inkNavy)
+				// The chosen pill is tinted; secondary ink can fall below the
+				// small-text contrast floor on it, so the timestamp follows the
+				// row's primary ink instead.
+				timeColor = inkNavy
 			} else {
 				name.TextColor(inkNavy.Alpha(0.86))
 			}
 			ui.Text(c, noteTime(n.UpdatedTime)).Font(fontMono).FontFeatures("tnum").
-				FontSize(sizeMonoSm).TextColor(inkSoft).Shrink(0)
+				FontSize(sizeMonoSm).TextColor(timeColor).Shrink(0)
 		})
 	})
 }

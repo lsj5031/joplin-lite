@@ -10,7 +10,7 @@ the theme wash; the browser retains a continuous paper reading surface.
 | Role | Light | Dark |
 | --- | --- | --- |
 | Paper / editor | `#F9FAF5` | `#20271F` |
-| Binding / navigation | `#E9EEE3` | `#1A2119` |
+| Binding / navigation | `#E9EEE3` | `#151B14` |
 | Ink | `#344238` | `#E8ECDF` |
 | Secondary ink | `#606F5A` | `#AFBAA5` |
 | Hairline | `#DCE3D6` | `#364130` |
@@ -88,7 +88,9 @@ shader glass. Native corner rendering can differ with the platform renderer.
 Notebooks and tags open on demand. Native desktop exposes a temporary inline notebook panel
 so dragging notes remains possible; the browser uses a dialog. Narrow native windows and
 mobile browser widths show the list or editor with an explicit Back action and a notebook
-drawer. Management, search, and recovery controls must remain reachable at compact heights.
+drawer. When the rail, list and Ask are all open, the rail yields first: if the editor would
+fall below 480 DIP, opening Ask temporarily hides the rail and restores it when Ask closes.
+Management, search, and recovery controls must remain reachable at compact heights.
 
 ### Material roles
 

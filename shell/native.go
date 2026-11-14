@@ -172,6 +172,9 @@ type nativeApp struct {
 	railOpen     bool
 	railW        float32
 	listW        float32
+	// askRailCollapsed records that opening Ask temporarily hid the rail;
+	// closing Ask restores it.
+	askRailCollapsed bool
 
 	// Inline double-click / context-menu rename state for sidebar rows.
 	inlineRenameKind  string
@@ -623,7 +626,12 @@ func (a *nativeApp) reloadNotes() {
 	} else if idx > 0 {
 		a.list.ScrollIntoView(idx)
 	}
-	a.loadNote()
+	// A search that matches nothing should not discard the note the reader
+	// was already reading. The empty list still explains the query; only an
+	// explicit selection or a new note replaces the editor.
+	if !(idx < 0 && len(a.notes) == 0 && a.query != "" && a.note != nil) {
+		a.loadNote()
+	}
 	a.metrics.observeAttrs(spanReloadNotes, start,
 		slog.Int("rows", len(a.notes)),
 		slog.Int("pages", pages),

@@ -136,6 +136,25 @@ func TestListNoteSummariesKeyset(t *testing.T) {
 	}
 }
 
+func TestNoteExcerptLongCJK(t *testing.T) {
+	exact := strings.Repeat("中", 140)
+	if got := noteExcerpt(exact); got != exact {
+		t.Fatalf("exactly %d CJK runes should not be truncated", len([]rune(exact)))
+	}
+
+	long := strings.Repeat("中", 150)
+	want := strings.Repeat("中", 139) + "…"
+	if got := noteExcerpt(long); got != want {
+		t.Fatalf("noteExcerpt(150 CJK runes) = %q, want 139 runes plus ellipsis", got)
+	}
+
+	mixed := strings.Repeat("中文🙂", 50)
+	got := noteExcerpt(mixed)
+	if !strings.HasSuffix(got, "…") || len([]rune(got)) != 140 {
+		t.Fatalf("mixed CJK excerpt = %q (%d runes), want 139 plus ellipsis", got, len([]rune(got)))
+	}
+}
+
 func TestNoteExcerptStripsFirstLine(t *testing.T) {
 	cases := map[string]string{
 		"# Title\n\nbody":          "Title",

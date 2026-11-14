@@ -298,6 +298,39 @@ func TestAskWidthAndVisibleConnectionLabels(t *testing.T) {
 	}
 }
 
+func TestAskTemporarilyCollapsesRail(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	note := addTestNote(t, service.New(db), "", "Ask layout", "The editor keeps its measure.")
+	app.showNote(note.ID)
+	app.railOpen = true
+	tt := ui.NewTester(app.view, 1440, 900)
+	tt.Frame()
+	if app.narrow || !app.railOpen {
+		t.Fatalf("fixture layout: narrow=%v rail=%v", app.narrow, app.railOpen)
+	}
+
+	app.ask.open = true
+	tt.Frame()
+	if app.railOpen || !app.askRailCollapsed {
+		t.Fatalf("Ask did not temporarily yield the rail at 1440: rail=%v collapsed=%v", app.railOpen, app.askRailCollapsed)
+	}
+
+	app.ask.open = false
+	tt.Frame()
+	if !app.railOpen || app.askRailCollapsed {
+		t.Fatalf("closing Ask did not restore the rail: rail=%v collapsed=%v", app.railOpen, app.askRailCollapsed)
+	}
+
+	// A wide window has room for all four columns; do not hide the rail.
+	tt.SetSize(1920, 1080)
+	tt.Frame()
+	app.ask.open = true
+	tt.Frame()
+	if !app.railOpen || app.askRailCollapsed {
+		t.Fatalf("wide layout lost the rail: rail=%v collapsed=%v", app.railOpen, app.askRailCollapsed)
+	}
+}
+
 func TestAskNavigationPreservesHistoryAndRestoresScope(t *testing.T) {
 	if testing.Short() {
 		t.Skip("embedded runtime")

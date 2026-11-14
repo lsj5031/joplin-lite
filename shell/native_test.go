@@ -1714,6 +1714,43 @@ func TestNativeSearchKeepsTheKeyboard(t *testing.T) {
 	}
 }
 
+func TestNativeEmptySearchKeepsOpenNote(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	note := addTestNote(t, svc, "", "Still reading", "The note stays visible")
+	app.reloadNotes()
+	app.showNote(note.ID)
+	tt := ui.NewTester(app.view, 1200, 800)
+	tt.Frame()
+
+	app.query = "no-such-note"
+	app.reloadNotes()
+	tt.Frame()
+	if len(app.notes) != 0 {
+		t.Fatalf("expected no matches, got %d rows", len(app.notes))
+	}
+	if app.note == nil || app.note.ID != note.ID {
+		t.Fatalf("empty search discarded the open note: %#v", app.note)
+	}
+	if app.selectedNote != -1 {
+		t.Fatalf("empty search left selectedNote=%d, want -1", app.selectedNote)
+	}
+	if !tt.HasText("No notes match “no-such-note”") {
+		t.Fatalf("missing empty-search explainer; texts = %v", tt.Texts())
+	}
+	if !tt.HasText("The note stays visible") {
+		t.Fatal("the reading pane did not keep the open note")
+	}
+
+	// Clearing the query restores the row and keeps the same note open.
+	app.query = ""
+	app.reloadNotes()
+	tt.Frame()
+	if app.note == nil || app.note.ID != note.ID || app.selectedNote < 0 {
+		t.Fatalf("clearing search did not restore the note and row: note=%#v selected=%d", app.note, app.selectedNote)
+	}
+}
+
 func TestNativeResourcePreview(t *testing.T) {
 	registerFonts()
 	app, db := openNativeTestApp(t)

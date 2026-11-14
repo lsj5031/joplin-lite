@@ -46,6 +46,39 @@ func BenchmarkListNotesFull(b *testing.B) {
 	}
 }
 
+// BenchmarkListNoteSummariesLongCJK measures the list query against a library
+// where every note is a long CJK note. The summary path must still fetch only
+// the 320-character prefix and reduce it to a single-line excerpt.
+func BenchmarkListNoteSummariesLongCJK(b *testing.B) {
+	db, err := Open(b.TempDir())
+	if err != nil {
+		b.Fatalf("Open: %v", err)
+	}
+	b.Cleanup(func() { db.Close() })
+	body := strings.Repeat("这是一段很长的中文笔记，包含标点和链接。", 160) + "\n\n第二段。"
+	for i := 0; i < 1000; i++ {
+		n := &models.Note{
+			ID:             fmt.Sprintf("bench-cjk-%04d", i),
+			Title:          fmt.Sprintf("长笔记 %04d：关于周末散步、阅读和写作的详细记录", i),
+			Body:           body,
+			CreatedTime:    int64(i),
+			UpdatedTime:    int64(1000 + i),
+			MarkupLanguage: 1,
+		}
+		if err := db.UpsertNote(n); err != nil {
+			b.Fatalf("UpsertNote: %v", err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		notes, _, _, err := db.ListNoteSummaries(NoteQuery{}, 50, "")
+		if err != nil || len(notes) != 50 {
+			b.Fatalf("ListNoteSummaries: %d notes, %v", len(notes), err)
+		}
+	}
+}
+
 func BenchmarkListNoteSummaries(b *testing.B) {
 	db := benchDB(b)
 	b.ReportAllocs()

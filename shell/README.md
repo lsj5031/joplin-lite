@@ -245,10 +245,13 @@ Markdown task checkboxes (`- [ ]` / `- [x]`) also work in the rendered preview:
 click a box or focus it and press Space. Changes use normal autosave, preserve
 the original Markdown outside the marker, and keep long-note scroll position.
 
-The note list is multi-select (Cmd/Ctrl-click adds a row, Shift-click a range,
-Cmd/Ctrl+A all): a bar above the list shows the count and moves every chosen
-note to a notebook or deletes them after confirmation. Rows carry the updated
-time in mono at the right and a hairline rule underneath; a to-do gets a real
+An active search with no matches keeps the open note in the reading pane; the
+list shows the empty result set until the query changes or the user chooses
+another note. The note list is multi-select (Cmd/Ctrl-click adds a row,
+Shift-click a range, Cmd/Ctrl+A all): a bar above the list shows the count and
+moves every chosen note to a notebook or deletes them after confirmation.
+Rows carry the updated time in mono at the right and a hairline rule
+underneath; a to-do gets a real
 checkbox that completes the task without opening the note. The choice is pruned
 whenever the rows change, so it never counts a hidden note; pending edits to a
 note that is being deleted are dropped instead of written back.
