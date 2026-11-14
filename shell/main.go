@@ -48,9 +48,13 @@ func main() {
 
 	// Joplin's external links are joplin://x-callback-url/openNote?id=…, which
 	// other apps paste next to the note they came from. The bundle declares the
-	// scheme (shell/bundle.sh) and this makes Joplin Lite its handler. Windows
-	// packages stay registry-free by design, so there the scheme is not claimed.
-	if runtime.GOOS == "darwin" {
+	// scheme on macOS (shell/bundle.sh) and this makes Joplin Lite its handler.
+	// On Windows RegisterURLScheme writes a per-user HKCU association, on Linux
+	// a hidden desktop entry, each on every start: no installer or admin right,
+	// and both follow the executable when it moves. Uninstalling the app leaves
+	// the registration behind; the OS Default Apps page (or UnregisterURLScheme)
+	// drops it.
+	if runtime.GOOS != "js" {
 		if err := mygo.App.RegisterURLScheme("joplin"); err != nil {
 			slog.Warn("cannot register joplin:// links", "error", err)
 		}
