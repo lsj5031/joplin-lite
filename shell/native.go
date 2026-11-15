@@ -197,6 +197,9 @@ type nativeApp struct {
 	paletteIndex int
 	paletteFocus bool
 
+	// shortcutsOpen is the keyboard reference dialog (F1 or Cmd/Ctrl+/).
+	shortcutsOpen bool
+
 	// surfaces carries the entrance state of the menus and dialogs, so a panel
 	// animates in once per open and never at rest.
 	surfaces surfaceMotions
@@ -2697,7 +2700,7 @@ func (a *nativeApp) modalOpen() bool {
 	return a.confirmDelete || a.confirmBulkDelete || a.confirmDeleteNotebook ||
 		a.confirmDeleteTag || a.notebookBlocked || a.notebookOpen || a.tagOpen ||
 		a.settingsOpen || a.ask.settingsOpen || a.savedOpen || a.savedDelete != "" ||
-		a.resolveConflict || a.paletteOpen || a.confirmImport
+		a.resolveConflict || a.paletteOpen || a.shortcutsOpen || a.confirmImport
 }
 
 func (a *nativeApp) menuAction(fn func()) func(*mygo.MenuItem, *mygo.Window) {
@@ -2805,6 +2808,12 @@ func (a *nativeApp) appMenu() *mygo.Menu {
 			},
 		},
 		&mygo.MenuItem{Role: mygo.RoleWindowMenu},
+		&mygo.MenuItem{
+			Label: "Help",
+			Submenu: []*mygo.MenuItem{
+				{Label: "Keyboard Shortcuts", Accelerator: "CmdOrCtrl+/", Click: do(a.openShortcuts)},
+			},
+		},
 	)
 	return mygo.NewMenu(items)
 }

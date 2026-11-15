@@ -45,4 +45,6 @@ var (
 	iconCheck = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.25 8.25 6.5 11.5 12.75 4.75"/></svg>`))
 
 	iconAlert = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M7.13 2.75a1 1 0 0 1 1.74 0l5.18 9a1 1 0 0 1-.87 1.5H2.82a1 1 0 0 1-.87-1.5z"/><line x1="8" y1="6.5" x2="8" y2="9.25"/><circle cx="8" cy="11.35" r="0.6" fill="currentColor"/></svg>`))
+
+	iconHelp = ui.MustParseSVG([]byte(`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.75"/><path d="M6.3 6.1a1.75 1.75 0 1 1 2.45 1.6c-.45.2-.75.6-.75 1.1v.3"/><circle cx="8" cy="11.3" r="0.65" fill="currentColor"/></svg>`))
 )

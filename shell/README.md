@@ -291,13 +291,16 @@ when the encryption card is shown.
 Dropbox and S3 targets still come from
 the config file and are kept (shown read-only) by the dialog.
 
-Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+K (or Cmd/Ctrl+F) search, Cmd/Ctrl+P
-command and note palette, Cmd/Ctrl+\ toggle notebooks rail, Cmd/Ctrl+, settings,
-Cmd/Ctrl+S save now, Cmd/Ctrl+E edit/preview, F2 (or Return on macOS) inline
-rename, and back/forward: Alt+Left/Right, or Cmd+[ / Cmd+]
-on macOS, where the focused editor keeps Alt and an arrow for word movement.
-Edits are flushed
-when switching notes, leaving the editor and closing the window.
+Shortcuts: Cmd/Ctrl+N new note, Cmd/Ctrl+Shift+N new notebook, Cmd/Ctrl+Shift+T
+new tag, Cmd/Ctrl+K (or Cmd/Ctrl+F) search, Cmd/Ctrl+P command and note palette,
+Cmd/Ctrl+\ toggle notebooks rail, Cmd/Ctrl+, settings, Cmd/Ctrl+S save now,
+Cmd/Ctrl+E edit/preview, Cmd/Ctrl+Shift+D mark as to-do, Cmd/Ctrl+Shift+Backspace
+delete (it yields the key to the editor while typing and always asks first),
+Cmd/Ctrl+R sync now, Cmd/Ctrl+Shift+A Ask, and Cmd/Ctrl+/ or F1 for the full
+platform-labeled reference. Inline rename is F2 (or Return on macOS), and
+back/forward is Alt+Left/Right, or Cmd+[ / Cmd+] on macOS, where the focused
+editor keeps Alt and an arrow for word movement. Edits are flushed when
+switching notes, leaving the editor and closing the window.
 
 Measured as one process at **92–101 MB** working set on windows/amd64
 depending on window visibility and GC timing (94,668 KB on the final sample)
@@ -312,8 +315,16 @@ save settings through the real view.
 
 `CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureScreens ./` renders every
 screen — panes, filters, menus, dialogs, the narrow drawer and the sync/progress
-states — through the same view and writes 36 PNGs for design review against
+states — through the same view and writes 41 PNGs for design review against
 `DESIGN.md`; it is skipped without `CAPTURE_DIR`.
+
+`RENDER_DIR=../tmp/render CGO_ENABLED=0 go test -run 'TestRenderScreens|TestRenderFilm' ./`
+draws the workspace through MyGO's render plugin instead of the tester: two 2x
+stills (light and dark) and a 1.2 s H.264 film with an animated Field Notes
+caption, written to `RENDER_DIR`. The CPU renderer keeps the stills repeatable;
+the film uses the platform's media encoder, or GStreamer on Linux, and the test
+skips where no H.264 encoder is available. Both are opt-in and skipped without
+`RENDER_DIR`.
 
 `CAPTURE_DIR=../tmp/ui-audit go test -run TestCaptureReadme ./` refreshes the
 public screenshots with synthetic everyday notes in light, dark, writing and

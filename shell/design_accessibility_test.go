@@ -140,7 +140,7 @@ func TestGlassAccessibilityFallbacks(t *testing.T) {
 					t.Fatal("control: normal material must sample backdrop")
 				}
 				tt.SetPreferences(ui.Preferences{ReduceTransparency: true, HighContrast: true})
-				// MyGO v0.9.0 falls back to Background for Clear glass and
+				// MyGO v0.9.1 falls back to Background for Clear glass and
 				// keeps an interactive tint on the opaque surface.
 				want := theme.Background
 				if name == "glass" {

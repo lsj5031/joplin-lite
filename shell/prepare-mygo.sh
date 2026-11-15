@@ -4,10 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
-version="v0.9.0"
+version="v0.9.1"
 patches=(
   "$root/shell/patches/mygo-list-estimate.patch"
-  "$root/shell/patches/mygo-task-checkboxes.patch"
   "$root/shell/patches/mygo-tooltip-modal.patch"
 )
 dest="$root/tmp/mygo-patched"
@@ -42,4 +41,4 @@ git -C "$stage" apply "${patches[@]}"
 printf '%s\n' "$stamp" > "$stage/.joplin-patch"
 mv "$stage" "$dest"
 stage=""
-echo "Prepared MyGO $version with preview row estimates, task checkbox and modal tooltip fixes."
+echo "Prepared MyGO $version with preview row estimates and the modal tooltip fix."

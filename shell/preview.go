@@ -48,7 +48,11 @@ func (a *nativeApp) previewMarkdown(c *ui.Context, source string, start int, top
 	a.md.OnTask = nil
 	if a.note != nil && a.note.EncryptionApplied == 0 {
 		id, raw, preview := a.note.ID, a.previewRaw, a.previewBody
-		a.md.OnTask = func(offset int, checked bool) {
+		a.md.OnTask = func(line int, checked bool) {
+			offset, ok := previewLineStart(source, line)
+			if !ok {
+				return
+			}
 			a.setPreviewTask(id, raw, preview, start+offset, checked)
 		}
 	}
@@ -82,11 +86,49 @@ func previewSourceOffset(raw, preview string, offset int) int {
 	}
 }
 
+// previewLineStart returns the byte offset in src where a 1-based line starts,
+// counting \n, \r\n and \r ends as the Markdown view does.
+func previewLineStart(src string, line int) (int, bool) {
+	if line < 1 {
+		return 0, false
+	}
+	offset := 0
+	for n := 1; n < line; n++ {
+		i := strings.IndexAny(src[offset:], "\r\n")
+		if i < 0 {
+			return 0, false
+		}
+		offset += i
+		if src[offset] == '\r' && offset+1 < len(src) && src[offset+1] == '\n' {
+			offset += 2
+		} else {
+			offset++
+		}
+	}
+	return offset, offset <= len(src)
+}
+
 func (a *nativeApp) setPreviewTask(id, raw, preview string, offset int, checked bool) {
 	if a.note == nil || a.note.ID != id || a.body != raw {
 		return
 	}
 	pos := previewSourceOffset(raw, preview, offset)
+	if pos < 0 || pos > len(raw) {
+		return
+	}
+	// The callback names the line, whether it carried the marker's byte
+	// offset (the old API) or its start. Find the task marker on that line;
+	// a task list item's first '[' is the marker.
+	lineStart := strings.LastIndexAny(raw[:pos], "\r\n") + 1
+	lineEnd := len(raw)
+	if i := strings.IndexAny(raw[pos:], "\r\n"); i >= 0 {
+		lineEnd = pos + i
+	}
+	marker := strings.IndexByte(raw[lineStart:lineEnd], '[')
+	if marker < 0 {
+		return
+	}
+	pos = lineStart + marker + 1
 	if pos < 1 || pos+1 >= len(raw) || raw[pos-1] != '[' || raw[pos+1] != ']' {
 		return
 	}

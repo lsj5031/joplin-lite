@@ -762,4 +762,15 @@ func TestCaptureScreens(t *testing.T) {
 	capture(t, dir, "39-dark-preview", tt)
 	app.dark = false
 	applyPalette(false)
+
+	// 40-41. The keyboard reference at wide and compact sizes.
+	app.openShortcuts()
+	tt.Frame()
+	tt.Advance(220 * time.Millisecond)
+	capture(t, dir, "40-keyboard-shortcuts", tt)
+	tt.SetSize(900, 640)
+	tt.Frame()
+	capture(t, dir, "41-keyboard-shortcuts-compact", tt)
+	app.shortcutsOpen = false
+	tt.SetSize(1280, 800)
 }

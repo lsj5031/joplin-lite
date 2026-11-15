@@ -7,10 +7,10 @@
 Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a single lightweight native app (~120 MB RAM, no Electron or embedded browser) with warm Field Notes paper tones, Liquid Glass surfaces, and a fast, distraction-free Markdown editor.
 
 **[Download v0.1.0-alpha.3](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)** ·
-**[Watch the 76s UI walkthrough](docs/promo/joplin-lite-ui-walkthrough.mp4)** ·
+**[Watch the 84s UI walkthrough](docs/promo/joplin-lite-ui-walkthrough.mp4)** ·
 **[Technical & desktop guide](shell/README.md)**
 
-[![Watch the 76-second native UI walkthrough](docs/promo/joplin-lite-ui-walkthrough-poster.png)](docs/promo/joplin-lite-ui-walkthrough.mp4)
+[![Watch the 84-second native UI walkthrough](docs/promo/joplin-lite-ui-walkthrough-poster.png)](docs/promo/joplin-lite-ui-walkthrough.mp4)
 
 > **Alpha note:** Joplin Lite is an independent client used daily on macOS and Windows with encrypted Dropbox libraries. Because it is still in alpha and does not cover every official Joplin feature, **always back up your notes** before connecting an existing library.
 
@@ -73,14 +73,23 @@ Keep those same flags whenever you want to reopen your trial notebook collection
 | Action | macOS | Windows / Linux |
 | --- | --- | --- |
 | New note | `Cmd+N` | `Ctrl+N` |
+| New notebook | `Cmd+Shift+N` | `Ctrl+Shift+N` |
+| New tag | `Cmd+Shift+T` | `Ctrl+Shift+T` |
 | Search notes | `Cmd+K` or `Cmd+F` | `Ctrl+K` or `Ctrl+F` |
 | Command & note palette | `Cmd+P` | `Ctrl+P` |
 | Toggle Edit / Preview | `Cmd+E` | `Ctrl+E` |
 | Toggle Notebooks rail | `Cmd+\` | `Ctrl+\` |
 | Save immediately | `Cmd+S` | `Ctrl+S` |
+| Mark as to-do | `Cmd+Shift+D` | `Ctrl+Shift+D` |
+| Delete note* | `Cmd+Shift+Backspace` | `Ctrl+Shift+Backspace` |
+| Sync now | `Cmd+R` | `Ctrl+R` |
+| Ask across notes | `Cmd+Shift+A` | `Ctrl+Shift+A` |
 | Back / Forward in history | `Cmd+[` / `Cmd+]` | `Alt+Left` / `Alt+Right` |
 | Inline rename selected item | `Return` or `F2` | `F2` |
 | Settings | `Cmd+,` | `Ctrl+,` |
+| Keyboard shortcuts | `Cmd+/` or `F1` | `Ctrl+/` or `F1` |
+
+\* Delete always asks first, and yields the key to the editor while you are typing. Press `Cmd/Ctrl+/` or `F1` in the app for the full, platform-labeled reference.
 
 ![Dark appearance with the Sage Oklab backdrop](docs/screenshots/native-dark.png)
 

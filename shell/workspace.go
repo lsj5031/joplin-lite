@@ -138,6 +138,20 @@ func (a *nativeApp) view(c *ui.Context) {
 	if c.Shortcut(0, ui.KeyF2) || (runtime.GOOS == "darwin" && c.Shortcut(0, ui.KeyEnter)) {
 		a.renameSelectedRail()
 	}
+	if c.Shortcut(0, ui.KeyF1) || c.Shortcut(ui.Cmd, ui.KeySlash) {
+		a.openShortcuts()
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyR) {
+		a.syncNow()
+	}
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyD) {
+		a.setTodo(a.note != nil && a.note.IsTodo == 0)
+	}
+	// Delete is guarded so a text field keeps its own editing commands while
+	// the user is writing; the reference dialog says so.
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyBackspace) && !c.FocusTakesText() {
+		a.requestDelete()
+	}
 	a.historyShortcuts(c)
 	a.tick()
 	a.tickSync()
@@ -150,6 +164,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.conflictDialog(c, t)
 	a.backupDialogs(c, t)
 	a.commandPalette(c, t)
+	a.shortcutsDialog(c, t)
 
 	if a.confirmDelete {
 		if confirmDialog(c, dangerTheme, &a.confirmDelete, "Delete note?",
@@ -342,17 +357,21 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 				}
 				ui.Spacer(c)
 				if !a.railOpen {
-					if iconButton(c, "top-open-notebooks", iconSidebar, "Open notebooks", "Toggle notebooks sidebar (Cmd/Ctrl+\\)").Clicked() {
+					if iconButton(c, "top-open-notebooks", iconSidebar, "Open notebooks", "Toggle notebooks sidebar (Cmd/Ctrl+\\)").
+						KeyShortcuts(ui.Cmd, ui.KeyBackslash).Clicked() {
 						a.railOpen = true
 					}
 				}
-				if iconButton(c, "top-new-note", iconPlus, "New note", "Create a new note (Cmd/Ctrl+N)").Clicked() {
+				if iconButton(c, "top-new-note", iconPlus, "New note", "Create a new note (Cmd/Ctrl+N)").
+					KeyShortcuts(ui.Cmd, ui.KeyN).Clicked() {
 					a.newNote()
 				}
-				if chromeButton(c, "Ask").Tooltip("Ask across your notes (Cmd/Ctrl+Shift+A)").Clicked() {
+				if chromeButton(c, "Ask").Tooltip("Ask across your notes (Cmd/Ctrl+Shift+A)").
+					KeyShortcuts(ui.Cmd|ui.Shift, ui.KeyA).Clicked() {
 					a.toggleAsk()
 				}
-				if iconButton(c, "top-settings", iconSettings, "Settings", "Sync target, master password and clipper token (Cmd/Ctrl+,)").Clicked() {
+				if iconButton(c, "top-settings", iconSettings, "Settings", "Sync target, master password and clipper token (Cmd/Ctrl+,)").
+					KeyShortcuts(ui.Cmd, ui.KeyComma).Clicked() {
 					a.openSettings()
 				}
 			})
@@ -374,7 +393,8 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		Padding(0, 14, 0, leftPad).DragWindow().
 		Background(navyDeep).Children(func() {
 		if a.narrow {
-			if iconButton(c, "narrow-open-notebooks", iconSidebar, "Open notebooks", "Notebooks and tags").Clicked() {
+			if iconButton(c, "narrow-open-notebooks", iconSidebar, "Open notebooks", "Notebooks and tags").
+				KeyShortcuts(ui.Cmd, ui.KeyBackslash).Clicked() {
 				a.railOpen = !a.railOpen
 			}
 		}
@@ -386,17 +406,18 @@ func (a *nativeApp) topBar(c *ui.Context, t *ui.Theme) {
 		}
 		a.searchField(c, t)
 		ui.Spacer(c)
-		primary := primaryAction(c, "New note")
+		primary := primaryAction(c, "New note").KeyShortcuts(ui.Cmd, ui.KeyN)
 		if a.narrow {
 			primary.Label("New note")
 		}
 		if primary.Clicked() {
 			a.newNote()
 		}
-		if chromeButton(c, "Ask").Clicked() {
+		if chromeButton(c, "Ask").KeyShortcuts(ui.Cmd|ui.Shift, ui.KeyA).Clicked() {
 			a.toggleAsk()
 		}
-		if iconButton(c, "narrow-settings", iconSettings, "Settings", "Sync target, master password and clipper token").Clicked() {
+		if iconButton(c, "narrow-settings", iconSettings, "Settings", "Sync target, master password and clipper token").
+			KeyShortcuts(ui.Cmd, ui.KeyComma).Clicked() {
 			a.openSettings()
 		}
 	})
@@ -464,6 +485,8 @@ func (a *nativeApp) searchField(c *ui.Context, t *ui.Theme) {
 				in := ui.TextInput(c.Key("search"), &a.query).
 					Placeholder("Search all notes…").
 					Label("Search notes").
+					KeyShortcuts(ui.Cmd, ui.KeyK).
+					KeyShortcuts(ui.Cmd, ui.KeyF).
 					TextColor(inkNavy).
 					SelectionColor(routeBlueSoft.Alpha(0.35)).
 					Background(ui.Transparent).
@@ -575,7 +598,8 @@ func (a *nativeApp) sidebarFooter(c *ui.Context, t *ui.Theme) {
 			if chromeButton(c, "Set up sync").Tooltip("Choose a sync target").Clicked() {
 				a.openSettings()
 			}
-		} else if iconButton(c, "footer-sync-now", iconSync, "Sync now", "Synchronize now (Cmd/Ctrl+R)").Disabled(st.Running || st.Pending).Clicked() {
+		} else if iconButton(c, "footer-sync-now", iconSync, "Sync now", "Synchronize now (Cmd/Ctrl+R)").
+			KeyShortcuts(ui.Cmd, ui.KeyR).Disabled(st.Running || st.Pending).Clicked() {
 			a.syncNow()
 		}
 	})
@@ -666,7 +690,8 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, fmt.Sprintf("%d", len(a.notebooks))).Font(fontMono).FontFeatures("tnum").
 				FontSize(sizeMonoSm).TextColor(inkSoft)
 			ui.Spacer(c)
-			if iconButton(c, "new-notebook", iconPlus, "New notebook", "New notebook").Clicked() {
+			if iconButton(c, "new-notebook", iconPlus, "New notebook", "New notebook").
+				KeyShortcuts(ui.Cmd|ui.Shift, ui.KeyN).Clicked() {
 				a.openNewNotebook()
 			}
 			// Rename and delete stay on the row's context menu, double click
@@ -683,7 +708,8 @@ func (a *nativeApp) railPane(c *ui.Context, t *ui.Theme) {
 		ui.Row(c).Padding(8, 12, 8, 14).Gap(4).AlignItems(ui.Center).Children(func() {
 			label(c, "Tags")
 			ui.Spacer(c)
-			if iconButton(c, "new-tag", iconPlus, "New tag", "New tag").Clicked() {
+			if iconButton(c, "new-tag", iconPlus, "New tag", "New tag").
+				KeyShortcuts(ui.Cmd|ui.Shift, ui.KeyT).Clicked() {
 				a.openNewTag()
 			}
 			// Rename, delete and clearing the filter live on the tag rows
@@ -1552,7 +1578,8 @@ func (a *nativeApp) editorHeader(c *ui.Context, t *ui.Theme) {
 		}
 		// Reading and writing is the primary editor action, so it keeps a
 		// label instead of being one more symbol among four.
-		mode := toolbarIconButton(c, "hdr-mode", modeIcon, a.modeLabel(), a.modeLabel(), "Edit/Preview (Cmd/Ctrl+E)")
+		mode := toolbarIconButton(c, "hdr-mode", modeIcon, a.modeLabel(), a.modeLabel(), "Edit/Preview (Cmd/Ctrl+E)").
+			KeyShortcuts(ui.Cmd, ui.KeyE)
 		if mode.Clicked() {
 			a.toggleEdit()
 		}
@@ -1972,6 +1999,10 @@ func (a *nativeApp) commandPalette(c *ui.Context, t *ui.Theme) {
 			{
 				key: "cmd:sync-now", title: "Sync Now", subtitle: "Sync", shortcut: mod + "R", icon: iconSync,
 				run: func() { a.paletteOpen = false; a.syncNow() },
+			},
+			{
+				key: "cmd:shortcuts", title: "Keyboard Shortcuts", subtitle: "Help", shortcut: mod + "/", icon: iconHelp,
+				run: func() { a.paletteOpen = false; a.openShortcuts() },
 			},
 			{
 				key: "cmd:settings", title: "Open Settings…", subtitle: "Preferences", shortcut: mod + ",", icon: iconSettings,

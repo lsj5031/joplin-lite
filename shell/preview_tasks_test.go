@@ -27,7 +27,7 @@ func TestPreviewTaskToggleSavesOriginalMarkdown(t *testing.T) {
 					c.SetTheme(designTheme())
 					app.previewContent(c)
 				}, width, 600)
-				click(t, tt, "Task: quoted task")
+				click(t, tt, "quoted task")
 				want := strings.Replace(raw, "> 1. [ ]", "> 1. [x]", 1)
 				if app.body != want || !app.dirty || app.editing {
 					t.Fatalf("preview edit changed extra bytes or editing state: %q dirty=%v editing=%v", app.body, app.dirty, app.editing)
@@ -45,11 +45,11 @@ func TestPreviewTaskToggleSavesOriginalMarkdown(t *testing.T) {
 				if app.body != raw {
 					t.Fatal("keyboard toggle failed to restore original bytes")
 				}
-				click(t, tt, "Task: nested task")
+				click(t, tt, "nested task")
 				if app.body != strings.Replace(raw, "[X]", "[ ]", 1) {
 					t.Fatal("uppercase or nested checkbox did not toggle")
 				}
-				if _, ok := tt.Find("Task: not a task"); ok {
+				if _, ok := tt.AccessByRole(ui.RoleCheckBox, "not a task"); ok {
 					t.Fatal("code fence became interactive")
 				}
 				if dir := os.Getenv("CAPTURE_DIR"); dir != "" {
@@ -58,7 +58,7 @@ func TestPreviewTaskToggleSavesOriginalMarkdown(t *testing.T) {
 				other := addTestNote(t, app.svc, "", "Other", "- [ ] other task")
 				app.showNote(other.ID)
 				tt.Frame()
-				click(t, tt, "Task: other task")
+				click(t, tt, "other task")
 				app.flush()
 				saved, err = app.svc.GetNote(note.ID)
 				if err != nil || saved.Body != strings.Replace(raw, "[X]", "[ ]", 1) {
@@ -77,7 +77,7 @@ func TestPreviewTaskToggleAtVirtualizedEndKeepsScroll(t *testing.T) {
 	tt := ui.NewTester(app.previewContent, 796, 600)
 	app.previewList.ScrollToEnd()
 	tt.Frame()
-	click(t, tt, "Task: duplicate")
+	click(t, tt, "duplicate")
 	tt.Frame()
 	pos := strings.LastIndex(raw, "[ ]") + 1
 	if want := raw[:pos] + "x" + raw[pos+1:]; app.body != want {
@@ -110,7 +110,7 @@ func TestPreviewTaskSaveFailureKeepsDraft(t *testing.T) {
 	note := addTestNote(t, app.svc, "", "Tasks", "- [ ] task")
 	app.showNote(note.ID)
 	tt := ui.NewTester(app.previewContent, 796, 600)
-	click(t, tt, "Task: task")
+	click(t, tt, "task")
 	if _, err := db.Exec("CREATE TRIGGER reject_task_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'fixture save failure'); END"); err != nil {
 		t.Fatal(err)
 	}
