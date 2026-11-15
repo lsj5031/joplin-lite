@@ -135,10 +135,11 @@ func recoverOfficialCredentials(cfg *config.Config, keychain func() ([]byte, err
 		return errors.New("cannot read the selected official profile")
 	}
 	defer db.Close()
-	var auth, encrypted string
-	if err := db.QueryRow("SELECT value FROM settings WHERE key = ?", "sync.7.auth").Scan(&auth); err != nil || strings.TrimSpace(auth) == "" {
-		return errors.New("selected official profile has no Dropbox authorization")
+	auth, err := config.OfficialDropboxAuth(cfg.DataDir)
+	if err != nil {
+		return err
 	}
+	var encrypted string
 	if err := db.QueryRow("SELECT value FROM key_values WHERE key = ?",
 		"KeychainServiceDriver.secureStore.setting.encryption.masterPassword").Scan(&encrypted); err != nil || encrypted == "" {
 		return errors.New("selected official profile has no encrypted master password")

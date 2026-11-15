@@ -19,6 +19,8 @@ const between = (a, b) => {
 const db = new DatabaseSync(':memory:');
 const tables = { 1: 'notes', 2: 'folders', 4: 'resources', 5: 'tags', 6: 'note_tags' };
 const wanted = new Set(Object.values(tables));
+wanted.add('revisions'); // Validate-only passthrough in the repair operator.
+let revisionBaseColumns;
 const run = q => {
   const sql = typeof q === 'string' ? q : q.sql;
   if (sql.startsWith('DROP TABLE ') && wanted.has(sql.slice(11))) {
@@ -26,9 +28,17 @@ const run = q => {
     return;
   }
   const match = sql.match(/^(?:CREATE TABLE|ALTER TABLE)\s+[`"]?(\w+)/i);
-  if (match && wanted.has(match[1])) db.exec(sql);
+  if (match && wanted.has(match[1])) {
+    db.exec(sql);
+    if (match[1] === 'revisions') {
+      const columns = db.prepare('pragma table_info(revisions)').all();
+      if (columns.length === 12 && !columns.some(c => c.name === 'is_locked')) {
+        revisionBaseColumns = columns;
+      }
+    }
+  }
 };
-// Execute the shipped migration functions, retaining only the five item tables.
+// Execute shipped migrations for the five repaired tables and revision history.
 const context = vm.createContext({
   console, Date, run,
   o: x => x,
@@ -57,6 +67,8 @@ database.upgradeDatabase(0);
 // Field order is SQLite's actual migrated column order, as BaseModel.fieldNames uses it.
 const fields = Object.fromEntries(Object.entries(tables).map(([type, table]) =>
   [type, db.prepare(`pragma table_info(${table})`).all()]));
+const revisionColumns = db.prepare('pragma table_info(revisions)').all();
+fields[13] = revisionColumns;
 const methods = [
   between('static serialize_format(t,n)', 'static unserialize_format('),
   between('static unserialize_format(t,n,r)', 'static async serialize('),
@@ -92,6 +104,7 @@ Official;
 `, context);
 const items = {};
 for (const [type, columns] of Object.entries(fields)) {
+  if (type === '13') continue;
   const item = {
     id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     updated_time: 1772000000000, type_: Number(type),
@@ -124,6 +137,16 @@ for (const [type, columns] of Object.entries(fields)) {
   update(parsed);
   items[type] = { columns, text, parsed, malformedError };
 }
+const revisionText = await Official.serializeForSync({
+  id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  updated_time: 1772000000000, type_: 13,
+});
+const revisionEnvelope = {
+  baseColumns: revisionBaseColumns,
+  columns: revisionColumns,
+  text: revisionText,
+  parsed: await Official.unserialize(revisionText),
+};
 fs.writeFileSync(output, JSON.stringify({
-  sourceSHA256, items,
+  sourceSHA256, items, revisionEnvelope,
 }, null, 2) + '\n');

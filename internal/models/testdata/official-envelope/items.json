@@ -870,5 +870,228 @@
       },
       "malformedError": "NOT NULL constraint failed: note_tags.user_created_time"
     }
+  },
+  "revisionEnvelope": {
+    "baseColumns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "parent_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "item_type",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "item_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "item_updated_time",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "title_diff",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "body_diff",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "metadata_diff",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "encryption_cipher_text",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "encryption_applied",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "updated_time",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "created_time",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "columns": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "parent_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "item_type",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "item_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "item_updated_time",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "title_diff",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "body_diff",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "metadata_diff",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "encryption_cipher_text",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "\"\"",
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "encryption_applied",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "updated_time",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "created_time",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "is_locked",
+        "type": "INT",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      }
+    ],
+    "text": "id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent_id: \nitem_type: \nitem_id: \nitem_updated_time: \ntitle_diff: \nbody_diff: \nmetadata_diff: \nencryption_cipher_text: synthetic-ciphertext\nencryption_applied: 1\nupdated_time: 2026-02-25T06:13:20.000Z\ncreated_time: \nis_locked: \ntype_: 13",
+    "parsed": {
+      "type_": 13,
+      "is_locked": 0,
+      "created_time": 0,
+      "updated_time": 1772000000000,
+      "encryption_applied": 1,
+      "encryption_cipher_text": "synthetic-ciphertext",
+      "metadata_diff": "",
+      "body_diff": "",
+      "title_diff": "",
+      "item_updated_time": 0,
+      "item_id": "",
+      "item_type": 0,
+      "parent_id": "",
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
   }
 }

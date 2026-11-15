@@ -67,6 +67,18 @@ func Correct(raw []byte, id string) ([]byte, error) {
 		return nil, fmt.Errorf("invalid encrypted envelope")
 	}
 	missing, supported := models.EncryptedEnvelopeMissing(item.Type, fields)
+	if item.Type == models.TypeRevision {
+		// Official revision history is not written by Lite. Recognize only a
+		// complete official base envelope, without correcting/re-uploading it.
+		// The later additive is_locked column is optional for old revisions.
+		// Both schemas are independently derived by qa/official-envelope.mjs.
+		for _, key := range strings.Split("id,parent_id,item_type,item_id,item_updated_time,title_diff,body_diff,metadata_diff,encryption_cipher_text,encryption_applied,updated_time,created_time", ",") {
+			if _, ok := fields[key]; !ok {
+				return nil, fmt.Errorf("incomplete revision envelope is outside repair scope")
+			}
+		}
+		supported = true
+	}
 	if !supported || fields["type_"] != strconv.Itoa(item.Type) {
 		return nil, fmt.Errorf("unsupported encrypted item type")
 	}

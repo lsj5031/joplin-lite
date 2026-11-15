@@ -18,7 +18,8 @@ Provenance:
 `serializeForSync`, `serialize`, `serialize_format`, `unserialize` and
 `unserialize_format` methods, plus the shipped database migration functions.
 It has no dependency on Lite's serializers, parser, schema or repair code.
-Only the five item tables are migrated in disposable in-memory SQLite.
+The five repaired item tables and the revision-history table are migrated in
+disposable in-memory SQLite.
 Column order/types/defaults come from SQLite's resulting `PRAGMA table_info`,
 not Lite's models. This includes otherwise-unmodeled resource OCR fields.
 
@@ -36,6 +37,17 @@ same fallback fails an existing-item SQLite update with
 update-local path, not new-item save logic that may assign fresh timestamps.
 SQL bindings map JavaScript `undefined` to NULL at the database boundary.
 The harness does not execute the entire Synchronizer or BaseModel.save.
+
+`revisionEnvelope` separately records the actual official type-13 producer/
+parser, its final columns and the twelve-column historical base schema observed
+while executing migrations, before additive `is_locked`. Revisions are not
+repaired: complete base/final revision envelopes pass through unchanged, while
+incomplete revisions still abort. The Go repair test replaces only the synthetic
+crypto marker with a framing-valid packet, requires exact-byte passthrough for
+both schemas, and rejects each missing base placeholder. This lets a mixed real
+target retain official history without expanding the five-type write scope.
+There is no revision SQLite timestamp-fallback negative control, since revision
+history has a different schema and does not have `user_created_time`.
 
 Regenerate using an extracted copy of this exact shipped bundle and Node with
 `node:sqlite` (generated with Node 26.12.1):
@@ -61,4 +73,5 @@ The observed full-schema serialization and timestamp fallback agree with the
 reported source evidence. Additional newer schema fields are blank and older
 official parsers remove unknown fields.
 
-No real iOS, Dropbox, live sync, user profile or user vault was accessed.
+Generating these synthetic fixtures accesses no real iOS, Dropbox, live sync,
+user profile or user vault. Live operator evidence is recorded separately.
