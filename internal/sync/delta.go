@@ -365,7 +365,7 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 				// before decryption restores the hidden filename extension.
 				resource.FileExtension = existing.FileExtension
 			}
-			if _, present := fields["blob_updated_time"]; !present {
+			if fields["blob_updated_time"] == "" {
 				resource.BlobUpdatedTime = existing.BlobUpdatedTime
 			}
 			si, err := db.GetSyncItem(resource.ID, syncTarget)

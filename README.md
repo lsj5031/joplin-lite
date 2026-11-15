@@ -125,6 +125,11 @@ On **macOS**, you can also configure a remembered Finder launch file (`~/Library
 - **Clear status in the sidebar footer:** Always see whether you are **Local only**, **Checking items**, **Synced**, **Offline**, or waiting on another device's sync lock, alongside the last successful sync time.
 - **Optional deletion guard:** Setting `sync.dropbox.block_deletes: true` in YAML prevents outgoing remote deletions while you test. Turn it off when you want local note deletions to sync to Dropbox.
 
+If official Joplin reports `NOT NULL constraint failed: notes.user_created_time`
+after encrypted Lite sync, see the [offline encrypted-envelope repair guide](docs/encrypted-envelope-repair.md).
+Upgrading prevents new malformed envelopes but does not correct existing target files.
+The repair command defaults to dry-run and never writes to Dropbox.
+
 ---
 
 ## Backups: JEX export and import

@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// The golden corpus is the M0 format gate: every fixture is Joplin's canonical
-// serialized item text and must round-trip byte-for-byte through our parser and
-// serializers. See testdata/golden/README.md for the fixture rules.
+// The golden corpus is the M0 lossless format gate. The envelope_* fixtures
+// retain old malformed Lite output, not canonical official producer output.
+// Independent producer/import evidence lives in encrypted_envelope_test.go.
 
 func TestGoldenCorpus(t *testing.T) {
 	files, err := filepath.Glob("testdata/golden/*.md")
@@ -47,8 +47,7 @@ func TestGoldenCorpus(t *testing.T) {
 			}
 
 			if passthroughOnly {
-				// Envelope forms carry a reduced keep-keys metadata block;
-				// only the raw layer applies to them.
+				// Retain malformed historical bytes for lossless reads.
 				return
 			}
 

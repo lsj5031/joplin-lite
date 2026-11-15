@@ -561,7 +561,7 @@ func parseJED01(s string) (masterKeyID string, method int, chunks [][]byte, err 
 	}
 	pos += 6
 
-	if pos+int(metaLen) > len(s) {
+	if metaLen < 0 || metaLen > int64(len(s)-pos) {
 		return "", 0, nil, fmt.Errorf("e2ee: truncated JED01 metadata")
 	}
 	metadata := s[pos : pos+int(metaLen)]
@@ -589,7 +589,7 @@ func parseJED01(s string) (masterKeyID string, method int, chunks [][]byte, err 
 		}
 		pos += 6
 
-		if pos+int(chunkLen) > len(s) {
+		if chunkLen <= 0 || chunkLen > int64(len(s)-pos) {
 			return "", 0, nil, fmt.Errorf("e2ee: truncated chunk data")
 		}
 		chunks = append(chunks, []byte(s[pos:pos+int(chunkLen)]))
@@ -597,6 +597,35 @@ func parseJED01(s string) (masterKeyID string, method int, chunks [][]byte, err 
 	}
 
 	return masterKeyID, method, chunks, nil
+}
+
+// ValidateEncryptedString checks framing without keys or decryption. It does
+// not authenticate ciphertext. Errors deliberately contain no input bytes.
+func ValidateEncryptedString(s string) error {
+	key, method, chunks, err := parseJED01(s)
+	if err != nil || len(chunks) == 0 || (method != 5 && method != 7 && method != 10) {
+		return fmt.Errorf("invalid encrypted string framing or unsupported method")
+	}
+	if _, err := hex.DecodeString(key); err != nil || len(key) != 32 {
+		return fmt.Errorf("invalid encrypted string key ID")
+	}
+	for _, chunk := range chunks {
+		var packet struct {
+			Salt string `json:"salt"`
+			IV   string `json:"iv"`
+			CT   string `json:"ct"`
+		}
+		if json.Unmarshal(chunk, &packet) != nil {
+			return fmt.Errorf("invalid encrypted string chunk")
+		}
+		for _, field := range []string{packet.Salt, packet.IV, packet.CT} {
+			decoded, err := base64.StdEncoding.DecodeString(field)
+			if err != nil || len(decoded) < 8 {
+				return fmt.Errorf("invalid encrypted string packet")
+			}
+		}
+	}
+	return nil
 }
 
 // decryptChunk decrypts a single chunk using the master key.

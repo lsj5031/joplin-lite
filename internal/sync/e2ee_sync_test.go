@@ -63,7 +63,7 @@ func buildTestKeyV1Packet(t *testing.T, password string) string {
 
 func TestResourcePullPreservesAbsentBlobTimestamp(t *testing.T) {
 	for _, encrypted := range []bool{false, true} {
-		for _, field := range []string{"absent", "zero"} {
+		for _, field := range []string{"absent", "blank", "zero"} {
 			t.Run(strconv.FormatBool(encrypted)+"/"+field, func(t *testing.T) {
 				db := testDB(t)
 				const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -75,6 +75,9 @@ func TestResourcePullPreservesAbsentBlobTimestamp(t *testing.T) {
 				want := int64(0)
 				if field == "absent" {
 					content = strings.ReplaceAll(content, "blob_updated_time: 0\n", "")
+					want = 1234
+				} else if field == "blank" {
+					content = strings.ReplaceAll(content, "blob_updated_time: 0\n", "blob_updated_time: \n")
 					want = 1234
 				}
 				svc := e2ee.NewService()

@@ -1,0 +1,874 @@
+{
+  "sourceSHA256": "b2143adff1589d07bd5c1dd83606ecbe571b61e5e6e27fa94357727e83675548",
+  "items": {
+    "1": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "parent_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "title",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "body",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "is_conflict",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "latitude",
+          "type": "NUMERIC",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "longitude",
+          "type": "NUMERIC",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "altitude",
+          "type": "NUMERIC",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 10,
+          "name": "author",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 11,
+          "name": "source_url",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 12,
+          "name": "is_todo",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 13,
+          "name": "todo_due",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 14,
+          "name": "todo_completed",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 15,
+          "name": "source",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 16,
+          "name": "source_application",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 17,
+          "name": "application_data",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 18,
+          "name": "order",
+          "type": "NUMERIC",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 19,
+          "name": "user_created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 20,
+          "name": "user_updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 21,
+          "name": "encryption_cipher_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 22,
+          "name": "encryption_applied",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 23,
+          "name": "markup_language",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "1",
+          "pk": 0
+        },
+        {
+          "cid": 24,
+          "name": "is_shared",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 25,
+          "name": "share_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 26,
+          "name": "conflict_original_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 27,
+          "name": "master_key_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 28,
+          "name": "user_data",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 29,
+          "name": "deleted_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 30,
+          "name": "is_locked",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 31,
+          "name": "extracted_resource_ids",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        }
+      ],
+      "text": "id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent_id: \ncreated_time: \nupdated_time: 2026-02-25T06:13:20.000Z\nis_conflict: \nlatitude: \nlongitude: \naltitude: \nauthor: \nsource_url: \nis_todo: \ntodo_due: \ntodo_completed: \nsource: \nsource_application: \napplication_data: \norder: \nuser_created_time: \nuser_updated_time: \nencryption_cipher_text: synthetic-ciphertext\nencryption_applied: 1\nmarkup_language: \nis_shared: \nshare_id: \nconflict_original_id: \nmaster_key_id: \nuser_data: \ndeleted_time: \nis_locked: \nextracted_resource_ids: \ntype_: 1",
+      "parsed": {
+        "type_": 1,
+        "extracted_resource_ids": "",
+        "is_locked": 0,
+        "deleted_time": 0,
+        "user_data": "",
+        "master_key_id": "",
+        "conflict_original_id": "",
+        "share_id": "",
+        "is_shared": 0,
+        "markup_language": 0,
+        "encryption_applied": 1,
+        "encryption_cipher_text": "synthetic-ciphertext",
+        "user_updated_time": 1772000000000,
+        "user_created_time": 0,
+        "order": 0,
+        "application_data": "",
+        "source_application": "",
+        "source": "",
+        "todo_completed": 0,
+        "todo_due": 0,
+        "is_todo": 0,
+        "source_url": "",
+        "author": "",
+        "altitude": "0.0000",
+        "longitude": "0.00000000",
+        "latitude": "0.00000000",
+        "is_conflict": 0,
+        "updated_time": 1772000000000,
+        "created_time": 0,
+        "parent_id": "",
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "body": ""
+      },
+      "malformedError": "NOT NULL constraint failed: notes.user_created_time"
+    },
+    "2": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "title",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "user_created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "user_updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "encryption_cipher_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "encryption_applied",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "parent_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "is_shared",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 10,
+          "name": "share_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 11,
+          "name": "master_key_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 12,
+          "name": "icon",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 13,
+          "name": "user_data",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 14,
+          "name": "deleted_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        }
+      ],
+      "text": "id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncreated_time: \nupdated_time: 2026-02-25T06:13:20.000Z\nuser_created_time: \nuser_updated_time: \nencryption_cipher_text: synthetic-ciphertext\nencryption_applied: 1\nparent_id: \nis_shared: \nshare_id: \nmaster_key_id: \nicon: \nuser_data: \ndeleted_time: \ntype_: 2",
+      "parsed": {
+        "type_": 2,
+        "deleted_time": 0,
+        "user_data": "",
+        "icon": "",
+        "master_key_id": "",
+        "share_id": "",
+        "is_shared": 0,
+        "parent_id": "",
+        "encryption_applied": 1,
+        "encryption_cipher_text": "synthetic-ciphertext",
+        "user_updated_time": 1772000000000,
+        "user_created_time": 0,
+        "updated_time": 1772000000000,
+        "created_time": 0,
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "malformedError": "NOT NULL constraint failed: folders.user_created_time"
+    },
+    "4": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "title",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "mime",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "filename",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "user_created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "user_updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "file_extension",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "encryption_cipher_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 10,
+          "name": "encryption_applied",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 11,
+          "name": "encryption_blob_encrypted",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 12,
+          "name": "size",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "-1",
+          "pk": 0
+        },
+        {
+          "cid": 13,
+          "name": "is_shared",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 14,
+          "name": "share_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 15,
+          "name": "master_key_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 16,
+          "name": "user_data",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 17,
+          "name": "blob_updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 18,
+          "name": "ocr_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 19,
+          "name": "ocr_details",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 20,
+          "name": "ocr_status",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 21,
+          "name": "ocr_error",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 22,
+          "name": "ocr_driver_id",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "\"1\"",
+          "pk": 0
+        },
+        {
+          "cid": 23,
+          "name": "is_locked",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        }
+      ],
+      "text": "id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nmime: \nfilename: \ncreated_time: \nupdated_time: 2026-02-25T06:13:20.000Z\nuser_created_time: \nuser_updated_time: \nfile_extension: \nencryption_cipher_text: synthetic-ciphertext\nencryption_applied: 1\nencryption_blob_encrypted: \nsize: \nis_shared: \nshare_id: \nmaster_key_id: \nuser_data: \nblob_updated_time: \nocr_text: \nocr_details: \nocr_status: \nocr_error: \nocr_driver_id: \nis_locked: \ntype_: 4",
+      "parsed": {
+        "type_": 4,
+        "is_locked": 0,
+        "ocr_driver_id": 0,
+        "ocr_error": "",
+        "ocr_status": 0,
+        "ocr_details": "",
+        "ocr_text": "",
+        "blob_updated_time": 0,
+        "user_data": "",
+        "master_key_id": "",
+        "share_id": "",
+        "is_shared": 0,
+        "size": 0,
+        "encryption_blob_encrypted": 0,
+        "encryption_applied": 1,
+        "encryption_cipher_text": "synthetic-ciphertext",
+        "file_extension": "",
+        "user_updated_time": 1772000000000,
+        "user_created_time": 0,
+        "updated_time": 1772000000000,
+        "created_time": 0,
+        "filename": "",
+        "mime": "",
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "malformedError": "NOT NULL constraint failed: resources.user_created_time"
+    },
+    "5": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "title",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "user_created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "user_updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "encryption_cipher_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "encryption_applied",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "is_shared",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "parent_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 10,
+          "name": "user_data",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        }
+      ],
+      "text": "id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncreated_time: \nupdated_time: 2026-02-25T06:13:20.000Z\nuser_created_time: \nuser_updated_time: \nencryption_cipher_text: synthetic-ciphertext\nencryption_applied: 1\nis_shared: \nparent_id: \nuser_data: \ntype_: 5",
+      "parsed": {
+        "type_": 5,
+        "user_data": "",
+        "parent_id": "",
+        "is_shared": 0,
+        "encryption_applied": 1,
+        "encryption_cipher_text": "synthetic-ciphertext",
+        "user_updated_time": 1772000000000,
+        "user_created_time": 0,
+        "updated_time": 1772000000000,
+        "created_time": 0,
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "malformedError": "NOT NULL constraint failed: tags.user_created_time"
+    },
+    "6": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "note_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "tag_id",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "user_created_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "user_updated_time",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "encryption_cipher_text",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "encryption_applied",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "is_shared",
+          "type": "INT",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        }
+      ],
+      "text": "id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nnote_id: \ntag_id: \ncreated_time: \nupdated_time: 2026-02-25T06:13:20.000Z\nuser_created_time: \nuser_updated_time: \nencryption_cipher_text: synthetic-ciphertext\nencryption_applied: 1\nis_shared: \ntype_: 6",
+      "parsed": {
+        "type_": 6,
+        "is_shared": 0,
+        "encryption_applied": 1,
+        "encryption_cipher_text": "synthetic-ciphertext",
+        "user_updated_time": 1772000000000,
+        "user_created_time": 0,
+        "updated_time": 1772000000000,
+        "created_time": 0,
+        "tag_id": "",
+        "note_id": "",
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "malformedError": "NOT NULL constraint failed: note_tags.user_created_time"
+    }
+  }
+}

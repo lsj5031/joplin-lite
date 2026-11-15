@@ -130,7 +130,7 @@ func decryptItem(db *store.DB, svc *e2ee.Service, item store.EncryptedItem) erro
 		resource.EncryptionCipherText = ""
 		resource.EncryptionApplied = 0
 		_, fields := models.Deserialize(plaintext)
-		if _, present := fields["blob_updated_time"]; !present {
+		if fields["blob_updated_time"] == "" {
 			existing, err := db.GetResource(item.ID)
 			if err != nil {
 				return err

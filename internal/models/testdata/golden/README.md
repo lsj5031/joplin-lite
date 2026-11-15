@@ -1,12 +1,16 @@
 # Golden corpus — the format gate
 
-Each fixture is Joplin's canonical serialized item text and must round-trip
-byte-for-byte. The gate is asserted in `golden_test.go`:
+Fixtures exercise lossless round-tripping. The `envelope_*` fixtures are
+**historical malformed Lite output**, not official producer output; their
+synthetic JED strings are not valid encrypted packets. Keeping their bytes is
+a parser compatibility check, not interoperability proof. Independent official
+producer/schema/parser evidence is in `../official-envelope/`.
+The gate is asserted in `golden_test.go`:
 
 1. **raw round-trip** — `ParseItem(x).Bytes() == x` for every fixture.
 2. **merge round-trip** — `ParseItem(x).SerializeWithOverrides(typedFields(x)) == x`
    for every fixture except the `envelope_*` forms (their metadata block is a
-   reduced keep-keys set, so a full field map legitimately appends keys).
+   malformed reduced keep-keys set).
 3. **typed round-trip** — `Serialize(Deserialize(x)) == x` for fixtures whose
    keys are all model-known (`*_extra` fixtures carry unknown keys such as
    `is_locked` and `extracted_resource_ids`, which survive only through the raw
@@ -27,5 +31,5 @@ Fixture rules (they encode Joplin's writer, verified against
 - `type_` is last. Type ids: 1 note, 2 folder, 4 resource, 5 tag, 6 note-tag,
   9 master key.
 
-Fixtures are synthetic but shaped exactly like real target items; the M1 gate
-replaces/extends them with items exported from the real target.
+Fixtures are synthetic. Do not infer official encrypted-envelope compatibility
+from the raw-passthrough checks.

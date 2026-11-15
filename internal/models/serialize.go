@@ -349,11 +349,24 @@ func DeserializeResource(content string) *Resource {
 	return r
 }
 
-// SerializeEncryptedEnvelope serializes the reduced item Joplin writes for an
-// encrypted sync item: keep-keys and encryption fields only, metadata block
-// only (Joplin's serializeForSync drops the title/body sections for the
-// reduced item).
+// SerializeEncryptedEnvelope writes the reduced item through the full schema,
+// just as BaseItem.serializeForSync -> ItemClass.serialize does. Absent values
+// are blank, not omitted: the official importer converts blank numbers to zero.
+// Never fill these placeholders from plaintext item fields.
 func SerializeEncryptedEnvelope(meta map[string]string) string {
+	keys, ok := encryptedSchema[parseInt(meta["type_"])]
+	if ok {
+		lines := make([]string, 0, len(keys)+1)
+		for _, key := range keys {
+			if key == "title" || key == "body" {
+				continue
+			}
+			lines = append(lines, key+": "+escapeMetaValue(key, meta[key]))
+		}
+		lines = append(lines, "type_: "+meta["type_"])
+		return strings.Join(lines, "\n")
+	}
+	// Other item types are not produced encrypted by Lite.
 	var b strings.Builder
 	writeMetadata(&b, meta)
 	return b.String()

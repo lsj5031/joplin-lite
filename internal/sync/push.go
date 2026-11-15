@@ -91,7 +91,9 @@ func itemPlain(db *store.DB, id string, updatedTime int64, fields map[string]str
 }
 
 // envelopeMeta reduces a field map to Joplin's keep-keys set for an encrypted
-// envelope (BaseItem.serializeForSync) plus the encryption fields.
+// envelope (BaseItem.serializeForSync) plus the encryption fields. This is an
+// intermediate object, not the wire schema: SerializeEncryptedEnvelope must
+// still emit blank placeholders for every other schema metadata field.
 func envelopeMeta(fields map[string]string, cipherText, masterKeyID string) map[string]string {
 	keep := map[string]bool{
 		"id": true, "note_id": true, "tag_id": true, "parent_id": true,
