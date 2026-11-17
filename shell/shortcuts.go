@@ -94,7 +94,7 @@ func shortcutGroups() []shortcutGroup {
 			{"Settings", shortcutKey(",")},
 		}},
 		{title: "Help", entries: []shortcutEntry{
-			{"Keyboard shortcuts", shortcutKey("/") + " or F1"},
+			{"Keyboard shortcuts", "? or " + shortcutKey("/") + " or F1"},
 		}},
 	}
 }

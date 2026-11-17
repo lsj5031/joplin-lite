@@ -138,7 +138,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	if c.Shortcut(0, ui.KeyF2) || (runtime.GOOS == "darwin" && c.Shortcut(0, ui.KeyEnter)) {
 		a.renameSelectedRail()
 	}
-	if c.Shortcut(0, ui.KeyF1) || c.Shortcut(ui.Cmd, ui.KeySlash) {
+	if c.Shortcut(0, ui.KeyF1) || c.Shortcut(ui.Cmd, ui.KeySlash) || c.Shortcut(ui.Shift, ui.KeySlash) {
 		a.openShortcuts()
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyR) {
