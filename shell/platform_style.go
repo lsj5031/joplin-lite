@@ -30,19 +30,21 @@ func (a *nativeApp) windowsTitleBar(c *ui.Context, t *ui.Theme) float32 {
 		if a.railOpen && !a.narrow {
 			railLabel = "Close notebooks"
 		}
-		if iconButton(c, "window-notebooks", iconSidebar, railLabel, "Toggle notebooks and tags (Ctrl+\\)").Clicked() {
+		if iconButton(c, "window-notebooks", iconSidebar, railLabel, "Toggle notebooks and tags (Ctrl+\\)").
+			KeyShortcuts(ui.Cmd, ui.KeyBackslash).Clicked() {
 			a.railOpen = !a.railOpen
 		}
 		ui.Spacer(c)
 		a.searchField(c, t)
 		ui.Spacer(c)
-		if primaryAction(c, "New note").Clicked() {
+		if primaryAction(c, "New note").KeyShortcuts(ui.Cmd, ui.KeyN).Clicked() {
 			a.newNote()
 		}
-		if chromeButton(c, "Ask").Tooltip("Ask across your notes (Ctrl+Shift+A)").Clicked() {
+		if chromeButton(c, "Ask").KeyShortcuts(ui.Cmd|ui.Shift, ui.KeyA).Clicked() {
 			a.toggleAsk()
 		}
-		if iconButton(c, "window-settings", iconSettings, "Settings", "Settings (Ctrl+,)").Clicked() {
+		if iconButton(c, "window-settings", iconSettings, "Settings", "Settings (Ctrl+,)").
+			KeyShortcuts(ui.Cmd, ui.KeyComma).Clicked() {
 			a.openSettings()
 		}
 	})
