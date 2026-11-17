@@ -1478,6 +1478,22 @@ func (a *nativeApp) keepConflictVersion() {
 // system, because the vault stores extensions such as .pdf only in metadata;
 // web and mail links keep their usual behavior.
 func (a *nativeApp) openLink(link string) {
+	// Heading anchors: with OnLink set the view leaves #heading links to the
+	// app, so scroll the preview to the heading the link names.
+	if strings.HasPrefix(link, "#") {
+		a.md.Anchor = link
+		a.md.AnchorVersion++
+		if a.invalidate != nil {
+			a.invalidate()
+		}
+		return
+	}
+	// Note-to-note links pasted from Joplin and its apps arrive as
+	// joplin://x-callback-url/openNote?id=.; open the note they name.
+	if id := joplinNoteID(link); id != "" {
+		a.openExternalNote(id)
+		return
+	}
 	if id, ok := strings.CutPrefix(link, ":/"); ok {
 		if len(id) != 32 {
 			return
@@ -2553,7 +2569,9 @@ func (a *nativeApp) prepareMarkdownOptions() string {
 	a.md.Theme = a.mdTheme
 	a.md.WrapCode = true
 	a.md.OnLink = nil
-	if strings.Contains(a.body, "](:/") {
+	// Taking the links means heading anchors and joplin:// links reach
+	// openLink too, which scrolls anchors and opens the named note.
+	if strings.Contains(a.body, "](:/") || strings.Contains(a.body, "joplin://") {
 		a.md.OnLink = a.openLink
 	}
 	return a.previewBody

@@ -36,6 +36,45 @@ func TestJoplinNoteID(t *testing.T) {
 	}
 }
 
+// TestNativePreviewJoplinLinks clicks the links a note body holds: a pasted
+// joplin:// note link opens the note it names, and a heading anchor scrolls
+// the preview when the body also has a resource link (the gate that makes
+// OnLink handle every click).
+func TestNativePreviewJoplinLinks(t *testing.T) {
+	app, db := openNativeTestApp(t)
+	svc := service.New(db)
+	nb := &models.Folder{Title: "Links"}
+	if err := svc.CreateNotebook(nb); err != nil {
+		t.Fatalf("CreateNotebook: %v", err)
+	}
+	target := addTestNote(t, svc, nb.ID, "Target", "body")
+	opened := addTestNote(t, svc, nb.ID, "Open", "body")
+	app.reloadNotebooks()
+	app.showNote(opened.ID)
+
+	link := "joplin://x-callback-url/openNote?id=" + target.ID
+	app.body = "See [the target](" + link + ")."
+	app.prepareMarkdownOptions()
+	if app.md.OnLink == nil {
+		t.Fatal("a body with a joplin:// link did not take the link clicks")
+	}
+	app.openLink(link)
+	if app.note == nil || app.note.ID != target.ID {
+		t.Fatalf("clicking %q opened %v, want %s", link, app.note, target.ID)
+	}
+
+	// A heading anchor scrolls the preview instead of doing nothing.
+	app.showNote(opened.ID)
+	app.body = "See [the intro](#intro).\n\n# Intro"
+	app.openLink("#intro")
+	if app.md.Anchor != "#intro" {
+		t.Fatalf("Anchor = %q, want #intro", app.md.Anchor)
+	}
+	if app.md.AnchorVersion == 0 {
+		t.Fatal("AnchorVersion did not move")
+	}
+}
+
 // TestNativeOpenExternalNote opens the note a joplin:// link names from a
 // notebook the sidebar is not showing, which is what a pasted external link
 // has to do.
