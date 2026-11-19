@@ -439,6 +439,9 @@ func overlayStoredSettings(cfg *config.Config, s desktopSettings) {
 // startSyncLocked starts the background loop. The caller holds syncMu (or is
 // still constructing the backend). A nil remote means "no sync".
 func (b *backend) startSyncLocked(remote jsync.SyncBackend) error {
+	if err := jsync.SelectTarget(b.db, remote); err != nil {
+		return err
+	}
 	b.status.reset()
 	key := syncSuccessKey(b.cfg, b.launch.ReuseOfficialKeychain)
 	raw, err := b.db.GetSetting(key)
@@ -529,16 +532,21 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 			return fmt.Errorf("cannot use this sync target: %w", err)
 		}
 	}
+	b.syncMu.Lock()
+	if b.closed {
+		b.syncMu.Unlock()
+		return errors.New("cannot change settings after shutdown")
+	}
 	if err := s.save(b.db); err != nil {
+		b.syncMu.Unlock()
 		return err
 	}
-
-	b.syncMu.Lock()
 	prevDone, prevCancel := b.syncDone, b.syncCancel
 	if prevCancel != nil {
 		prevCancel()
 	}
-	b.syncCancel, b.syncDone = nil, nil
+	done := make(chan struct{})
+	b.syncCancel, b.syncDone = nil, done
 	b.engine = nil
 	// A finishing old pass may still persist its own target's timestamp, but
 	// cannot publish that result as the newly selected target's status.
@@ -552,13 +560,18 @@ func (b *backend) ApplySettings(s desktopSettings) error {
 	b.srv.SetAPIToken(cfg.APIToken)
 
 	go func() {
+		defer close(done)
 		if prevDone != nil {
 			<-prevDone
 		}
 		b.syncMu.Lock()
 		defer b.syncMu.Unlock()
-		// A newer save (or Close) wins; this generation must not start.
+		// Record each saved selection, even if a newer save superseded it
+		// or the app closed before a pass started.
 		if b.closed || b.syncGen != gen {
+			if err := jsync.SelectTarget(b.db, remote); err != nil {
+				slog.Error("cannot record superseded sync target", "error", err)
+			}
 			return
 		}
 		if err := b.startSyncLocked(remote); err != nil {

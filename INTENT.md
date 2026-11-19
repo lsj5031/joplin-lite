@@ -100,7 +100,9 @@ Coexist with Joplin desktop/mobile on the same target.
 - **Deletion propagation** through `deleted_items` (fork already does this: push deletes the
   remote object; remote deletions found by the listing diff are pruned locally).
   **[update 2026-10-17]** Local deletes now queue `deleted_items` from the store's delete paths
-  (one row per synced target, incl. note-tag links and resource blob cleanup on push);
+  (incl. note-tag links and resource blob cleanup on push); only deletes bound to the
+  active remote are sent. [Held delete records](docs/sync-delete-queue.md) stay local
+  when a target is inactive, replaced, or cannot be identified;
   both-ways propagation on a real target stays an M2 gate item.
 - **Conflicts**: both sides changed → Joplin-style conflict note (never lose data).
   **[gap]** the fork currently overwrites local changes on pull. Required behavior: when a
@@ -117,8 +119,11 @@ Coexist with Joplin desktop/mobile on the same target.
   `conflict_original_id=<original id>` (empty when the remote copy was deleted), `is_shared`/
   `share_id` cleared — **title and parent_id are NOT changed** (the Conflicts notebook is
   virtual: fixed id `c04f1c7c04f1c7c04f1c7c04f1c7c04f` listing `is_conflict=1` notes), and
-  `deleted_time` is inherited like every other field. A note conflict is raised only when
-  title/body differ (or cipher text is involved — `Note.mustHandleConflict`); resources
+  `deleted_time` is inherited like every other field. A note conflict compares meaningful
+  note fields (including title, body, parent, to-do and preserved metadata), not timestamps
+  or encryption wrappers. When a pending local edit meets an encrypted revision, authenticating
+  the relevant envelope is required before proceeding; if it can't be compared safely,
+  the sync pass stops without overwriting either original. Resources
   conflict when `blob_updated_time` differs, resolved by duplicating the resource (blob
   copied, share fields cleared) plus an `Attachment conflict: "…"` pointer note in a real
   "Conflicts (attachments)`" folder. Remote delete + local changes → conflict copy first,

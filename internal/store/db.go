@@ -192,10 +192,20 @@ func (db *DB) ensureSidecarSchema() error {
 		revision TEXT NOT NULL,
 		local_hash TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (scope, item_name)
-	)`} {
+	)`, `CREATE TABLE IF NOT EXISTS jl_sync_targets (
+		sync_target INTEGER PRIMARY KEY,
+		scope TEXT NOT NULL,
+		active INTEGER NOT NULL
+	)`, `CREATE UNIQUE INDEX IF NOT EXISTS jl_one_active_sync_target ON jl_sync_targets(active) WHERE active = 1`} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("sidecar schema statement failed: %w\nSQL: %s", err, stmt)
 		}
+	}
+	// Legacy rows cannot prove which remote was active when they were queued.
+	// The empty default is quarantine, not a binding to the next target.
+	if _, err := db.Exec(`ALTER TABLE deleted_items ADD COLUMN jl_scope TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return err
 	}
 	// Guarded columns: databases that created `jl_revisions` before the
 	// encryption columns existed.

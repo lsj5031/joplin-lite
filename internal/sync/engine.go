@@ -143,6 +143,9 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 		return err
 	}
 	e.progress("Checking remote")
+	if err := SelectTarget(e.db, e.backend); err != nil {
+		return err
+	}
 
 	// Authenticate if needed
 	if !e.backend.IsAuthenticated() {
@@ -178,9 +181,25 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 	default:
 	}
 
+	// A new filesystem target can be created by lock acquisition. Bind it
+	// now that the path exists, before any local item gains a sync point.
+	if e.backend.SyncTarget() == 2 {
+		if err := SelectTarget(e.db, e.backend); err != nil {
+			return err
+		}
+	}
+
+	// Read target policy and master keys before making any pull decisions.
+	if err := PullSyncInfo(e.backend, e.db); err != nil {
+		return fmt.Errorf("sync refused: %w", err)
+	}
+	if _, err := loadSyncMasterKeys(e.db, e.e2ee, e.masterPassword); err != nil {
+		return err
+	}
+
 	// Pull changes from server
 	slog.Info("pulling changes from server")
-	if err := PullChanges(e.backend, e.db, func(done, total int, hasMore bool) {
+	if err := pullChanges(e.backend, e.db, e.e2ee, func(done, total int, hasMore bool) {
 		suffix := ""
 		if hasMore {
 			suffix = "+"
@@ -196,12 +215,6 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 	e.progress("Checking library")
 	if err := PullMissingItems(e.backend, e.db); err != nil {
 		return fmt.Errorf("reconciliation failed: %w", err)
-	}
-
-	// Fetch master keys from info.json (Joplin stores them there, not as .md
-	// items) and enforce the target format version.
-	if err := PullSyncInfo(e.backend, e.db); err != nil {
-		return fmt.Errorf("sync refused: %w", err)
 	}
 
 	// Decrypt pulled items

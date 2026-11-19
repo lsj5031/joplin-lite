@@ -53,6 +53,9 @@ var serveCmd = &cobra.Command{
 		// the local database, it just never talks to a remote.
 		var syncer clipper.SyncTrigger
 		if cfg.NoSync {
+			if err := sync.SelectTarget(db, nil); err != nil {
+				return err
+			}
 			slog.Info("sync disabled (--no-sync): serving the local database only")
 		} else {
 			var backend sync.SyncBackend
@@ -79,6 +82,9 @@ var serveCmd = &cobra.Command{
 				backend = sync.NewTracedBackend(c, "joplin_server")
 			}
 
+			if err := sync.SelectTarget(db, backend); err != nil {
+				return err
+			}
 			engine := sync.NewEngine(backend, db, cfg.MasterPassword)
 			syncer = engine
 

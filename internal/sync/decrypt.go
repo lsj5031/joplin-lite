@@ -18,28 +18,9 @@ func DecryptPulledItems(db *store.DB, svc *e2ee.Service, masterPassword string) 
 		return nil
 	}
 
-	// Load master keys
-	masterKeys, err := db.ListMasterKeys()
-	if err != nil {
-		return fmt.Errorf("cannot list master keys: %w", err)
-	}
-
-	if len(masterKeys) == 0 {
-		slog.Warn("no master keys in database, skipping decryption")
-		return nil
-	}
-
-	slog.Info("found master keys in database", "count", len(masterKeys))
-
-	for _, mk := range masterKeys {
-		if svc.HasMasterKey(mk.ID) {
-			continue
-		}
-		if err := svc.LoadMasterKey(mk.ID, mk.Content, masterPassword, mk.EncryptionMethod); err != nil {
-			slog.Error("cannot decrypt master key", "id", mk.ID, "error", err)
-			continue
-		}
-		slog.Info("loaded master key", "id", mk.ID)
+	haveKeys, err := loadSyncMasterKeys(db, svc, masterPassword)
+	if err != nil || !haveKeys {
+		return err
 	}
 
 	// Decrypt items with encryption_applied = 1
@@ -69,6 +50,25 @@ func DecryptPulledItems(db *store.DB, svc *e2ee.Service, masterPassword string) 
 	}
 
 	return nil
+}
+
+func loadSyncMasterKeys(db *store.DB, svc *e2ee.Service, password string) (bool, error) {
+	if password == "" {
+		return false, nil
+	}
+	keys, err := db.ListMasterKeys()
+	if err != nil {
+		return false, fmt.Errorf("cannot list master keys: %w", err)
+	}
+	for _, key := range keys {
+		if svc.HasMasterKey(key.ID) {
+			continue
+		}
+		if err := svc.LoadMasterKey(key.ID, key.Content, password, key.EncryptionMethod); err != nil {
+			slog.Warn("cannot unlock master key", "id", key.ID)
+		}
+	}
+	return len(keys) > 0, nil
 }
 
 func decryptItem(db *store.DB, svc *e2ee.Service, item store.EncryptedItem) error {

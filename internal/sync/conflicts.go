@@ -82,17 +82,6 @@ func remoteDecision(si *models.SyncItem, localUpdated, remoteUpdated int64, loca
 	return pullConflict
 }
 
-// noteMustHandleConflict mirrors Joplin's Note.mustHandleConflict: an item with
-// cipher text always conflicts (its content can't be compared here); otherwise
-// only title/body differences matter — a metadata-only difference is resolved
-// by taking the remote version without a conflict note.
-func noteMustHandleConflict(local, remote *models.Note) bool {
-	if local.EncryptionCipherText != "" || remote.EncryptionCipherText != "" {
-		return true
-	}
-	return local.Title != remote.Title || local.Body != remote.Body
-}
-
 // keepDecryptedCopy reports whether a still-encrypted remote copy must not
 // replace a decrypted local copy — at-least-once redelivery of the same or an
 // older revision. A genuinely newer encrypted revision falls through to the
@@ -145,6 +134,10 @@ func conflictBytes(db *store.DB, sourceID string, fields map[string]string, fres
 // no longer exists — and share fields cleared; everything else, including
 // title, parent_id and the timestamps, is inherited).
 func createNoteConflictCopy(db *store.DB, n *models.Note, remoteExists bool) (string, error) {
+	return saveNoteConflictCopy(db, n, remoteExists, nil)
+}
+
+func saveNoteConflictCopy(db *store.DB, n *models.Note, remoteExists bool, verifiedRaw *models.RawItem) (string, error) {
 	c := *n
 	c.ID = models.NewID()
 	c.IsConflict = 1
@@ -156,7 +149,13 @@ func createNoteConflictCopy(db *store.DB, n *models.Note, remoteExists bool) (st
 	c.IsShared = 0
 	c.ShareID = ""
 
-	plain := conflictBytes(db, n.ID, noteOverrides(&c), models.SerializeNote(&c))
+	fields := noteOverrides(&c)
+	var plain []byte
+	if verifiedRaw != nil {
+		plain = []byte(verifiedRaw.SerializeWithOverrides(fields))
+	} else {
+		plain = conflictBytes(db, n.ID, fields, models.SerializeNote(&c))
+	}
 	// One transaction: the conflict note and the bytes we will push for it
 	// must not be able to land separately.
 	if err := db.CreateNoteAndRaw(&c, plain); err != nil {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lsj5031/joplin-lite/internal/e2ee"
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
 )
@@ -39,6 +40,10 @@ type DeltaItem struct {
 // and applies them to the local database. Progress counts successfully applied
 // items; hasMore means the total only includes pages discovered so far.
 func PullChanges(backend SyncBackend, db *store.DB, progress func(done, total int, hasMore bool)) error {
+	return pullChanges(backend, db, nil, progress)
+}
+
+func pullChanges(backend SyncBackend, db *store.DB, svc *e2ee.Service, progress func(done, total int, hasMore bool)) error {
 	cursor, err := db.GetSyncCursor()
 	if err != nil {
 		return fmt.Errorf("cannot get sync cursor: %w", err)
@@ -133,7 +138,7 @@ func PullChanges(backend SyncBackend, db *store.DB, progress func(done, total in
 				if resumed[i] {
 					typeCounts["resumed"]++
 				} else {
-					if err := applyDeltaItem(backend, db, syncTarget, item, prefetched[i]); err != nil {
+					if err := applyDeltaItemWithKeys(backend, db, syncTarget, item, prefetched[i], svc); err != nil {
 						return fmt.Errorf("cannot apply delta item %s: %w", item.ItemName, err)
 					}
 					if delta.CheckpointScope != "" && item.Revision != "" && item.Type != 3 {
@@ -191,6 +196,10 @@ func downloadedBlobHash(db *store.DB, name string) (string, error) {
 // applyDeltaItem processes a single delta item. If prefetched is non-nil it is
 // used as the item content; otherwise the content is fetched from the server.
 func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item DeltaItem, prefetched []byte) error {
+	return applyDeltaItemWithKeys(backend, db, syncTarget, item, prefetched, nil)
+}
+
+func applyDeltaItemWithKeys(backend SyncBackend, db *store.DB, syncTarget int, item DeltaItem, prefetched []byte, svc *e2ee.Service) error {
 	// Delete type
 	if item.Type == 3 {
 		itemID, itemType := parseItemName(item.ItemName)
@@ -240,6 +249,22 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 			if err != nil {
 				return err
 			}
+			// While a local edit is pending, even a decision to skip an
+			// encrypted remote revision can lead to overwriting it on push.
+			// Authenticate before trusting its claimed revision timestamp.
+			if si != nil && existing.UpdatedTime > si.SyncTime && encryptedNote(note) {
+				id, _ := parseItemName(item.ItemName)
+				if id != note.ID {
+					return errUncertainNoteConflict
+				}
+				note, content, err = decryptConflictNote(svc, note)
+				if err != nil {
+					return err
+				}
+				if _, err := conflictNoteRaw(content, note); err != nil {
+					return err
+				}
+			}
 			if handled, err := keepDecryptedCopy(db, syncTarget, models.TypeNote, note.ID,
 				note.EncryptionApplied, existing.EncryptionApplied, note.UpdatedTime, existing.UpdatedTime, si); handled || err != nil {
 				return err
@@ -249,11 +274,8 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 				slog.Debug("keeping local note; remote copy is not a newer revision", "id", note.ID)
 				return nil
 			case pullConflict:
-				if existing.IsConflict != 1 && noteMustHandleConflict(existing, note) {
-					if _, err := createNoteConflictCopy(db, existing, true); err != nil {
-						return fmt.Errorf("cannot keep conflict copy of note %s: %w", note.ID, err)
-					}
-					slog.Info("note conflict: local version kept as conflict note, remote is canonical", "id", note.ID)
+				if err := resolveNoteConflict(db, svc, existing, note, content); err != nil {
+					return err
 				}
 			}
 		}

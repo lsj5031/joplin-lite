@@ -519,7 +519,7 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int, encryptBef
 }
 
 func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
-	deleted, err := db.GetDeletedItems(syncTarget)
+	deleted, err := db.PushableDeletedItems(syncTarget, deleteScope(backend))
 	if err != nil {
 		return err
 	}

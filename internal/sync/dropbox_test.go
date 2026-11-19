@@ -325,6 +325,9 @@ func TestDropboxBackend_BlockedDeletesPreserveRemoteAndQueue(t *testing.T) {
 					t.Fatal(err)
 				}
 				db := testDB(t)
+				if err := SelectTarget(db, b); err != nil {
+					t.Fatal(err)
+				}
 				if err := db.AddDeletedItem(id, itemType, 7); err != nil {
 					t.Fatal(err)
 				}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lsj5031/joplin-lite/internal/config"
@@ -27,9 +28,10 @@ type s3Objects interface {
 // Locks use the shared flat-file protocol under locks/ (like Dropbox and the
 // local folder target).
 type S3Backend struct {
-	client s3Objects
-	target int
-	locks  *fileLockManager
+	client      s3Objects
+	target      int
+	locks       *fileLockManager
+	deleteScope string
 }
 
 func newS3Backend(client s3Objects) *S3Backend {
@@ -53,8 +55,12 @@ func NewS3Backend(cfg *config.Config) (*S3Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newS3Backend(client), nil
+	b := newS3Backend(client)
+	b.deleteScope = targetScope("s3", cfg.S3URL, cfg.S3Bucket, cfg.S3Region, cfg.S3AccessKey, strconv.FormatBool(cfg.S3ForcePathStyle))
+	return b, nil
 }
+
+func (b *S3Backend) remoteDeleteScope() string { return b.deleteScope }
 
 // Authenticate is a no-op for S3 (credentials from env).
 func (b *S3Backend) Authenticate() error { return nil }

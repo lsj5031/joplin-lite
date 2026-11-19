@@ -129,18 +129,22 @@ func upsertSyncItemTx(ex execer, itemID string, itemType, syncTarget int, syncTi
 	return err
 }
 
-// AddDeletedItem records an item that needs to be deleted on the server.
+// AddDeletedItem records a deletion, binding it only if that target is active.
 func (db *DB) AddDeletedItem(itemID string, itemType, syncTarget int) error {
 	now := time.Now().UnixMilli()
-	_, err := db.Exec(`INSERT INTO deleted_items (item_type, item_id, deleted_time, sync_target)
-		VALUES (?, ?, ?, ?)`, itemType, itemID, now, syncTarget)
+	_, err := db.Exec(`INSERT INTO deleted_items (item_type, item_id, deleted_time, sync_target, jl_scope)
+		VALUES (?, ?, ?, ?, COALESCE((SELECT scope FROM jl_sync_targets WHERE sync_target = ? AND active = 1), ''))`,
+		itemType, itemID, now, syncTarget, syncTarget)
 	return err
 }
 
-// GetDeletedItems returns items that need to be deleted from the server.
+// GetDeletedItems returns all pending and quarantined records for inspection.
 func (db *DB) GetDeletedItems(syncTarget int) ([]*models.DeletedItem, error) {
-	rows, err := db.Query(`SELECT id, item_type, item_id, deleted_time, sync_target
-		FROM deleted_items WHERE sync_target = ?`, syncTarget)
+	return db.listDeletedItems(`WHERE sync_target = ?`, syncTarget)
+}
+
+func (db *DB) listDeletedItems(where string, args ...any) ([]*models.DeletedItem, error) {
+	rows, err := db.Query(`SELECT id, item_type, item_id, deleted_time, sync_target FROM deleted_items `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +158,7 @@ func (db *DB) GetDeletedItems(syncTarget int) ([]*models.DeletedItem, error) {
 		}
 		items = append(items, di)
 	}
-	return items, nil
+	return items, rows.Err()
 }
 
 // RemoveDeletedItem removes a deleted item record after it's been synced.

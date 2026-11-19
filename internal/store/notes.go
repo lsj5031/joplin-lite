@@ -305,8 +305,7 @@ func UpsertNoteTx(ex execer, n *models.Note) error {
 }
 
 // DeleteNote removes a note by ID. The note and its note-tag links are
-// queued in deleted_items first, so push propagates the deletion to every
-// sync target that has seen them.
+// recorded in deleted_items first; only the active remote can receive them.
 func (db *DB) DeleteNote(id string) error {
 	return db.writeTx(func(ex execer) error {
 		if err := recordDeletionTx(ex, id, models.TypeNote); err != nil {

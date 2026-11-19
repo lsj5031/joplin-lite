@@ -326,6 +326,46 @@ func TestDesktopBackendApplySettings(t *testing.T) {
 	}
 }
 
+func TestDesktopTargetOffHoldsPendingDelete(t *testing.T) {
+	target := t.TempDir()
+	const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	path := filepath.Join(target, id+".md")
+	note := &models.Note{ID: id, Title: "Fixture note", UpdatedTime: 1772000000000}
+	if err := os.WriteFile(path, []byte(models.SerializeNote(note)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := writeDesktopConfig(t, fmt.Sprintf("sync:\n  target: 2\n  local_dir: %q\n", filepath.ToSlash(target)))
+	be, err := startBackend(cfg, t.TempDir(), false, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(be.Close)
+	initial := waitDesktopSync(t, be, time.Time{})
+	if err := be.db.DeleteNote(id); err != nil {
+		t.Fatal(err)
+	}
+	before := be.Settings()
+	off := before
+	off.Target = targetOff
+	if err := be.ApplySettings(off); err != nil {
+		t.Fatal(err)
+	}
+	// Return without waiting for an Off pass (there is no remote to sync).
+	if err := be.ApplySettings(before); err != nil {
+		t.Fatal(err)
+	}
+	if st := waitDesktopSync(t, be, initial.Last); st.Err != "" {
+		t.Fatal(st.Err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("quick Off/on replayed a queued delete: %v", err)
+	}
+	held, err := be.db.GetDeletedItems(targetFolder)
+	if err != nil || len(held) != 1 || held[0].ItemID != id {
+		t.Fatalf("held queue = %v, err = %v", held, err)
+	}
+}
+
 // folderContains reports whether any file under dir mentions want.
 func folderContains(t *testing.T, dir, want string) bool {
 	t.Helper()
