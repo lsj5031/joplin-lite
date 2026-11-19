@@ -14,6 +14,8 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Perform a one-shot sync with Joplin Server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Cobra has parsed the invocation; usage doesn't help diagnose runtime failures.
+		cmd.SilenceUsage = true
 		cfg, err := loadConfig()
 		if err != nil {
 			return err

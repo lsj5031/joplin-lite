@@ -235,8 +235,8 @@ Clipper server compatible with the official Joplin Web Clipper:
     `PendingAuth`));
   - `GET /auth/check?auth_token=…` → `{"status":"waiting"}` →
     `{"status":"accepted","token":"API_TOKEN"}` or `{"status":"rejected"}`;
-  - the API token is also copyable from settings (the second, documented auth path) —
-    `serve` logs it at startup in the meantime.
+  - the API token is also available through desktop Settings or, for headless
+    `serve`, through the user's configured secret. `serve` does not log it at startup.
   **[verified 2026-10-17 against `routes/auth.ts` + `Api.ts` checkToken_]**: `GET
   /auth/check?token=<x>` → `{"valid": true|false}` is a second mode; an unknown
   `auth_token` is an error (we return 400 `Invalid auth token`); the Data API authenticates
@@ -404,8 +404,8 @@ stack (CodeMirror 6, markdown-it, KaTeX, DOMPurify) is unchanged.
   settings, route set matched to Joplin's `ClipperServer.ts` incl. `/revisions`, explicit
   port-collision messaging. **[done 2026-10-17 — code complete, `internal/clipper/auth_test.go`
   covers the pairing flow, token matrix, origin protection, /revisions and the collision
-  message; see the browser-extension section for the verified details]**. Remaining before
-  the gate: "API token in settings" is a console log line until the M4 settings UI exists.
+  message; see the browser-extension section for the verified details]**. The desktop
+  settings UI exposes the token; headless setup uses the configured secret or explicit pairing.
 - **Gate (the clipper gate):** the official extension clips a page (simplified + full clip),
   the note lands with its resource, and it survives a sync round-trip into Joplin desktop.
 

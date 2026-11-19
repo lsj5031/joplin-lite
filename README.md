@@ -193,6 +193,15 @@ go test ./...
 
 See [`shell/README.md`](shell/README.md) for Windows portable packaging, headless UI screenshot/video generation, and the optional browser preview. Additional testing guides cover [local sync](docs/local-sync-test.md), [E2EE sync](docs/e2ee-sync-rehearsal.md), [Joplin Server](docs/joplin-server-test.md), and [S3](docs/s3-test.md).
 
+### Headless Web Clipper setup
+
+`gojoplin serve` does not print the Clipper API token. In your YAML config, use
+`api.token: "${GOJOPLIN_API_TOKEN}"` as shown in [`config.yaml.example`](config.yaml.example)
+and supply a private token from your secret store through the process environment.
+To pair the official Web Clipper, start `serve` with an interactive console, initiate
+pairing from the extension, and accept the console prompt only if you requested it.
+For manual setup, use the token from your secret store, not the server logs.
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE). Forked from [jescarri/go-joplin](https://github.com/jescarri/go-joplin); see [NOTICE](NOTICE).

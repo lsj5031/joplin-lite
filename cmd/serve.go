@@ -117,7 +117,6 @@ var serveCmd = &cobra.Command{
 		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, syncer, policy, consoleAuthPrompt{out: os.Stdout})
 		addr := cfg.ListenAddr()
 		slog.Info("starting clipper server", "addr", addr)
-		slog.Info("clipper API token (paste into the extension or settings)", "token", cfg.APIToken)
 
 		httpSrv := &http.Server{
 			Addr:    addr,
