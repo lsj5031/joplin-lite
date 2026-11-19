@@ -78,7 +78,10 @@ func Open(dataDir string) (*DB, error) {
 	}
 	// cgo-free driver (modernc.org/sqlite): per-connection pragmas must be passed
 	// in the driver's _pragma= DSN form; the mattn-style _journal_mode params are ignored.
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	// Reserve the WAL writer at BEGIN, before a write transaction can take a
+	// read snapshot (even while preparing its first INSERT). Busy timeout can
+	// wait for the writer lock, but cannot let a stale snapshot become a writer.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("cannot open database: %w", err)
 	}

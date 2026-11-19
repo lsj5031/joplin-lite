@@ -30,12 +30,6 @@ func recordDeletionTx(ex execer, itemID string, itemType int) error {
 func (db *DB) SelectDeleteTarget(target int, scope string) (int64, error) {
 	var quarantined int64
 	err := db.writeTx(func(ex execer) error {
-		// Take the SQLite writer reservation before reading the selection.
-		// A deferred read transaction cannot upgrade its stale WAL snapshot
-		// if a local note/settings write commits in between.
-		if _, err := ex.Exec(`UPDATE jl_sync_targets SET active = active WHERE 0`); err != nil {
-			return err
-		}
 		var activeTarget int
 		var activeScope string
 		err := ex.QueryRow(`SELECT sync_target, scope FROM jl_sync_targets WHERE active = 1`).Scan(&activeTarget, &activeScope)
