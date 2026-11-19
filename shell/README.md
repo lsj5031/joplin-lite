@@ -211,9 +211,19 @@ local-only startup; this does not import official Joplin's sync configuration.
 
 Dropbox accepts an existing official `sync.7.auth` bearer token as well as
 Lite's JSON token set. A usable existing token does not require a new OAuth
-app; refreshing a token still requires its original app key. Encrypted targets
+app; refreshing a token still requires its original app key. Normal Lite setups
+renew short-lived tokens automatically and replace their private
+`dropbox_token.json` cache. If authorization is missing, expired without a
+refresh token, or revoked, run `gojoplin dropbox-auth` with the same Lite
+config and data directory, then restart the shell. When explicitly reusing
+official Keychain credentials, reconnect Dropbox in official Joplin instead;
+the shell still never reads or writes a token cache in that mode. Encrypted targets
 refuse uploads and queued deletions until the active encryption key is unlocked,
 and unreadable encryption metadata stops sync instead of allowing plaintext.
+
+Dropbox rate limits and server errors can schedule an earlier retry, shown in
+the footer. YAML `sync.dropbox.push_workers` sets upload concurrency (default
+three, maximum six); the driver spaces writes after rate limiting.
 
 The API token comes from the config or from a token saved in **Settings**.
 Without one the shell mints an ephemeral token for the session; it is not

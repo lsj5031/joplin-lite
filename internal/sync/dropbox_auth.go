@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,9 @@ type DropboxToken struct {
 // tokenExpirySkew is how early a token is considered expired.
 const tokenExpirySkew = 60 * time.Second
 
+// ErrDropboxReauthorize reports credentials that automatic refresh cannot fix.
+var ErrDropboxReauthorize = errors.New("Dropbox authorization is no longer valid; run 'gojoplin dropbox-auth' to reauthorize, then restart the desktop app if it is open")
+
 func (t *DropboxToken) expired(now time.Time) bool {
 	if t == nil || t.AccessToken == "" {
 		return true
@@ -50,7 +54,11 @@ func (t *DropboxToken) expired(now time.Time) bool {
 	if t.ExpiresAt == 0 {
 		return false
 	}
-	return now.UnixMilli() >= t.ExpiresAt-tokenExpirySkew.Milliseconds()
+	expires := time.UnixMilli(t.ExpiresAt)
+	if t.RefreshToken != "" {
+		expires = expires.Add(-tokenExpirySkew)
+	}
+	return !now.Before(expires)
 }
 
 // DropboxOAuth runs the PKCE flow and renews tokens.
@@ -144,7 +152,24 @@ func (o *DropboxOAuth) tokenRequest(ctx context.Context, form url.Values) (*Drop
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("dropbox token endpoint returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		var failure struct {
+			Code string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &failure)
+		if form.Get("grant_type") == "refresh_token" && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) {
+			switch failure.Code {
+			case "invalid_grant":
+				return nil, ErrDropboxReauthorize
+			case "invalid_client":
+				return nil, fmt.Errorf("check the original OAuth app key and secret: %w", ErrDropboxReauthorize)
+			}
+		}
+		// Share Retry-After parsing without exposing token-endpoint bodies.
+		err := dropboxError(resp.StatusCode, resp.Header, body, time.Now())
+		if api, ok := err.(*DropboxAPIError); ok {
+			api.summary = ""
+		}
+		return nil, err
 	}
 	var raw struct {
 		AccessToken  string `json:"access_token"`
@@ -187,11 +212,13 @@ func LoadDropboxToken(dataDir, authJSON string) (*DropboxToken, error) {
 		if data, err := os.ReadFile(DropboxTokenPath(dataDir)); err == nil {
 			var t DropboxToken
 			if err := json.Unmarshal(data, &t); err != nil {
-				return nil, fmt.Errorf("cannot parse %s: %w", DropboxTokenPath(dataDir), err)
+				return nil, fmt.Errorf("invalid Dropbox token cache: %w", ErrDropboxReauthorize)
 			}
-			if t.AccessToken != "" {
+			if t.AccessToken != "" || t.RefreshToken != "" {
 				return &t, nil
 			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("cannot read Dropbox token cache: %w", err)
 		}
 	}
 	if auth := strings.TrimSpace(authJSON); auth != "" {
@@ -200,9 +227,9 @@ func LoadDropboxToken(dataDir, authJSON string) (*DropboxToken, error) {
 		}
 		var t DropboxToken
 		if err := json.Unmarshal([]byte(auth), &t); err != nil {
-			return nil, fmt.Errorf("cannot parse sync.7.auth: %w", err)
+			return nil, fmt.Errorf("invalid sync.7.auth: %w", ErrDropboxReauthorize)
 		}
-		if t.AccessToken != "" {
+		if t.AccessToken != "" || t.RefreshToken != "" {
 			return &t, nil
 		}
 	}
@@ -218,5 +245,19 @@ func SaveDropboxToken(dataDir string, t *DropboxToken) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(DropboxTokenPath(dataDir), data, 0o600)
+	f, err := os.CreateTemp(dataDir, ".dropbox-token-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), DropboxTokenPath(dataDir))
 }

@@ -1,10 +1,12 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/lsj5031/joplin-lite/internal/e2ee"
 	"github.com/lsj5031/joplin-lite/internal/models"
@@ -37,38 +39,48 @@ func PushChanges(backend SyncBackend, db *store.DB, e2eeSvc *e2ee.Service) error
 	activeMasterKeyID, _ := db.GetActiveMasterKeyID()
 	encryptBeforePush := e2eeSvc != nil && activeMasterKeyID != "" && e2eeSvc.HasMasterKey(activeMasterKeyID)
 
-	// Push changed notes
-	if err := pushNotes(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID); err != nil {
-		return err
+	var partial PartialPushError
+	for _, group := range []struct {
+		name string
+		push func(SyncBackend, *store.DB, int, bool, *e2ee.Service, string) error
+	}{
+		{"notes", pushNotes}, {"folders", pushFolders}, {"tags", pushTags},
+		{"note_tags", pushNoteTags}, {"resources", pushResources},
+	} {
+		partial.add(group.name, group.push(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID))
 	}
-
-	// Push changed folders
-	if err := pushFolders(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID); err != nil {
-		return err
+	partial.add("deletions", pushDeletes(backend, db, syncTarget))
+	if len(partial.causes) != 0 {
+		return &partial
 	}
-
-	// Push changed tags
-	if err := pushTags(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID); err != nil {
-		return err
-	}
-
-	// Push changed note-tags
-	if err := pushNoteTags(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID); err != nil {
-		return err
-	}
-
-	// Push changed resources
-	if err := pushResources(backend, db, syncTarget, encryptBeforePush, e2eeSvc, activeMasterKeyID); err != nil {
-		return err
-	}
-
-	// Push deletes
-	if err := pushDeletes(backend, db, syncTarget); err != nil {
-		return err
-	}
-
 	return nil
 }
+
+// PartialPushError reports an incomplete pass. Successfully pushed items have
+// already been checkpointed; every failure is available to errors.Is/As.
+type PartialPushError struct {
+	causes  []error
+	summary []string
+}
+
+func (e *PartialPushError) add(group string, err error) {
+	if err == nil {
+		return
+	}
+	e.causes = append(e.causes, err)
+	if batch, ok := err.(interface{ Unwrap() []error }); ok {
+		failures := batch.Unwrap()
+		e.summary = append(e.summary, fmt.Sprintf("%s (%d failed): %v", group, len(failures), failures[0]))
+	} else {
+		e.summary = append(e.summary, fmt.Sprintf("%s: %v", group, err))
+	}
+}
+
+func (e *PartialPushError) Error() string {
+	return "incomplete push; unsynced changes remain: " + strings.Join(e.summary, "; ")
+}
+
+func (e *PartialPushError) Unwrap() []error { return e.causes }
 
 // itemPlain returns the plaintext bytes to push for an item and whether they
 // are newly serialized (as opposed to the exact bytes that were pulled).
@@ -170,7 +182,10 @@ func pushNotes(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforeP
 		ids = append(ids, id)
 	}
 
-	return parallelEach(len(ids), pushWorkers, func(i int) error {
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return parallelEach(len(ids), pushConcurrency(backend, pushWorkers), func(i int) error {
 		id := ids[i]
 		note, err := db.GetNote(id)
 		if err != nil {
@@ -183,14 +198,13 @@ func pushNotes(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforeP
 		plain, changed := itemPlain(db, id, note.UpdatedTime, noteOverrides(note), models.SerializeNote(note))
 		content := serializeNoteForSync(note, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
-			return nil
+			return fmt.Errorf("cannot serialize note %s for sync", id)
 		}
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
 		if err := backend.Put(path, content); err != nil {
-			slog.Error("failed to push note", "id", id, "error", err)
-			return nil
+			return fmt.Errorf("note %s: %w", id, err)
 		}
 
 		if err := db.UpsertSyncItem(id, models.TypeNote, syncTarget); err != nil {
@@ -233,7 +247,10 @@ func pushFolders(backend SyncBackend, db *store.DB, syncTarget int, encryptBefor
 		ids = append(ids, id)
 	}
 
-	return parallelEach(len(ids), pushWorkers, func(i int) error {
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return parallelEach(len(ids), pushConcurrency(backend, pushWorkers), func(i int) error {
 		id := ids[i]
 		folder, err := db.GetFolder(id)
 		if err != nil {
@@ -246,14 +263,13 @@ func pushFolders(backend SyncBackend, db *store.DB, syncTarget int, encryptBefor
 		plain, changed := itemPlain(db, id, folder.UpdatedTime, folderOverrides(folder), models.SerializeFolder(folder))
 		content := serializeFolderForSync(folder, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
-			return nil
+			return fmt.Errorf("cannot serialize folder %s for sync", id)
 		}
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
 		if err := backend.Put(path, content); err != nil {
-			slog.Error("failed to push folder", "id", id, "error", err)
-			return nil
+			return fmt.Errorf("folder %s: %w", id, err)
 		}
 
 		if err := db.UpsertSyncItem(id, models.TypeFolder, syncTarget); err != nil {
@@ -296,7 +312,10 @@ func pushTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePu
 		ids = append(ids, id)
 	}
 
-	return parallelEach(len(ids), pushWorkers, func(i int) error {
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return parallelEach(len(ids), pushConcurrency(backend, pushWorkers), func(i int) error {
 		id := ids[i]
 		tag, err := db.GetTag(id)
 		if err != nil {
@@ -309,14 +328,13 @@ func pushTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBeforePu
 		plain, changed := itemPlain(db, id, tag.UpdatedTime, tagOverrides(tag), models.SerializeTag(tag))
 		content := serializeTagForSync(tag, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
-			return nil
+			return fmt.Errorf("cannot serialize tag %s for sync", id)
 		}
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
 		if err := backend.Put(path, content); err != nil {
-			slog.Error("failed to push tag", "id", id, "error", err)
-			return nil
+			return fmt.Errorf("tag %s: %w", id, err)
 		}
 
 		if err := db.UpsertSyncItem(id, models.TypeTag, syncTarget); err != nil {
@@ -364,19 +382,21 @@ func pushNoteTags(backend SyncBackend, db *store.DB, syncTarget int, encryptBefo
 		noteTags = append(noteTags, nt)
 	}
 
-	return parallelEach(len(noteTags), pushWorkers, func(i int) error {
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return parallelEach(len(noteTags), pushConcurrency(backend, pushWorkers), func(i int) error {
 		nt := noteTags[i]
 		plain, changed := itemPlain(db, nt.ID, nt.UpdatedTime, models.NoteTagFields(nt), models.SerializeNoteTag(nt))
 		content := serializeNoteTagForSync(nt, plain, changed, db, encryptBeforePush, e2eeSvc, activeMasterKeyID)
 		if content == nil {
-			return nil
+			return fmt.Errorf("cannot serialize note_tag %s for sync", nt.ID)
 		}
 		itemName := nt.ID + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
 		if err := backend.Put(path, content); err != nil {
-			slog.Error("failed to push note_tag", "id", nt.ID, "error", err)
-			return nil
+			return fmt.Errorf("note_tag %s: %w", nt.ID, err)
 		}
 
 		if err := db.UpsertSyncItem(nt.ID, models.TypeNoteTag, syncTarget); err != nil {
@@ -433,7 +453,10 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int, encryptBef
 		ids = append(ids, id)
 	}
 
-	return parallelEach(len(ids), resourcePushWorkers, func(i int) error {
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return parallelEach(len(ids), pushConcurrency(backend, resourcePushWorkers), func(i int) error {
 		id := ids[i]
 		resource, err := db.GetResource(id)
 		if err != nil {
@@ -459,14 +482,13 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int, encryptBef
 		plain, changed := itemPlain(db, id, resource.UpdatedTime, resourceOverrides(pushRes), models.SerializeResource(pushRes))
 		content := serializeResourceForSync(resource, plain, changed, db, encrypt, e2eeSvc, activeMasterKeyID)
 		if content == nil {
-			return nil
+			return fmt.Errorf("cannot serialize resource %s for sync", id)
 		}
 		itemName := id + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
 		if err := backend.Put(path, content); err != nil {
-			slog.Error("failed to push resource metadata", "id", id, "error", err)
-			return nil
+			return fmt.Errorf("resource %s metadata: %w", id, err)
 		}
 
 		// Push blob if exists
@@ -475,17 +497,17 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int, encryptBef
 			if encrypt {
 				cipherText, err := e2eeSvc.EncryptFile(activeMasterKeyID, blobData)
 				if err != nil {
-					slog.Error("failed to encrypt resource blob", "id", id, "error", err)
-					return nil
+					return fmt.Errorf("cannot encrypt resource %s blob: %w", id, err)
 				}
 				blobData = []byte(cipherText)
 			}
 			blobItemName := ".resource/" + id
 			blobAPIPath := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(blobItemName))
 			if err := backend.Put(blobAPIPath, blobData); err != nil {
-				slog.Error("failed to push resource blob", "id", id, "error", err)
-				return nil
+				return fmt.Errorf("resource %s blob: %w", id, err)
 			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("cannot read resource %s blob: %w", id, err)
 		}
 
 		if err := db.UpsertSyncItem(id, models.TypeResource, syncTarget); err != nil {

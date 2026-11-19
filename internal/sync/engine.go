@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -71,33 +72,49 @@ type LockRefresher interface {
 	RefreshLock(lock interface{}) error
 }
 
+type lockKeeper interface {
+	keepLock(ctx context.Context, lock interface{}) error
+}
+
 // startLockRefresh refreshes the held lock until the returned stop is called.
 // An expired lock is not re-acquired — the failure is reported and the loop
 // stops (Joplin 'lockExpired' cancels the operation).
-func startLockRefresh(r LockRefresher, lock interface{}, cancel context.CancelCauseFunc) func() {
-	stopCh := make(chan struct{})
+func startLockRefresh(ctx context.Context, backend SyncBackend, lock interface{}, cancel context.CancelCauseFunc) func() {
+	ctx, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		if err := keepBackendLock(ctx, backend, lock); err != nil &&
+			(ctx.Err() == nil || errors.Is(err, ErrLockExpired) || errors.Is(err, ErrExclusiveLock)) {
+			slog.Error("lock refresh failed", "error", err)
+			cancel(fmt.Errorf("sync lock refresh failed: %w", err))
+		}
+	}()
+	return func() {
+		stop()
+		<-done
+	}
+}
+
+func keepBackendLock(ctx context.Context, backend SyncBackend, lock interface{}) error {
+	if keeper, ok := backend.(lockKeeper); ok {
+		return keeper.keepLock(ctx, lock)
+	}
+	if r, ok := backend.(LockRefresher); ok {
 		ticker := time.NewTicker(LockRefreshInterval)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-stopCh:
-				return
+			case <-ctx.Done():
+				return ctx.Err()
 			case <-ticker.C:
 				if err := r.RefreshLock(lock); err != nil {
-					slog.Error("lock refresh failed", "error", err)
-					cancel(fmt.Errorf("sync lock refresh failed: %w", err))
-					return
+					return err
 				}
 			}
 		}
-	}()
-	return func() {
-		close(stopCh)
-		<-done
 	}
+	return nil
 }
 
 // Sync performs a full sync cycle. Overlapping calls are refused (not queued):
@@ -151,9 +168,7 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 		}
 	}()
 	if lock != nil {
-		if refresher, ok := e.backend.(LockRefresher); ok {
-			defer startLockRefresh(refresher, lock, cancel)()
-		}
+		defer startLockRefresh(ctx, e.backend, lock, cancel)()
 	}
 
 	// Check for cancellation

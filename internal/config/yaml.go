@@ -35,6 +35,7 @@ type yamlDropbox struct {
 	AppKey       string `yaml:"app_key"`
 	AppSecret    string `yaml:"app_secret"`
 	BlockDeletes bool   `yaml:"block_deletes"`
+	PushWorkers  int    `yaml:"push_workers"`
 }
 
 type yamlS3 struct {
@@ -142,6 +143,7 @@ func loadFromYAML(data []byte) (*Config, error) {
 	cfg.DropboxAppKey = ExpandEnv(y.Sync.Dropbox.AppKey)
 	cfg.DropboxAppSecret = ExpandEnv(y.Sync.Dropbox.AppSecret)
 	cfg.DropboxBlockDeletes = y.Sync.Dropbox.BlockDeletes
+	cfg.DropboxPushWorkers = y.Sync.Dropbox.PushWorkers
 
 	// API: expand ${VAR} so secrets come from env
 	cfg.APIToken = ExpandEnv(y.API.Token)

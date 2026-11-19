@@ -101,6 +101,7 @@ type Config struct {
 	DropboxAppSecret    string `json:"sync.7.appSecret"`
 	DropboxAuth         string `json:"sync.7.auth"`         // OAuth token JSON (Joplin's key), bootstrap for the token store
 	DropboxBlockDeletes bool   `json:"sync.7.blockDeletes"` // keep remote data during initial dogfooding
+	DropboxPushWorkers  int    `json:"sync.7.pushWorkers"`
 	//
 	APIToken       string `json:"api.token"`
 	APIKey         string `json:"-"`
@@ -284,6 +285,7 @@ func loadFromJoplinJSON(data []byte) (*Config, error) {
 	cfg.DropboxAppSecret = getString("sync.7.appSecret")
 	cfg.DropboxAuth = getString("sync.7.auth")
 	cfg.DropboxBlockDeletes = getBool("sync.7.blockDeletes")
+	cfg.DropboxPushWorkers = getInt("sync.7.pushWorkers")
 	cfg.APIToken = getString("api.token")
 	return cfg, nil
 }

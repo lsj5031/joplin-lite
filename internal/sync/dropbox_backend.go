@@ -1,8 +1,10 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,7 +36,11 @@ import (
 // the shared flat-file protocol (locks/<type>_<clientType>_<clientId>.json).
 type DropboxBackend struct {
 	oauth        *DropboxOAuth
-	token        *DropboxToken
+	token        atomic.Pointer[DropboxToken]
+	tokenGate    chan struct{}
+	pendingToken *DropboxToken // guarded by tokenGate
+	authErr      error         // guarded by tokenGate
+	identity     string
 	dataDir      string // token store location
 	apiBase      string // default https://api.dropboxapi.com
 	contentBase  string // default https://content.dropboxapi.com
@@ -50,11 +56,12 @@ type DropboxBackend struct {
 	cacheHits    atomic.Int64
 	downloads    atomic.Int64
 	requests     atomic.Int64
+	pacer        dropboxPacer
+	pushWorkers  int
+	lockTTL      time.Duration
+	lockInterval time.Duration
+	lockTimeout  time.Duration
 }
-
-// A refresh lists locks and writes ours. Bound each leg well inside the
-// three-minute TTL, leaving time for the engine to cancel safely on failure.
-var dropboxLockRequestTimeout = 30 * time.Second
 
 // NewDropboxBackend creates the Dropbox driver from config. Credentials come
 // from the user's own Dropbox OAuth app (sync.7.appKey / sync.7.appSecret);
@@ -65,11 +72,14 @@ func NewDropboxBackend(cfg *config.Config) (*DropboxBackend, error) {
 		return nil, err
 	}
 	if token == nil {
-		return nil, fmt.Errorf("no Dropbox token found — run 'dropbox-auth' to authorize this client")
+		return nil, fmt.Errorf("no Dropbox token found: %w", ErrDropboxReauthorize)
 	}
 	oauth := NewDropboxOAuth(cfg.DropboxAppKey, cfg.DropboxAppSecret)
 	b := newDropboxBackend(oauth, token, cfg.DataDir)
 	b.blockDeletes = cfg.DropboxBlockDeletes
+	if cfg.DropboxPushWorkers > 0 {
+		b.pushWorkers = min(cfg.DropboxPushWorkers, pushWorkers)
+	}
 	return b, nil
 }
 
@@ -77,13 +87,27 @@ func NewDropboxBackend(cfg *config.Config) (*DropboxBackend, error) {
 // API bases at a fake server).
 func newDropboxBackend(oauth *DropboxOAuth, token *DropboxToken, dataDir string) *DropboxBackend {
 	b := &DropboxBackend{
-		oauth:       oauth,
-		token:       token,
-		dataDir:     dataDir,
-		apiBase:     "https://api.dropboxapi.com",
-		contentBase: "https://content.dropboxapi.com",
-		http:        &http.Client{Timeout: 120 * time.Second},
-		ctx:         context.Background(),
+		oauth:        oauth,
+		tokenGate:    make(chan struct{}, 1),
+		dataDir:      dataDir,
+		apiBase:      "https://api.dropboxapi.com",
+		contentBase:  "https://content.dropboxapi.com",
+		http:         &http.Client{Timeout: 120 * time.Second},
+		ctx:          context.Background(),
+		pushWorkers:  3,
+		lockTTL:      LockTTL,
+		lockInterval: LockRefreshInterval,
+		lockTimeout:  30 * time.Second,
+	}
+	b.token.Store(token)
+	if token != nil {
+		b.identity = token.AccountID
+		if b.identity == "" {
+			b.identity = token.RefreshToken
+		}
+		if b.identity == "" {
+			b.identity = token.AccessToken
+		}
 	}
 	b.locks = newFileLockManager(b, LockClientTypeCLI, "joplin-lite")
 	return b
@@ -91,6 +115,10 @@ func newDropboxBackend(oauth *DropboxOAuth, token *DropboxToken, dataDir string)
 
 // SyncTarget returns 7 (Dropbox).
 func (b *DropboxBackend) SyncTarget() int { return 7 }
+
+func (b *DropboxBackend) pushConcurrency(limit int) int {
+	return min(b.pushWorkers, limit)
+}
 
 // BeginSync shares one fresh, complete inventory between delta and reconciliation.
 // The profile retains its listing cursor and pending changes across restarts.
@@ -110,44 +138,14 @@ func (b *DropboxBackend) BeginSync(ctx context.Context, db *store.DB) func() {
 	}
 }
 
-// Authenticate refreshes the access token if it is expired.
-func (b *DropboxBackend) Authenticate() error {
-	if b.token == nil {
-		return fmt.Errorf("no Dropbox token — run 'dropbox-auth' first")
-	}
-	if !b.token.expired(time.Now()) {
-		return nil
-	}
-	if b.token.RefreshToken == "" {
-		return fmt.Errorf("Dropbox access token expired and there is no refresh token — run 'dropbox-auth' again")
-	}
-	if b.oauth == nil || b.oauth.AppKey == "" {
-		return fmt.Errorf("refreshing this Dropbox token requires its original OAuth app key")
-	}
-	tok, err := b.oauth.Refresh(b.ctx, b.token.RefreshToken)
-	if err != nil {
-		return fmt.Errorf("cannot refresh Dropbox token: %w", err)
-	}
-	if tok.RefreshToken == "" {
-		tok.RefreshToken = b.token.RefreshToken
-	}
-	b.token = tok
-	if b.dataDir != "" {
-		return SaveDropboxToken(b.dataDir, tok)
-	}
-	return nil
-}
-
-// IsAuthenticated reports whether a token is present (expiry is handled in
-// Authenticate via the refresh token).
-func (b *DropboxBackend) IsAuthenticated() bool {
-	return b.token != nil && (b.token.AccessToken != "" || b.token.RefreshToken != "")
-}
-
 // AcquireLock acquires the flat-file SYNC lock (ErrExclusiveLock when another
 // client holds an active EXCLUSIVE lock).
 func (b *DropboxBackend) AcquireLock() (interface{}, error) {
-	return b.locks.Acquire()
+	lock, err := b.locks.Acquire()
+	if err != nil {
+		return nil, err
+	}
+	return lock, nil
 }
 
 // ReleaseLock releases our lock.
@@ -156,29 +154,24 @@ func (b *DropboxBackend) ReleaseLock(lock interface{}) error {
 		return nil
 	}
 	// Leave time for the worker to exit inside the shell's five-second wait.
-	previous := b.ctx
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(previous), 3*time.Second)
-	b.ctx = ctx
-	defer func() {
-		cancel()
-		b.ctx = previous
-	}()
-	return b.locks.Release()
-}
-
-// RefreshLock refreshes our held lock while it is still active.
-func (b *DropboxBackend) RefreshLock(lock interface{}) error {
-	if lock == nil {
-		return nil
+	deadline := time.Now().Add(3 * time.Second)
+	if earlier, ok := b.ctx.Deadline(); ok && earlier.Before(deadline) {
+		deadline = earlier
 	}
-	started := time.Now()
-	err := b.locks.Refresh()
-	slog.Info("Dropbox lock refresh finished", "duration", time.Since(started), "error", err)
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(b.ctx), deadline)
+	defer cancel()
+	err := b.deletePath(ctx, "/locks/"+lockFileName(lock.(*Lock)))
+	if err != nil {
+		slog.Warn("failed to release Dropbox lock", "error", err)
+	}
 	return err
 }
 
 // Get implements SyncBackend for the Joplin-Server-style paths.
 func (b *DropboxBackend) Get(path string) ([]byte, error) {
+	if err := b.ctx.Err(); err != nil {
+		return nil, err
+	}
 	path, rawQuery, _ := strings.Cut(path, "?")
 	key, op := parseDropboxPath(path)
 	if key == "" && op == "delta" {
@@ -211,7 +204,7 @@ func (b *DropboxBackend) Delete(path string) error {
 	if key == "" || op != "content" {
 		return fmt.Errorf("unsupported Dropbox delete path: %s", path)
 	}
-	return b.deletePath(dropboxPath(key))
+	return b.deletePath(b.ctx, dropboxPath(key))
 }
 
 // parseDropboxPath extracts key and operation from engine paths
@@ -276,20 +269,22 @@ func (b *DropboxBackend) listAll(path string) ([]dropboxEntry, error) {
 	if path == "" && b.inSync && b.db != nil {
 		return b.listInventory()
 	}
+	return b.listFolder(b.ctx, path)
+}
+
+func (b *DropboxBackend) listFolder(ctx context.Context, path string) ([]dropboxEntry, error) {
 	started := time.Now()
 	pages := 0
 	var out []dropboxEntry
-	ctx := b.ctx
+	var timeout time.Duration
 	if path == "/locks" {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, dropboxLockRequestTimeout)
-		defer cancel()
+		timeout = b.lockTimeout
 	}
 	arg := map[string]any{"path": path, "recursive": true, "limit": 500}
 	endpoint := "/2/files/list_folder"
 	for {
 		var resp listFolderResponse
-		if err := b.apiJSON(ctx, endpoint, arg, &resp); err != nil {
+		if err := b.jsonRequest(ctx, endpoint, timeout, false, arg, &resp); err != nil {
 			return nil, err
 		}
 		pages++
@@ -327,11 +322,7 @@ func entryTimeMs(e dropboxEntry) int64 {
 
 // checkpointScope isolates persisted state by endpoint and authorization.
 func (b *DropboxBackend) checkpointScope() string {
-	identity := b.token.RefreshToken
-	if identity == "" {
-		identity = b.token.AccessToken
-	}
-	return fmt.Sprintf("dropbox:%x", sha256.Sum256([]byte(b.apiBase+"\x00"+b.contentBase+"\x00"+identity)))
+	return fmt.Sprintf("dropbox:%x", sha256.Sum256([]byte(b.apiBase+"\x00"+b.contentBase+"\x00"+b.identity)))
 }
 
 // getDelta delivers pending inventory changes. Calls outside an engine pass
@@ -405,21 +396,22 @@ func (b *DropboxBackend) getChildren() ([]byte, error) {
 
 // apiJSON posts a JSON-RPC-style Dropbox request (apiBase endpoint).
 func (b *DropboxBackend) apiJSON(ctx context.Context, endpoint string, arg any, out any) error {
+	return b.jsonRequest(ctx, endpoint, 0, false, arg, out)
+}
+
+func (b *DropboxBackend) jsonRequest(ctx context.Context, endpoint string, timeout time.Duration, write bool, arg any, out any) error {
 	body, err := json.Marshal(arg)
 	if err != nil {
 		return err
 	}
-	respBody, status, err := b.do(ctx, func(req *http.Request) {
+	respBody, err := b.do(ctx, endpoint, timeout, write, func(req *http.Request) {
 		req.URL, _ = url.Parse(b.apiBase + endpoint)
 		req.Header.Set("Content-Type", "application/json")
-		req.Body = io.NopCloser(strings.NewReader(string(body)))
+		req.Body = io.NopCloser(bytes.NewReader(body))
 		req.ContentLength = int64(len(body))
-	}, endpoint)
+	})
 	if err != nil {
 		return err
-	}
-	if status != http.StatusOK {
-		return dropboxError(status, respBody)
 	}
 	if out != nil {
 		return json.Unmarshal(respBody, out)
@@ -427,34 +419,60 @@ func (b *DropboxBackend) apiJSON(ctx context.Context, endpoint string, arg any, 
 	return nil
 }
 
-// upload uploads raw content to a Dropbox path (files/upload).
+// Uploads are guarded by the revision observed before the first attempt. If
+// the response was lost after commit, a replay cannot overwrite a peer's
+// intervening edit or create a second copy.
 func (b *DropboxBackend) upload(path string, content []byte) error {
-	ctx := b.ctx
-	if strings.HasPrefix(path, "/locks/") {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, dropboxLockRequestTimeout)
-		defer cancel()
-	}
-	arg, err := json.Marshal(map[string]any{
-		"path": path, "mode": "overwrite", "autorename": false, "mute": true,
-	})
+	timeout := b.mutationTimeout(path)
+	before, err := b.metadata(b.ctx, path, timeout)
 	if err != nil {
 		return err
 	}
-	respBody, status, err := b.do(ctx, func(req *http.Request) {
+	_, err = b.uploadRevision(b.ctx, path, content, before, timeout)
+	return err
+}
+
+func (b *DropboxBackend) uploadRevision(ctx context.Context, path string, content []byte, before *dropboxEntry, timeout time.Duration) (*dropboxEntry, error) {
+	var mode any = "add"
+	if before != nil {
+		if before.Rev == "" {
+			return nil, fmt.Errorf("cannot safely update %s without a Dropbox revision", path)
+		}
+		mode = map[string]string{".tag": "update", "update": before.Rev}
+	}
+	arg, err := json.Marshal(map[string]any{
+		"path": path, "mode": mode, "autorename": false, "mute": true, "strict_conflict": true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	respBody, err := b.do(ctx, "/2/files/upload", timeout, true, func(req *http.Request) {
 		req.URL, _ = url.Parse(b.contentBase + "/2/files/upload")
 		req.Header.Set("Dropbox-API-Arg", string(arg))
 		req.Header.Set("Content-Type", "application/octet-stream")
-		req.Body = io.NopCloser(strings.NewReader(string(content)))
+		req.Body = io.NopCloser(bytes.NewReader(content))
 		req.ContentLength = int64(len(content))
-	}, "/2/files/upload")
+	})
 	if err != nil {
-		return err
+		if ctx.Err() == nil && (isDropboxStatus(err, http.StatusConflict) || ambiguousDropboxResponse(err)) {
+			current, checkErr := b.metadata(ctx, path, timeout)
+			if checkErr != nil {
+				return nil, errors.Join(err, checkErr)
+			}
+			if current != nil {
+				hash, hashErr := hex.DecodeString(current.ContentHash)
+				if hashErr == nil && matchesDropboxContent(content, hash) {
+					return current, nil
+				}
+			}
+		}
+		return nil, err
 	}
-	if status != http.StatusOK {
-		return dropboxError(status, respBody)
+	var entry dropboxEntry
+	if err := json.Unmarshal(respBody, &entry); err != nil {
+		return nil, fmt.Errorf("cannot parse Dropbox upload response: %w", err)
 	}
-	return nil
+	return &entry, nil
 }
 
 // download fetches a Dropbox path (files/download). Missing files return
@@ -472,18 +490,15 @@ func (b *DropboxBackend) download(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	respBody, status, err := b.do(b.ctx, func(req *http.Request) {
+	respBody, err := b.do(b.ctx, "/2/files/download", 0, false, func(req *http.Request) {
 		req.URL, _ = url.Parse(b.contentBase + "/2/files/download")
 		req.Header.Set("Dropbox-API-Arg", string(arg))
-	}, "/2/files/download")
-	if err != nil {
-		return nil, err
-	}
-	if status == http.StatusConflict && isNotFound(respBody) {
+	})
+	if isDropboxNotFound(err) {
 		return nil, nil
 	}
-	if status != http.StatusOK {
-		return nil, dropboxError(status, respBody)
+	if err != nil {
+		return nil, err
 	}
 	if !strings.HasPrefix(path, "/locks/") && path != "/info.json" {
 		b.downloads.Add(1)
@@ -493,72 +508,56 @@ func (b *DropboxBackend) download(path string) ([]byte, error) {
 
 // deletePath deletes a Dropbox path (files/delete_v2). Missing files are a
 // no-op (the item is already gone from the target).
-func (b *DropboxBackend) deletePath(path string) error {
-	var out any
-	err := b.apiJSON(b.ctx, "/2/files/delete_v2", map[string]string{"path": path}, &out)
-	if err != nil && isNotFound([]byte(err.Error())) {
+func (b *DropboxBackend) deletePath(ctx context.Context, path string) error {
+	timeout := b.mutationTimeout(path)
+	before, err := b.metadata(ctx, path, timeout)
+	if err != nil || before == nil {
+		return err
+	}
+	if before.Rev == "" {
+		return fmt.Errorf("cannot safely delete %s without a Dropbox revision", path)
+	}
+	err = b.jsonRequest(ctx, "/2/files/delete_v2", timeout, true, map[string]string{"path": path, "parent_rev": before.Rev}, nil)
+	if isDropboxNotFound(err) {
 		return nil
+	}
+	if ctx.Err() == nil && ambiguousDropboxResponse(err) {
+		current, checkErr := b.metadata(ctx, path, timeout)
+		if checkErr == nil && current == nil {
+			return nil
+		}
 	}
 	return err
 }
 
-// do runs an authenticated request, refreshing the token once on 401.
-func (b *DropboxBackend) do(ctx context.Context, setup func(*http.Request), endpoint string) ([]byte, int, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", nil)
-		if err != nil {
-			return nil, 0, err
-		}
-		setup(req)
-		req.Header.Set("Authorization", "Bearer "+b.token.AccessToken)
-		b.requests.Add(1)
-		started := time.Now()
-		resp, err := b.http.Do(req)
-		if err != nil {
-			slog.Warn("Dropbox request failed", "endpoint", endpoint, "stage", "response headers", "duration", time.Since(started), "error", err)
-			return nil, 0, err
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
-		resp.Body.Close()
-		if err != nil {
-			slog.Warn("Dropbox request failed", "endpoint", endpoint, "stage", "response body", "duration", time.Since(started), "status", resp.StatusCode, "error", err)
-			return nil, resp.StatusCode, err
-		}
-		if time.Since(started) >= 5*time.Second || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-			slog.Warn("Dropbox request finished", "endpoint", endpoint, "duration", time.Since(started), "status", resp.StatusCode)
-		}
-		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
-			if aerr := b.Authenticate(); aerr != nil {
-				return nil, resp.StatusCode, aerr
-			}
-			continue
-		}
-		return body, resp.StatusCode, nil
+func (b *DropboxBackend) metadata(ctx context.Context, path string, timeout time.Duration) (*dropboxEntry, error) {
+	var out dropboxEntry
+	err := b.jsonRequest(ctx, "/2/files/get_metadata", timeout, false, map[string]string{"path": path}, &out)
+	if isDropboxNotFound(err) {
+		return nil, nil
 	}
-	return nil, 0, fmt.Errorf("unauthorized: %s", endpoint)
+	return &out, err
 }
 
-// dropboxError renders a Dropbox API error body
-// ({"error_summary": "path/not_found/..."}).
-func dropboxError(status int, body []byte) error {
-	var e struct {
-		ErrorSummary string `json:"error_summary"`
-		Error        struct {
-			Tag string `json:".tag"`
-		} `json:"error"`
+func (b *DropboxBackend) mutationTimeout(path string) time.Duration {
+	if strings.HasPrefix(path, "/locks/") {
+		return b.lockTimeout
 	}
-	_ = json.Unmarshal(body, &e)
-	if status == http.StatusConflict && e.Error.Tag == "reset" {
-		return errDropboxCursorReset
-	}
-	if e.ErrorSummary != "" {
-		return fmt.Errorf("dropbox API error %d: %s", status, e.ErrorSummary)
-	}
-	return fmt.Errorf("dropbox API error %d: %s", status, strings.TrimSpace(string(body)))
+	return 0
 }
 
-func isNotFound(body []byte) bool {
-	return strings.Contains(string(body), "not_found")
+func isDropboxStatus(err error, status int) bool {
+	var api *DropboxAPIError
+	return errors.As(err, &api) && api.Status == status
+}
+
+func isDropboxNotFound(err error) bool {
+	var api *DropboxAPIError
+	if !errors.As(err, &api) || api.Status != http.StatusConflict {
+		return false
+	}
+	s := strings.TrimRight(api.summary, "/")
+	return s == "path/not_found" || s == "path_lookup/not_found"
 }
 
 var errDropboxCursorReset = errors.New("Dropbox listing cursor reset")
@@ -574,13 +573,13 @@ func (b *DropboxBackend) putLock(name string, data []byte) error {
 }
 
 func (b *DropboxBackend) deleteLock(name string) error {
-	return b.deletePath("/locks/" + name)
+	return b.deletePath(b.ctx, "/locks/"+name)
 }
 
 func (b *DropboxBackend) listLocks() ([]LockFile, error) {
 	entries, err := b.listAll("/locks")
 	if err != nil {
-		if isNotFound([]byte(err.Error())) {
+		if isDropboxNotFound(err) {
 			return nil, nil
 		}
 		return nil, err

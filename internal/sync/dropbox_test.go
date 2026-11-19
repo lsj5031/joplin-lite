@@ -65,6 +65,24 @@ func (f *fakeDropbox) put(path string, content []byte) {
 	f.times[path] = time.Now()
 }
 
+// entry must be called with f.mu held.
+func (f *fakeDropbox) entry(path string) dropboxEntry {
+	data := f.files[path]
+	hash := sha256.New()
+	for remaining := data; len(remaining) > 0; {
+		n := min(len(remaining), 4<<20)
+		block := sha256.Sum256(remaining[:n])
+		hash.Write(block[:])
+		remaining = remaining[n:]
+	}
+	return dropboxEntry{
+		Tag: "file", PathDisplay: path, PathLower: strings.ToLower(path),
+		ServerModified: f.times[path].UTC().Format(time.RFC3339Nano),
+		Rev:            fmt.Sprintf("%x-%x", sha256.Sum256(data), f.times[path].UnixNano()),
+		ContentHash:    fmt.Sprintf("%x", hash.Sum(nil)),
+	}
+}
+
 func (f *fakeDropbox) handler() http.Handler {
 	mux := http.NewServeMux()
 	auth := func(r *http.Request) {
@@ -76,12 +94,44 @@ func (f *fakeDropbox) handler() http.Handler {
 	mux.HandleFunc("/2/files/upload", func(w http.ResponseWriter, r *http.Request) {
 		auth(r)
 		var arg struct {
-			Path string `json:"path"`
+			Path       string `json:"path"`
+			Mode       any    `json:"mode"`
+			Strict     bool   `json:"strict_conflict"`
+			Autorename bool   `json:"autorename"`
 		}
 		json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &arg)
 		body, _ := io.ReadAll(r.Body)
-		f.put(arg.Path, body)
-		w.Write([]byte(`{}`))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		_, exists := f.files[arg.Path]
+		ok := false
+		switch mode := arg.Mode.(type) {
+		case string:
+			ok = mode == "add" && !exists
+		case map[string]any:
+			ok = exists && mode[".tag"] == "update" && mode["update"] == f.entry(arg.Path).Rev
+		}
+		if !ok || !arg.Strict || arg.Autorename {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error_summary":"path/conflict/file/"}`)
+			return
+		}
+		f.files[arg.Path], f.times[arg.Path] = body, time.Now()
+		_ = json.NewEncoder(w).Encode(f.entry(arg.Path))
+	})
+
+	mux.HandleFunc("/2/files/get_metadata", func(w http.ResponseWriter, r *http.Request) {
+		auth(r)
+		var arg struct{ Path string }
+		_ = json.NewDecoder(r.Body).Decode(&arg)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if _, ok := f.files[arg.Path]; !ok {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error_summary":"path/not_found/"}`)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(f.entry(arg.Path))
 	})
 
 	mux.HandleFunc("/2/files/download", func(w http.ResponseWriter, r *http.Request) {
@@ -118,19 +168,7 @@ func (f *fakeDropbox) handler() http.Handler {
 			page = fakeDropboxListing{path: path, snapshot: make(map[string]dropboxEntry)}
 			for p := range f.files {
 				if path == "" || p == path || strings.HasPrefix(p, path+"/") {
-					hash := sha256.New()
-					for remaining := f.files[p]; len(remaining) > 0; {
-						n := min(len(remaining), 4<<20)
-						block := sha256.Sum256(remaining[:n])
-						hash.Write(block[:])
-						remaining = remaining[n:]
-					}
-					entry := dropboxEntry{
-						Tag: "file", PathDisplay: p, PathLower: strings.ToLower(p),
-						ServerModified: f.times[p].UTC().Format(time.RFC3339Nano),
-						Rev:            fmt.Sprintf("%x", sha256.Sum256(f.files[p])),
-						ContentHash:    fmt.Sprintf("%x", hash.Sum(nil)),
-					}
+					entry := f.entry(p)
 					page.snapshot[p] = entry
 					if old, exists := prior.snapshot[p]; !exists || old != entry {
 						page.entries = append(page.entries, entry)
@@ -182,19 +220,25 @@ func (f *fakeDropbox) handler() http.Handler {
 	mux.HandleFunc("/2/files/delete_v2", func(w http.ResponseWriter, r *http.Request) {
 		auth(r)
 		var arg struct {
-			Path string `json:"path"`
+			Path      string `json:"path"`
+			ParentRev string `json:"parent_rev"`
 		}
 		json.Unmarshal(newBody(r), &arg)
 		f.mu.Lock()
 		_, ok := f.files[arg.Path]
-		delete(f.files, arg.Path)
-		delete(f.times, arg.Path)
-		f.mu.Unlock()
+		defer f.mu.Unlock()
 		if !ok {
 			w.WriteHeader(http.StatusConflict)
 			w.Write([]byte(`{"error_summary": "path/not_found/"}`))
 			return
 		}
+		if arg.ParentRev != f.entry(arg.Path).Rev {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error_summary":"parent_rev_mismatch/"}`)
+			return
+		}
+		delete(f.files, arg.Path)
+		delete(f.times, arg.Path)
 		w.Write([]byte(`{}`))
 	})
 
@@ -470,7 +514,7 @@ func TestDropboxEngineInventoryIsCompleteAndFreshEachPass(t *testing.T) {
 	handler := f.handler()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/2/files/list_folder/continue" && failPage.Swap(false) {
-			http.Error(w, "injected incomplete inventory", http.StatusServiceUnavailable)
+			http.Error(w, "injected non-retryable inventory error", http.StatusForbidden)
 			return
 		}
 		if r.URL.Path == "/2/files/list_folder" {
@@ -670,11 +714,11 @@ func TestDropboxBackend_TokenRefresh(t *testing.T) {
 	b, f, done := newTestDropbox(t)
 	defer done()
 
-	b.token = &DropboxToken{
+	b.token.Store(&DropboxToken{
 		AccessToken:  "expired-token",
 		RefreshToken: "rt-1",
 		ExpiresAt:    time.Now().Add(-time.Hour).UnixMilli(),
-	}
+	})
 	if err := b.Authenticate(); err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -684,8 +728,8 @@ func TestDropboxBackend_TokenRefresh(t *testing.T) {
 	if len(forms) != 1 || forms[0].Get("grant_type") != "refresh_token" || forms[0].Get("refresh_token") != "rt-1" {
 		t.Fatalf("token endpoint calls = %v, want one refresh_token grant", forms)
 	}
-	if b.token.AccessToken != "new-token" || b.token.RefreshToken != "rt-new" {
-		t.Fatalf("token after refresh = %+v", b.token)
+	if token := b.token.Load(); token.AccessToken != "new-token" || token.RefreshToken != "rt-new" {
+		t.Fatal("refresh did not replace both tokens")
 	}
 
 	// API calls now carry the fresh token; a 401 would refresh and retry.
@@ -705,6 +749,51 @@ func TestDropboxOAuth_LoopbackFlow(t *testing.T) {
 	srv := httptest.NewServer(f.handler())
 	defer srv.Close()
 
+	oauth := NewDropboxOAuth("appkey", "")
+	oauth.AuthURL, oauth.TokenURL = srv.URL+"/authorize", srv.URL+"/oauth2/token"
+	flowTok, q, flowErr := completeMockDropboxOAuthFlow(t, oauth)
+	if flowErr != nil {
+		t.Fatalf("flow: %v", flowErr)
+	}
+	if flowTok.AccessToken != "new-token" || flowTok.RefreshToken != "rt-new" || flowTok.AccountID != "dbid:42" {
+		t.Fatal("flow did not return the expected offline grant")
+	}
+	if flowTok.ExpiresAt < time.Now().Add(30*time.Minute).UnixMilli() {
+		t.Fatal("expires_at not set from expires_in")
+	}
+	// PKCE linkage: the code_verifier sent to the token endpoint must hash to
+	// the code_challenge in the authorization URL.
+	f.mu.Lock()
+	forms := append([]url.Values(nil), f.tokenForms...)
+	f.mu.Unlock()
+	if len(forms) != 1 {
+		t.Fatalf("token endpoint calls = %d, want 1", len(forms))
+	}
+	form := forms[0]
+	if form.Get("code") != "the-code" || form.Get("grant_type") != "authorization_code" {
+		t.Fatal("unexpected grant form")
+	}
+	sum := sha256.Sum256([]byte(form.Get("code_verifier")))
+	if base64.RawURLEncoding.EncodeToString(sum[:]) != q.Get("code_challenge") {
+		t.Fatal("code_verifier does not match the code_challenge")
+	}
+}
+
+func TestDropboxOAuth_LoopbackRejectsMissingOfflineGrant(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"access_token":"mock-short-lived","expires_in":3600}`)
+	}))
+	defer srv.Close()
+	oauth := NewDropboxOAuth("appkey", "")
+	oauth.AuthURL, oauth.TokenURL = srv.URL+"/authorize", srv.URL+"/oauth2/token"
+	token, _, err := completeMockDropboxOAuthFlow(t, oauth)
+	if token != nil || !errors.Is(err, ErrDropboxReauthorize) {
+		t.Fatalf("fresh sign-in without offline grant was accepted: %v", err)
+	}
+}
+
+func completeMockDropboxOAuthFlow(t *testing.T, oauth *DropboxOAuth) (*DropboxToken, url.Values, error) {
+	t.Helper()
 	// Reserve a loopback port for the redirect.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -713,17 +802,17 @@ func TestDropboxOAuth_LoopbackFlow(t *testing.T) {
 	addr := ln.Addr().String()
 	ln.Close()
 
-	oauth := NewDropboxOAuth("appkey", "")
-	oauth.TokenURL = srv.URL + "/oauth2/token"
 	oauth.Redirect = "http://" + addr
 
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	var out syncBuffer
 	done := make(chan struct{})
 	var flowTok *DropboxToken
 	var flowErr error
 	go func() {
 		defer close(done)
-		flowTok, flowErr = RunDropboxOAuthFlow(context.Background(), oauth, &out)
+		flowTok, flowErr = RunDropboxOAuthFlow(ctx, oauth, &out)
 	}()
 
 	// Wait for the authorization URL and complete the redirect with its state.
@@ -766,32 +855,7 @@ func TestDropboxOAuth_LoopbackFlow(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("flow did not finish")
 	}
-	if flowErr != nil {
-		t.Fatalf("flow: %v", flowErr)
-	}
-	if flowTok.AccessToken != "new-token" || flowTok.RefreshToken != "rt-new" || flowTok.AccountID != "dbid:42" {
-		t.Fatalf("flow token = %+v", flowTok)
-	}
-	if flowTok.ExpiresAt < time.Now().Add(30*time.Minute).UnixMilli() {
-		t.Fatalf("expires_at not set from expires_in: %+v", flowTok)
-	}
-
-	// PKCE linkage: the code_verifier sent to the token endpoint must hash to
-	// the code_challenge in the authorization URL.
-	f.mu.Lock()
-	forms := append([]url.Values(nil), f.tokenForms...)
-	f.mu.Unlock()
-	if len(forms) != 1 {
-		t.Fatalf("token endpoint calls = %d, want 1", len(forms))
-	}
-	form := forms[0]
-	if form.Get("code") != "the-code" || form.Get("grant_type") != "authorization_code" {
-		t.Fatalf("token form = %v", form)
-	}
-	sum := sha256.Sum256([]byte(form.Get("code_verifier")))
-	if base64.RawURLEncoding.EncodeToString(sum[:]) != q.Get("code_challenge") {
-		t.Fatal("code_verifier does not match the code_challenge")
-	}
+	return flowTok, q, flowErr
 }
 
 // syncBuffer is a goroutine-safe buffer for capturing the flow output.
@@ -861,8 +925,8 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := PullChanges(backend("access", "account-one"), db, nil); err == nil {
-				t.Fatal("interrupted pull succeeded")
+			if err := PullChanges(backend("access", "account-one"), db, nil); err == nil || !strings.Contains(err.Error(), last.ID+".md") {
+				t.Fatalf("interrupted pull did not report the failed item: %v", err)
 			}
 			if cursor, err := db.GetSyncCursor(); err != nil || cursor != "" {
 				t.Fatalf("unfinished page advanced cursor: %q, %v", cursor, err)
@@ -935,7 +999,11 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 			if change == "different account" || change == "different endpoint" {
 				wantNote = 2
 			}
-			if downloads["/"+note.ID+".md"] != wantNote || downloads["/"+last.ID+".md"] != 2 {
+			wantLast := 2 // an apply failure doesn't retry the successful download
+			if change != "apply failure" {
+				wantLast = 5 // four bounded attempts, then one successful fetch on restart
+			}
+			if downloads["/"+note.ID+".md"] != wantNote || downloads["/"+last.ID+".md"] != wantLast {
 				t.Errorf("note download counts: %v", downloads)
 			}
 			wantBytes := "resource 1"
@@ -963,9 +1031,6 @@ func TestDropboxDownloadResumesAfterDatabaseReopen(t *testing.T) {
 }
 
 func TestDropboxLockRefreshRequestDeadlines(t *testing.T) {
-	previous := dropboxLockRequestTimeout
-	dropboxLockRequestTimeout = 25 * time.Millisecond
-	defer func() { dropboxLockRequestTimeout = previous }()
 	for _, stage := range []string{"listing", "upload headers", "upload body"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newFakeDropbox()
@@ -987,12 +1052,16 @@ func TestDropboxLockRefreshRequestDeadlines(t *testing.T) {
 			defer srv.Close()
 			b := newDropboxBackend(nil, &DropboxToken{AccessToken: "access"}, "")
 			b.apiBase, b.contentBase = srv.URL, srv.URL
+			b.lockTimeout = 25 * time.Millisecond
 			lock, err := b.AcquireLock()
 			if err != nil {
 				t.Fatal(err)
 			}
 			stall.Store(true)
 			started := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			b.ctx = ctx
 			if err := b.RefreshLock(lock); !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("stalled refresh must fail closed with deadline, got %v", err)
 			}
@@ -1000,6 +1069,7 @@ func TestDropboxLockRefreshRequestDeadlines(t *testing.T) {
 				t.Fatalf("refresh exceeded bounded wait: %s", elapsed)
 			}
 			stall.Store(false)
+			b.ctx = context.Background()
 			if err := b.RefreshLock(lock); err != nil {
 				t.Fatalf("active lock cannot refresh after network recovers: %v", err)
 			}
@@ -1305,8 +1375,7 @@ func TestDropboxIncrementalListingFailurePreservesInventory(t *testing.T) {
 			defer cancel()
 			handler := f.handler()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if armed.Load() && r.URL.Path == "/2/files/list_folder/continue" && pages.Add(1) == 2 {
-					armed.Store(false)
+				if armed.Load() && r.URL.Path == "/2/files/list_folder/continue" && pages.Add(1) >= 2 {
 					if failure == "cancelled" {
 						cancel()
 					}
@@ -1357,6 +1426,7 @@ func TestDropboxIncrementalListingFailurePreservesInventory(t *testing.T) {
 			if err := NewEngine(backend(), db, "").Sync(ctx); err == nil {
 				t.Fatal("incomplete inventory succeeded")
 			}
+			armed.Store(false)
 			if after, err := db.GetSetting(key); err != nil || after != before {
 				t.Fatalf("failed listing committed partial inventory: %v", err)
 			}

@@ -188,12 +188,13 @@ func (m *fileLockManager) Acquire() (*Lock, error) {
 
 		ours := activeLock(locks, nowMs, LockTTL.Milliseconds(), LockTypeSync, m.clientType, m.clientID)
 		if ours != nil {
-			// Refresh if this is a re-acquire or the lock is more than 10 s old.
-			if isFirstPass || nowMs-ours.UpdatedTime > 10_000 {
+			if isFirstPass {
 				if err := m.save(ours); err != nil {
 					m.releaseOwn()
 					return nil, err
 				}
+				isFirstPass = false
+				continue // Return the new authoritative timestamp, not the JSON body's time.
 			}
 			return ours, nil
 		}

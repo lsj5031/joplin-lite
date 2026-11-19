@@ -83,7 +83,10 @@ type syncFailure string
 const (
 	syncFailureNone    syncFailure = ""
 	syncFailureLock    syncFailure = "lock"
+	syncFailureExpired syncFailure = "lock_expired"
 	syncFailureOffline syncFailure = "offline"
+	syncFailureDropbox syncFailure = "dropbox"
+	syncFailureAuth    syncFailure = "auth"
 	syncFailureTarget  syncFailure = "target"
 	syncFailureOther   syncFailure = "other"
 )
@@ -769,6 +772,7 @@ func randomToken() (string, error) {
 // on its own when the network returns instead of waiting for the ten-minute
 // tick. Failures that need the user keep waiting for that tick.
 func syncLoop(ctx context.Context, engine syncer, status *syncStatus) {
+	var notBefore time.Time
 	run := func() time.Duration {
 		start := time.Now()
 		status.start()
@@ -785,7 +789,11 @@ func syncLoop(ctx context.Context, engine syncer, status *syncStatus) {
 		}
 		slog.Error("sync failed", "error", err)
 		if d := retryAfter(err); d > 0 {
-			status.retryIn(time.Now().Add(d))
+			at := time.Now().Add(d)
+			if _, ok := jsync.DropboxRetryAt(err); ok {
+				notBefore = at
+			}
+			status.retryIn(at)
 			return d
 		}
 		return 0
@@ -799,6 +807,10 @@ func syncLoop(ctx context.Context, engine syncer, status *syncStatus) {
 	defer retry.Stop()
 	// arm runs a pass and starts or stops the retry timer to match its result.
 	arm := func() {
+		if ctx.Err() != nil || time.Now().Before(notBefore) {
+			return
+		}
+		notBefore = time.Time{}
 		if !retry.Stop() {
 			select {
 			case <-retry.C:
@@ -843,13 +855,20 @@ var (
 
 // syncFailureFor says which kind of failure a pass hit.
 func syncFailureFor(err error) syncFailure {
+	_, dropboxRetry := jsync.DropboxRetryAt(err)
 	switch {
 	case err == nil:
 		return syncFailureNone
+	case errors.Is(err, jsync.ErrDropboxReauthorize):
+		return syncFailureAuth
 	case errors.Is(err, jsync.ErrExclusiveLock):
 		return syncFailureLock
 	case errors.Is(err, jsync.ErrSyncTargetUnsupported):
 		return syncFailureTarget
+	case dropboxRetry:
+		return syncFailureDropbox
+	case errors.Is(err, jsync.ErrLockExpired):
+		return syncFailureExpired
 	case isOffline(err):
 		return syncFailureOffline
 	}
@@ -860,9 +879,14 @@ func syncFailureFor(err error) syncFailure {
 // when the failure needs the user and should not be retried behind their back.
 func retryAfter(err error) time.Duration {
 	switch syncFailureFor(err) {
-	case syncFailureLock:
+	case syncFailureLock, syncFailureExpired:
 		return syncRetryLock
 	case syncFailureOffline:
+		return syncRetryNetwork
+	case syncFailureDropbox:
+		if at, _ := jsync.DropboxRetryAt(err); !at.IsZero() {
+			return max(time.Until(at), time.Second)
+		}
 		return syncRetryNetwork
 	}
 	return 0

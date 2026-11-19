@@ -62,6 +62,14 @@ func (t *tracedBackend) RefreshLock(lock interface{}) error {
 	return nil
 }
 
+func (t *tracedBackend) keepLock(ctx context.Context, lock interface{}) error {
+	return keepBackendLock(ctx, t.inner, lock)
+}
+
+func (t *tracedBackend) pushConcurrency(limit int) int {
+	return pushConcurrency(t.inner, limit)
+}
+
 func (t *tracedBackend) Get(path string) ([]byte, error) {
 	ctx := context.Background()
 	ctx, span := t.tracer.Start(ctx, "storage.get",

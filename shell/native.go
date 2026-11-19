@@ -1760,7 +1760,11 @@ func syncNoticeFor(st syncSnapshot) syncNotice {
 		meta = append(meta, "last synced "+st.Last.Format("15:04"))
 	}
 	if !st.Retry.IsZero() {
-		meta = append(meta, "retrying at "+st.Retry.Format("15:04"))
+		format := "15:04"
+		if st.Kind == syncFailureDropbox {
+			format = "15:04:05"
+		}
+		meta = append(meta, "retrying at "+st.Retry.Format(format))
 	}
 	tail := strings.Join(meta, " · ")
 	switch st.Kind {
@@ -1778,6 +1782,12 @@ func syncNoticeFor(st syncSnapshot) syncNotice {
 		return syncNotice{Line: "Offline · sync paused", Hint: tail}
 	case syncFailureTarget:
 		return syncNotice{Line: "Sync stopped · target needs a newer Joplin", Hint: clip(st.Err, 80), Err: true}
+	case syncFailureDropbox:
+		return syncNotice{Line: "Dropbox is busy · sync paused", Hint: tail}
+	case syncFailureExpired:
+		return syncNotice{Line: "Sync paused · lock expired", Hint: tail}
+	case syncFailureAuth:
+		return syncNotice{Line: "Dropbox needs reauthorization", Hint: "Reconnect in Joplin if reusing its credentials; otherwise run gojoplin dropbox-auth. Then restart Lite.", Err: true}
 	}
 	hint := clip(st.Err, 80)
 	if tail != "" {

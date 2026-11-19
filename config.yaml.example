@@ -41,6 +41,13 @@ sync:
   joplin_server:
     url: ""
 
+  # Dropbox (target 7). Required app key for fresh authorization and refresh;
+  # the app secret is optional for a public PKCE client.
+  dropbox:
+    app_key: "${GOJOPLIN_DROPBOX_APP_KEY}"
+    app_secret: "${GOJOPLIN_DROPBOX_APP_SECRET}"
+    push_workers: 3    # 1–6, default 3; writes are paced after a rate limit
+
 # API and auth. Use ${VAR} so values come from env; do not put secrets inline.
 api:
   token: "${GOJOPLIN_API_TOKEN}"

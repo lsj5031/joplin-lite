@@ -48,7 +48,7 @@ func RunDropboxOAuthFlow(ctx context.Context, oauth *DropboxOAuth, out io.Writer
 			errCh <- fmt.Errorf("state mismatch in OAuth callback")
 			return
 		}
-		fmt.Fprintln(w, "Dropbox authorized — you can close this tab and return to the terminal.")
+		fmt.Fprintln(w, "Dropbox sign-in received. Return to the terminal to finish.")
 		codeCh <- q.Get("code")
 	})}
 	go func() { _ = srv.Serve(ln) }()
@@ -63,7 +63,14 @@ func RunDropboxOAuthFlow(ctx context.Context, oauth *DropboxOAuth, out io.Writer
 	case err := <-errCh:
 		return nil, err
 	case code := <-codeCh:
-		return oauth.Exchange(ctx, code, verifier)
+		token, err := oauth.Exchange(ctx, code, verifier)
+		if err != nil {
+			return nil, err
+		}
+		if token.RefreshToken == "" {
+			return nil, fmt.Errorf("Dropbox did not grant offline access; repeat authorization and approve access: %w", ErrDropboxReauthorize)
+		}
+		return token, nil
 	case <-time.After(5 * time.Minute):
 		return nil, fmt.Errorf("timed out waiting for the Dropbox redirect")
 	}
