@@ -106,6 +106,10 @@ func (t *tracedBackend) Put(path string, content []byte) error {
 }
 
 func (t *tracedBackend) Delete(path string) error {
+	return t.deleteInScope(path, "")
+}
+
+func (t *tracedBackend) deleteInScope(path, scope string) error {
 	ctx := context.Background()
 	ctx, span := t.tracer.Start(ctx, "storage.delete",
 		trace.WithAttributes(
@@ -114,7 +118,7 @@ func (t *tracedBackend) Delete(path string) error {
 		),
 	)
 	defer span.End()
-	err := t.inner.Delete(path)
+	err := deleteInScope(t.inner, path, scope)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())

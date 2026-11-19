@@ -60,23 +60,34 @@ func (c *Client) remoteDeleteScope() string {
 }
 
 func (b *DropboxBackend) remoteDeleteScope() string {
-	token := b.token
+	return b.deleteScopeForToken(b.token.Load())
+}
+
+func (b *DropboxBackend) deleteScopeForToken(token *DropboxToken) string {
 	if token == nil {
-		return ""
-	}
-	// A refresh grant covers one account and app folder, and remains stable
-	// when the access token rotates. Without a grant a changed access token
-	// is deliberately treated as an uncertain/new remote.
-	grant := token.RefreshToken
-	if grant == "" {
-		grant = token.AccessToken
-	}
-	if grant == "" {
 		return ""
 	}
 	var app string
 	if b.oauth != nil {
 		app = b.oauth.AppKey
 	}
-	return targetScope("dropbox", b.apiBase, b.contentBase, app, grant)
+	// A configured app key alone does not establish which app minted an
+	// imported token. Use provider IDs only with app provenance on the token.
+	if token.AppKey != "" && (app == "" || app == token.AppKey) {
+		if token.AccountID != "" {
+			return targetScope("dropbox", b.apiBase, b.contentBase, token.AppKey, "account", token.AccountID)
+		}
+		if token.UID != "" {
+			return targetScope("dropbox", b.apiBase, b.contentBase, token.AppKey, "uid", token.UID)
+		}
+	}
+	// Without proven identity, an unchanged grant (or legacy bearer) is
+	// sufficient. Rotation of that credential does not carry delete eligibility.
+	if token.RefreshToken != "" {
+		return targetScope("dropbox", b.apiBase, b.contentBase, app, "refresh", token.RefreshToken)
+	}
+	if token.AccessToken != "" {
+		return targetScope("dropbox", b.apiBase, b.contentBase, app, "access", token.AccessToken)
+	}
+	return ""
 }

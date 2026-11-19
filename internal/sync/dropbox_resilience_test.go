@@ -521,7 +521,7 @@ func TestDropboxLongRetryHintIsReportedWithoutWaiting(t *testing.T) {
 
 func TestDropboxConcurrentRefreshPersistsAcrossBackendRestart(t *testing.T) {
 	dir := t.TempDir()
-	token := &DropboxToken{AccessToken: "synthetic-old", RefreshToken: "synthetic-refresh", AccountID: "mock-account"}
+	token := &DropboxToken{AccessToken: "synthetic-old", RefreshToken: "synthetic-refresh", AccountID: "dbid:42"}
 	data, err := json.Marshal(token)
 	if err != nil {
 		t.Fatal(err)
@@ -567,6 +567,144 @@ func TestDropboxConcurrentRefreshPersistsAcrossBackendRestart(t *testing.T) {
 	}
 }
 
+func TestDropboxQueuedDeleteAcrossRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name, endpoint string
+		provenance     bool
+		accountChanged bool
+	}{
+		{name: "known app and account", endpoint: "/2/files/delete_v2", provenance: true},
+		{name: "imported account without app provenance", endpoint: "/2/files/delete_v2"},
+		{name: "uncertain metadata read", endpoint: "/2/files/get_metadata"},
+		{name: "refresh during lock acquisition", endpoint: "/2/files/list_folder"},
+		{name: "different account in refresh response", endpoint: "/2/files/delete_v2", provenance: true, accountChanged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			path := "/" + id + ".md"
+			f := newFakeDropbox()
+			f.put(path, []byte(models.SerializeNote(&models.Note{ID: id, Title: "Remote"})))
+			var expire atomic.Bool
+			var rejected, refreshedDeletes atomic.Int32
+			b := mockDropbox(t, f, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path == "/oauth2/token" {
+					switch {
+					case tc.accountChanged:
+						_, _ = io.WriteString(w, `{"access_token":"wrong","refresh_token":"wrong-grant","account_id":"dbid:wrong"}`)
+						return true
+					case tc.endpoint == "/2/files/get_metadata":
+						_, _ = io.WriteString(w, `{"access_token":"new-token","refresh_token":"rt-new","expires_in":3600}`)
+						return true
+					}
+				}
+				if !expire.Load() || (r.URL.Path != tc.endpoint && r.URL.Path != "/2/files/delete_v2") {
+					return false
+				}
+				body := newBody(r)
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				var arg struct{ Path string }
+				_ = json.Unmarshal(body, &arg)
+				bearer := r.Header.Get("Authorization")
+				if arg.Path == path && r.URL.Path == "/2/files/delete_v2" && bearer != "Bearer original" {
+					refreshedDeletes.Add(1)
+				}
+				if r.URL.Path == tc.endpoint && bearer == "Bearer original" &&
+					(arg.Path == path || tc.endpoint == "/2/files/list_folder" && arg.Path == "/locks") {
+					rejected.Add(1)
+					w.WriteHeader(http.StatusUnauthorized)
+					return true
+				}
+				if tc.endpoint == "/2/files/get_metadata" && r.URL.Path == tc.endpoint && arg.Path == path {
+					// Another target could report the item missing. That response
+					// must not be used to acknowledge the original queued row.
+					w.WriteHeader(http.StatusConflict)
+					_, _ = io.WriteString(w, `{"error_summary":"path/not_found/"}`)
+					return true
+				}
+				return false
+			})
+			b.dataDir = t.TempDir()
+			token := &DropboxToken{AccessToken: "original", RefreshToken: "original-grant"}
+			if tc.provenance || tc.endpoint == "/2/files/delete_v2" {
+				token.AccountID = "dbid:42"
+			}
+			if tc.provenance {
+				token.AppKey = b.oauth.AppKey
+			}
+			if err := SaveDropboxToken(b.dataDir, token); err != nil {
+				t.Fatal(err)
+			}
+			b.token.Store(token)
+			scope := b.remoteDeleteScope()
+			db := mockProfile(t)
+			engine := NewEngine(NewTracedBackend(b, "dropbox"), db, "")
+			if err := engine.Sync(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.DeleteNote(id); err != nil {
+				t.Fatal(err)
+			}
+			expire.Store(true)
+			err := engine.Sync(context.Background())
+			if rejected.Load() != 1 {
+				t.Fatalf("did not exercise the expected 401: %d", rejected.Load())
+			}
+			wantDelete := tc.provenance && !tc.accountChanged
+			wantPartial := !wantDelete && tc.endpoint != "/2/files/list_folder"
+			var partial *PartialPushError
+			if wantPartial {
+				if !errors.As(err, &partial) || !strings.Contains(err.Error(), "deletions:") {
+					t.Fatalf("deletion failure did not reach the sync caller: %v", err)
+				}
+				if tc.accountChanged && !errors.Is(err, ErrDropboxReauthorize) {
+					t.Fatalf("changed account did not require reauthorization: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if got := refreshedDeletes.Load(); (got == 1) != wantDelete || got > 1 {
+				t.Fatalf("unexpected deletes with refreshed credentials: %d", got)
+			}
+			if tc.endpoint == "/2/files/list_folder" {
+				eligible, err := db.PushableDeletedItems(7, scope)
+				if err != nil || len(eligible) != 0 {
+					t.Fatalf("lock-triggered refresh did not quarantine old scope: %v, %v", eligible, err)
+				}
+			}
+			reloaded, err := NewDropboxBackend(&config.Config{DataDir: b.dataDir, DropboxAppKey: b.oauth.AppKey})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reloaded.apiBase, reloaded.contentBase = b.apiBase, b.contentBase
+			persisted := reloaded.token.Load()
+			if tc.accountChanged {
+				if *persisted != *token || b.token.Load() != token {
+					t.Fatal("mismatched refresh replaced the original token")
+				}
+			} else {
+				if persisted.RefreshToken != "rt-new" || (reloaded.remoteDeleteScope() == scope) != wantDelete {
+					t.Fatal("restart did not preserve the rotated credential and its expected scope")
+				}
+				expire.Store(false)
+				if err := NewEngine(reloaded, db, "").Sync(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pending, err := db.GetDeletedItems(7)
+			f.mu.Lock()
+			_, remains := f.files[path]
+			f.mu.Unlock()
+			wantPending := 0
+			if !wantDelete {
+				wantPending = 1
+			}
+			if err != nil || remains == wantDelete || len(pending) != wantPending || (wantPending == 1 && pending[0].ItemID != id) {
+				t.Fatalf("unexpected remote/queue state: remote=%t, pending=%v (%v)", remains, pending, err)
+			}
+		})
+	}
+}
+
 func TestDropboxLegacyAndRevokedAuthorization(t *testing.T) {
 	for _, scenario := range []string{"valid legacy", "missing after 401", "known expired", "revoked", "refresh without rotation"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -596,6 +734,7 @@ func TestDropboxLegacyAndRevokedAuthorization(t *testing.T) {
 				token.ExpiresAt = time.Now().Add(-time.Second).UnixMilli()
 			}
 			b.token.Store(token)
+			scope := b.remoteDeleteScope()
 			var wantRefresh int32
 			if scenario == "revoked" || scenario == "refresh without rotation" {
 				wantRefresh = 1
@@ -616,8 +755,8 @@ func TestDropboxLegacyAndRevokedAuthorization(t *testing.T) {
 			if refreshes.Load() != wantRefresh {
 				t.Fatalf("refreshes=%d, want %d", refreshes.Load(), wantRefresh)
 			}
-			if scenario == "refresh without rotation" && b.token.Load().RefreshToken != token.RefreshToken {
-				t.Fatal("refresh response without a new token discarded the existing refresh token")
+			if scenario == "refresh without rotation" && (b.token.Load().RefreshToken != token.RefreshToken || b.remoteDeleteScope() != scope) {
+				t.Fatal("refresh response without a new grant changed the grant or its delete scope")
 			}
 		})
 	}

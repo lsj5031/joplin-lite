@@ -518,8 +518,16 @@ func pushResources(backend SyncBackend, db *store.DB, syncTarget int, encryptBef
 	})
 }
 
+func deleteInScope(backend SyncBackend, path, scope string) error {
+	if b, ok := backend.(interface{ deleteInScope(string, string) error }); ok {
+		return b.deleteInScope(path, scope)
+	}
+	return backend.Delete(path)
+}
+
 func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
-	deleted, err := db.PushableDeletedItems(syncTarget, deleteScope(backend))
+	scope := deleteScope(backend)
+	deleted, err := db.PushableDeletedItems(syncTarget, scope)
 	if err != nil {
 		return err
 	}
@@ -531,7 +539,7 @@ func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
 		if item.ItemType == models.TypeResource {
 			blobItemName := ".resource/" + item.ItemID
 			blobPath := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(blobItemName))
-			if err := backend.Delete(blobPath); err != nil {
+			if err := deleteInScope(backend, blobPath, scope); err != nil {
 				slog.Warn("failed to delete remote resource blob", "id", item.ItemID, "error", err)
 			}
 		}
@@ -539,7 +547,7 @@ func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
 		itemName := item.ItemID + ".md"
 		path := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(itemName))
 
-		if err := backend.Delete(path); err != nil {
+		if err := deleteInScope(backend, path, scope); err != nil {
 			return fmt.Errorf("cannot delete remote item %s: %w", item.ItemID, err)
 		}
 

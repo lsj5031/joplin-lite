@@ -59,7 +59,7 @@ func (b *DropboxBackend) accessToken(ctx context.Context, rejected *DropboxToken
 		b.authErr = fmt.Errorf("no Dropbox refresh token: %w", ErrDropboxReauthorize)
 		return nil, b.authErr
 	}
-	if b.oauth == nil || b.oauth.AppKey == "" {
+	if b.oauth == nil || b.oauth.AppKey == "" || (t.AppKey != "" && t.AppKey != b.oauth.AppKey) {
 		b.authErr = fmt.Errorf("refreshing this Dropbox token requires its original OAuth app key: %w", ErrDropboxReauthorize)
 		return nil, b.authErr
 	}
@@ -69,6 +69,11 @@ func (b *DropboxBackend) accessToken(ctx context.Context, rejected *DropboxToken
 			b.authErr = err
 		}
 		return nil, fmt.Errorf("cannot refresh Dropbox token: %w", err)
+	}
+	if (t.AccountID != "" && next.AccountID != "" && t.AccountID != next.AccountID) ||
+		(t.UID != "" && next.UID != "" && t.UID != next.UID) {
+		b.authErr = fmt.Errorf("Dropbox refresh returned a different account: %w", ErrDropboxReauthorize)
+		return nil, b.authErr
 	}
 	if next.RefreshToken == "" {
 		next.RefreshToken = t.RefreshToken

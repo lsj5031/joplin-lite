@@ -197,6 +197,12 @@ func (b *DropboxBackend) Put(path string, content []byte) error {
 
 // Delete implements SyncBackend.
 func (b *DropboxBackend) Delete(path string) error {
+	return b.deleteInScope(path, "")
+}
+
+type dropboxDeleteScopeKey struct{}
+
+func (b *DropboxBackend) deleteInScope(path, scope string) error {
 	if b.blockDeletes {
 		return fmt.Errorf("remote deletion blocked: sync.dropbox.block_deletes is enabled; deletion remains queued")
 	}
@@ -204,7 +210,11 @@ func (b *DropboxBackend) Delete(path string) error {
 	if key == "" || op != "content" {
 		return fmt.Errorf("unsupported Dropbox delete path: %s", path)
 	}
-	return b.deletePath(b.ctx, dropboxPath(key))
+	ctx := b.ctx
+	if scope != "" {
+		ctx = context.WithValue(ctx, dropboxDeleteScopeKey{}, scope)
+	}
+	return b.deletePath(ctx, dropboxPath(key))
 }
 
 // parseDropboxPath extracts key and operation from engine paths

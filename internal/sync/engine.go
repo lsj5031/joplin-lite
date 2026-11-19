@@ -181,9 +181,9 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 	default:
 	}
 
-	// A new filesystem target can be created by lock acquisition. Bind it
-	// now that the path exists, before any local item gains a sync point.
-	if e.backend.SyncTarget() == 2 {
+	// Lock acquisition can create a filesystem target or trigger Dropbox
+	// credential refresh. Confirm the selection before reading or writing sync points.
+	if target := e.backend.SyncTarget(); target == 2 || target == 7 {
 		if err := SelectTarget(e.db, e.backend); err != nil {
 			return err
 		}

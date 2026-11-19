@@ -199,11 +199,17 @@ func (p *dropboxPacer) admit(ctx context.Context, write bool, budget time.Time) 
 // do replays only reads and revision-guarded mutations. The setup builds an
 // identical request body for every attempt; there is no generic POST replay.
 func (b *DropboxBackend) do(ctx context.Context, endpoint string, requestTimeout time.Duration, write bool, setup func(*http.Request)) ([]byte, error) {
+	scope, _ := ctx.Value(dropboxDeleteScopeKey{}).(string)
 	refreshed := false
 	for attempt := 0; ; {
 		token, err := b.accessToken(ctx, nil)
 		if err != nil {
 			return nil, err
+		}
+		// Check the same immutable snapshot that supplies this request's bearer,
+		// including metadata reads (not-found would acknowledge the delete).
+		if scope != "" && b.deleteScopeForToken(token) != scope {
+			return nil, errors.New("Dropbox authorization changed; deletion remains queued")
 		}
 		if err := b.pacer.admit(ctx, write, time.Now().Add(dropboxRetryWait)); err != nil {
 			return nil, err

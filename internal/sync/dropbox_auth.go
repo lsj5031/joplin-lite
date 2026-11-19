@@ -39,6 +39,7 @@ type DropboxToken struct {
 	Scope        string `json:"scope,omitempty"`
 	UID          string `json:"uid,omitempty"`
 	AccountID    string `json:"account_id,omitempty"`
+	AppKey       string `json:"jl_app_key,omitempty"` // app used to obtain this token, not inferred from config
 }
 
 // tokenExpirySkew is how early a token is considered expired.
@@ -193,6 +194,7 @@ func (o *DropboxOAuth) tokenRequest(ctx context.Context, form url.Values) (*Drop
 		Scope:        raw.Scope,
 		UID:          raw.UID,
 		AccountID:    raw.AccountID,
+		AppKey:       o.AppKey,
 	}
 	if raw.ExpiresIn > 0 {
 		tok.ExpiresAt = time.Now().UnixMilli() + raw.ExpiresIn*1000
