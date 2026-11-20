@@ -1,0 +1,125 @@
+name: release
+
+# Build release artifacts on their native platforms. Pushing a v* tag creates
+# or updates the matching GitHub release; workflow_dispatch can rebuild an
+# existing release (for example, to add a macOS asset to one made elsewhere).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix (e.g. 0.2.0)"
+        required: true
+      ref:
+        description: "Git ref to build (defaults to main for manual runs)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Resolve version, tag and source ref
+        id: resolve
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+            ref="${{ inputs.ref }}"
+            if [ -z "$ref" ]; then ref="main"; fi
+          else
+            ref="${GITHUB_REF_NAME}"
+            version="${ref#v}"
+          fi
+          version="${version#v}"
+          if [ -z "$version" ]; then
+            echo "empty release version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: false
+      - name: Materialize MyGO dependency
+        shell: bash
+        run: bash shell/prepare-mygo.sh
+      - name: Package portable Windows ZIP
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: bash shell/package-windows.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: tmp/Joplin-Lite-*.zip
+          if-no-files-found: error
+
+  macos:
+    needs: meta
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: false
+      - name: Materialize MyGO dependency
+        shell: bash
+        run: bash shell/prepare-mygo.sh
+      - name: Package macOS app bundle
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: bash shell/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: tmp/Joplin-Lite-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: [meta, windows, macos]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish or update the release
+        shell: bash
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" *.zip SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" *.zip SHA256SUMS.txt \
+              --title "Joplin Lite v$VERSION" --generate-notes
+          fi
