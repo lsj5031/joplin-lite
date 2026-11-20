@@ -1,8 +1,8 @@
 name: release
 
-# Build release artifacts on their native platforms. Pushing a v* tag creates
-# or updates the matching GitHub release; workflow_dispatch can rebuild an
-# existing release (for example, to add a macOS asset to one made elsewhere).
+# Build release artifacts on their native platforms. A v* tag creates a draft
+# release with both binaries; publish it with publish-release.yml once the
+# assets check passes. workflow_dispatch can rebuild an existing release.
 on:
   push:
     tags:
@@ -103,13 +103,14 @@ jobs:
     needs: [meta, windows, macos]
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Publish or update the release
+      - name: Upload assets to the release
         shell: bash
         env:
           TAG: ${{ needs.meta.outputs.tag }}
@@ -121,5 +122,22 @@ jobs:
             gh release upload "$TAG" *.zip SHA256SUMS.txt --clobber
           else
             gh release create "$TAG" *.zip SHA256SUMS.txt \
-              --title "Joplin Lite v$VERSION" --generate-notes
+              --draft --verify-tag --title "Joplin Lite v$VERSION" --generate-notes
           fi
+      - name: Check the release has every asset
+        shell: bash
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -eu
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for asset in \
+            "Joplin-Lite-$VERSION-windows-amd64.zip" \
+            "Joplin-Lite-$VERSION-macos-arm64.zip" \
+            SHA256SUMS.txt; do
+            echo "$names" | grep -qxF "$asset" || {
+              echo "::error::$TAG has no $asset"
+              exit 1
+            }
+          done

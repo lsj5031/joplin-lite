@@ -1,0 +1,44 @@
+name: Publish release
+
+# Run by hand after the release workflow succeeds. Publishes the draft for
+# this version, so a release is never published with missing or stale assets.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the v prefix (e.g. 0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish the draft
+        shell: bash
+        env:
+          TAG: v${{ inputs.version }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          if [ "$state" != "true" ]; then
+            echo "::error::$TAG is not a draft (or does not exist); nothing to publish"
+            exit 1
+          fi
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for asset in \
+            "Joplin-Lite-$VERSION-windows-amd64.zip" \
+            "Joplin-Lite-$VERSION-macos-arm64.zip" \
+            SHA256SUMS.txt; do
+            echo "$names" | grep -qxF "$asset" || {
+              echo "::error::draft $TAG has no $asset"
+              exit 1
+            }
+          done
+          gh release edit "$TAG" --draft=false
