@@ -6,6 +6,15 @@ Restarting on the same remote keeps eligible deletes queued. Selecting another
 target or turning sync off holds outstanding deletes instead of replaying them
 when the old target returns. An offline network alone does not turn sync off.
 
+When switching targets, Lite also protects pending note edits. If the new
+target contains the same note ID with different content, Lite keeps the
+local edit as a conflict note and uses the remote version for the original.
+Sync pauses if the pending edit is itself a conflict note or if an encrypted
+revision cannot be compared.
+
+For attachments, sync deletes the remote blob first, then the metadata. A
+failure at either step keeps the deletion queued for retry.
+
 Existing `deleted_items` rows from before this feature have no reliable
 remote provenance. The upgrade preserves them but holds them all, even for
 the target currently configured. The upgrade itself does not reset the existing

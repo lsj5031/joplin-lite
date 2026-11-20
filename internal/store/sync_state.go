@@ -101,7 +101,7 @@ func (db *DB) GetSyncItem(itemID string, syncTarget int) (*models.SyncItem, erro
 // UpsertSyncItem records that an item has been synced, using the current
 // wall-clock time as the sync point.
 func (db *DB) UpsertSyncItem(itemID string, itemType, syncTarget int) error {
-	return upsertSyncItemTx(db, itemID, itemType, syncTarget, time.Now().UnixMilli())
+	return db.UpsertSyncItemAt(itemID, itemType, syncTarget, time.Now().UnixMilli())
 }
 
 // UpsertSyncItemAt records that the given revision of an item has been synced.
@@ -110,6 +110,11 @@ func (db *DB) UpsertSyncItem(itemID string, itemType, syncTarget int) error {
 // lands on (or after) a local edit's timestamp makes that edit invisible and
 // silently drops it.
 func (db *DB) UpsertSyncItemAt(itemID string, itemType, syncTarget int, syncTime int64) error {
+	if itemType == models.TypeNote {
+		return db.writeTx(func(ex execer) error {
+			return upsertSyncItemTx(ex, itemID, itemType, syncTarget, syncTime)
+		})
+	}
 	return upsertSyncItemTx(db, itemID, itemType, syncTarget, syncTime)
 }
 
@@ -125,6 +130,9 @@ func upsertSyncItemTx(ex execer, itemID string, itemType, syncTarget int, syncTi
 		_, err = ex.Exec(`INSERT INTO sync_items (sync_target, sync_time, item_type, item_id, sync_disabled, sync_disabled_reason, force_sync, item_location)
 			VALUES (?, ?, ?, ?, 0, '', 0, 0)`,
 			syncTarget, syncTime, itemType, itemID)
+	}
+	if err == nil && itemType == models.TypeNote {
+		return clearNoteSwitchBaseline(ex, itemID)
 	}
 	return err
 }
@@ -212,7 +220,12 @@ func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
 	var err error
 	switch itemType {
 	case models.TypeNote:
-		_, err = db.Exec("DELETE FROM notes WHERE id = ?", itemID)
+		err = db.writeTx(func(ex execer) error {
+			if _, err := ex.Exec("DELETE FROM notes WHERE id = ?", itemID); err != nil {
+				return err
+			}
+			return clearNoteSwitchBaseline(ex, itemID)
+		})
 	case models.TypeFolder:
 		_, err = db.Exec("DELETE FROM folders WHERE id = ?", itemID)
 	case models.TypeTag:

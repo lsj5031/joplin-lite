@@ -213,7 +213,7 @@ func (e *Engine) Sync(ctx context.Context) (err error) {
 
 	// Reconcile: fetch any items the delta missed (e.g. master keys)
 	e.progress("Checking library")
-	if err := PullMissingItems(e.backend, e.db); err != nil {
+	if err := pullMissingItems(e.backend, e.db, e.e2ee); err != nil {
 		return fmt.Errorf("reconciliation failed: %w", err)
 	}
 

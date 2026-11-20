@@ -323,6 +323,9 @@ func (db *DB) DeleteNote(id string) error {
 		if _, err := ex.Exec("DELETE FROM notes WHERE id = ?", id); err != nil {
 			return err
 		}
+		if err := clearNoteSwitchBaseline(ex, id); err != nil {
+			return err
+		}
 		// Also remove note-tag associations
 		if _, err := ex.Exec("DELETE FROM note_tags WHERE note_id = ?", id); err != nil {
 			return err

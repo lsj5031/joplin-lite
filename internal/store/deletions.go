@@ -38,6 +38,9 @@ func (db *DB) SelectDeleteTarget(target int, scope string) (int64, error) {
 			if activeTarget == target && activeScope == scope {
 				return nil
 			}
+			if err := saveNoteSwitchBaselines(ex, activeTarget); err != nil {
+				return err
+			}
 			result, err := ex.Exec(`UPDATE deleted_items SET jl_scope = '' WHERE jl_scope != ''`)
 			if err != nil {
 				return err
@@ -47,6 +50,9 @@ func (db *DB) SelectDeleteTarget(target int, scope string) (int64, error) {
 				return err
 			}
 			if _, err := ex.Exec(`DELETE FROM key_values WHERE key = 'sync.cursor'`); err != nil {
+				return err
+			}
+			if _, err := ex.Exec(`DELETE FROM jl_sync_downloads`); err != nil {
 				return err
 			}
 		case err != sql.ErrNoRows:
@@ -60,7 +66,12 @@ func (db *DB) SelectDeleteTarget(target int, scope string) (int64, error) {
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
-		if previousScope != "" && previousScope != scope {
+		if err == nil && previousScope != scope {
+			if activeTarget != target {
+				if err := saveNoteSwitchBaselines(ex, target); err != nil {
+					return err
+				}
+			}
 			if _, err := ex.Exec(`DELETE FROM sync_items WHERE sync_target = ?`, target); err != nil {
 				return err
 			}
@@ -72,6 +83,32 @@ func (db *DB) SelectDeleteTarget(target int, scope string) (int64, error) {
 		return err
 	})
 	return quarantined, err
+}
+
+func saveNoteSwitchBaselines(ex execer, target int) error {
+	_, err := ex.Exec(`INSERT INTO jl_note_switch_baselines (note_id, sync_time)
+		SELECT n.id, si.sync_time FROM sync_items si JOIN notes n ON n.id = si.item_id
+		WHERE si.sync_target = ? AND si.item_type = ?
+		ON CONFLICT(note_id) DO UPDATE SET sync_time = MIN(sync_time, excluded.sync_time)`,
+		target, models.TypeNote)
+	return err
+}
+
+// NoteNeedsTargetConflict checks for an edit made since an earlier target's
+// baseline when there is no sync point for the selected remote.
+func (db *DB) NoteNeedsTargetConflict(noteID string, target int) (bool, error) {
+	var pending bool
+	err := db.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM jl_note_switch_baselines b JOIN notes n ON n.id = b.note_id
+		WHERE b.note_id = ? AND n.updated_time > b.sync_time AND NOT EXISTS (
+			SELECT 1 FROM sync_items WHERE item_id = b.note_id AND sync_target = ?
+		))`, noteID, target).Scan(&pending)
+	return pending, err
+}
+
+func clearNoteSwitchBaseline(ex execer, noteID string) error {
+	_, err := ex.Exec(`DELETE FROM jl_note_switch_baselines WHERE note_id = ?`, noteID)
+	return err
 }
 
 // PushableDeletedItems returns only deletes bound to the current selection.

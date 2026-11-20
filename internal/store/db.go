@@ -199,6 +199,9 @@ func (db *DB) ensureSidecarSchema() error {
 		sync_target INTEGER PRIMARY KEY,
 		scope TEXT NOT NULL,
 		active INTEGER NOT NULL
+	)`, `CREATE TABLE IF NOT EXISTS jl_note_switch_baselines (
+		note_id TEXT PRIMARY KEY,
+		sync_time INTEGER NOT NULL
 	)`, `CREATE UNIQUE INDEX IF NOT EXISTS jl_one_active_sync_target ON jl_sync_targets(active) WHERE active = 1`} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("sidecar schema statement failed: %w\nSQL: %s", err, stmt)

@@ -22,8 +22,9 @@ func deleteScope(backend SyncBackend) string {
 	return "" // Never authorize deletes for an unidentified backend.
 }
 
-// SelectTarget records a change of remote, or disables remote deletion when
-// backend is nil. It does not contact the target.
+// SelectTarget selects the remote for sync bookkeeping and retains local note
+// baselines across switches. A nil backend disables remote deletion.
+// It does not contact the target.
 func SelectTarget(db *store.DB, backend SyncBackend) error {
 	var target int
 	if backend != nil {

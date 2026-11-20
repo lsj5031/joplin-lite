@@ -3,6 +3,7 @@ package sync
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,8 @@ import (
 	"github.com/lsj5031/joplin-lite/internal/models"
 	"github.com/lsj5031/joplin-lite/internal/store"
 )
+
+var errTargetSwitchConflictNote = errors.New("cannot replace an edited conflict note after changing sync targets")
 
 // DeltaResponse represents the Joplin Server delta API response.
 type DeltaResponse struct {
@@ -232,6 +235,29 @@ func applyDeltaItemWithKeys(backend SyncBackend, db *store.DB, syncTarget int, i
 	// Parse as Joplin text format
 	itemType, fields := models.Deserialize(string(content))
 
+	noteID, _ := parseItemName(item.ItemName)
+	contentID := fields["id"]
+	var targetConflict bool
+	if noteID != "" {
+		var err error
+		targetConflict, err = db.NoteNeedsTargetConflict(noteID, syncTarget)
+		if err != nil {
+			return err
+		}
+		if targetConflict && (itemType != models.TypeNote || contentID != noteID) {
+			return errUncertainNoteConflict
+		}
+	}
+	if contentID != "" && contentID != noteID {
+		protected, err := db.NoteNeedsTargetConflict(contentID, syncTarget)
+		if err != nil {
+			return err
+		}
+		if protected {
+			return errUncertainNoteConflict
+		}
+	}
+
 	slog.Debug("applying delta item", "name", item.ItemName, "parsed_type", itemType)
 
 	switch itemType {
@@ -252,9 +278,8 @@ func applyDeltaItemWithKeys(backend SyncBackend, db *store.DB, syncTarget int, i
 			// While a local edit is pending, even a decision to skip an
 			// encrypted remote revision can lead to overwriting it on push.
 			// Authenticate before trusting its claimed revision timestamp.
-			if si != nil && existing.UpdatedTime > si.SyncTime && encryptedNote(note) {
-				id, _ := parseItemName(item.ItemName)
-				if id != note.ID {
+			if (targetConflict || si != nil && existing.UpdatedTime > si.SyncTime) && encryptedNote(note) {
+				if noteID != note.ID {
 					return errUncertainNoteConflict
 				}
 				note, content, err = decryptConflictNote(svc, note)
@@ -265,15 +290,33 @@ func applyDeltaItemWithKeys(backend SyncBackend, db *store.DB, syncTarget int, i
 					return err
 				}
 			}
-			if handled, err := keepDecryptedCopy(db, syncTarget, models.TypeNote, note.ID,
-				note.EncryptionApplied, existing.EncryptionApplied, note.UpdatedTime, existing.UpdatedTime, si); handled || err != nil {
-				return err
+			decision := pullConflict
+			if !targetConflict {
+				if handled, err := keepDecryptedCopy(db, syncTarget, models.TypeNote, note.ID,
+					note.EncryptionApplied, existing.EncryptionApplied, note.UpdatedTime, existing.UpdatedTime, si); handled || err != nil {
+					return err
+				}
+				decision = remoteDecision(si, existing.UpdatedTime, note.UpdatedTime, existing.IsConflict == 1)
 			}
-			switch remoteDecision(si, existing.UpdatedTime, note.UpdatedTime, existing.IsConflict == 1) {
+			switch decision {
 			case pullStale:
 				slog.Debug("keeping local note; remote copy is not a newer revision", "id", note.ID)
 				return nil
 			case pullConflict:
+				if targetConflict {
+					if existing.IsConflict == 1 {
+						return errTargetSwitchConflictNote
+					}
+					if encryptedNote(existing) {
+						local, _, err := decryptConflictNote(svc, existing)
+						if err != nil {
+							return err
+						}
+						if local.IsConflict == 1 {
+							return errTargetSwitchConflictNote
+						}
+					}
+				}
 				if err := resolveNoteConflict(db, svc, existing, note, content); err != nil {
 					return err
 				}

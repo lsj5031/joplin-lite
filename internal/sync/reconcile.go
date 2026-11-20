@@ -2,11 +2,13 @@ package sync
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
 
+	"github.com/lsj5031/joplin-lite/internal/e2ee"
 	"github.com/lsj5031/joplin-lite/internal/store"
 )
 
@@ -31,6 +33,10 @@ type ChildItem struct {
 // handling cases where the delta delete event was missed (e.g. cursor
 // already advanced past it).
 func PullMissingItems(backend SyncBackend, db *store.DB) error {
+	return pullMissingItems(backend, db, nil)
+}
+
+func pullMissingItems(backend SyncBackend, db *store.DB, svc *e2ee.Service) error {
 	syncTarget := backend.SyncTarget()
 
 	// Collect all item names from the server
@@ -84,8 +90,7 @@ func PullMissingItems(backend SyncBackend, db *store.DB) error {
 
 		si, err := db.GetSyncItem(itemID, syncTarget)
 		if err != nil {
-			slog.Error("cannot check sync item", "id", itemID, "error", err)
-			continue
+			return fmt.Errorf("cannot check sync item %s: %w", itemID, err)
 		}
 		if si != nil {
 			continue // already synced via delta
@@ -95,18 +100,19 @@ func PullMissingItems(backend SyncBackend, db *store.DB) error {
 		slog.Info("fetching missing item from server", "name", child.Name)
 		contentPath := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(child.Name))
 		content, err := backend.Get(contentPath)
+		if err == nil {
+			deltaItem := DeltaItem{ID: child.ID, ItemName: child.Name, Type: 1}
+			err = applyDeltaItemWithKeys(backend, db, syncTarget, deltaItem, content, svc)
+		}
 		if err != nil {
-			slog.Error("cannot fetch missing item content", "name", child.Name, "error", err)
-			continue
-		}
-
-		deltaItem := DeltaItem{
-			ID:       child.ID,
-			ItemName: child.Name,
-			Type:     1, // PUT
-		}
-		if err := applyDeltaItem(backend, db, syncTarget, deltaItem, content); err != nil {
-			slog.Error("failed to apply missing item", "name", child.Name, "error", err)
+			pending, checkErr := db.NoteNeedsTargetConflict(itemID, syncTarget)
+			if checkErr != nil {
+				return fmt.Errorf("cannot check pending edit for %s: %w", itemID, checkErr)
+			}
+			if pending || errors.Is(err, errUncertainNoteConflict) {
+				return fmt.Errorf("cannot reconcile %s: %w", child.Name, err)
+			}
+			slog.Error("failed to reconcile missing item", "name", child.Name, "error", err)
 			continue
 		}
 		fetched++
