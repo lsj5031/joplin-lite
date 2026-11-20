@@ -533,14 +533,11 @@ func pushDeletes(backend SyncBackend, db *store.DB, syncTarget int) error {
 	}
 
 	for _, item := range deleted {
-		// A resource lives at two paths on the target: metadata <id>.md and
-		// the blob .resource/<id>. The blob delete is best-effort; the
-		// metadata delete below is what the bookkeeping keys on.
 		if item.ItemType == models.TypeResource {
 			blobItemName := ".resource/" + item.ItemID
 			blobPath := fmt.Sprintf("/api/items/root:/%s:/content", url.PathEscape(blobItemName))
 			if err := deleteInScope(backend, blobPath, scope); err != nil {
-				slog.Warn("failed to delete remote resource blob", "id", item.ItemID, "error", err)
+				return fmt.Errorf("cannot delete remote resource blob %s: %w", item.ItemID, err)
 			}
 		}
 

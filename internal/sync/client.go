@@ -143,11 +143,13 @@ func (c *Client) delete(path string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent, http.StatusNotFound:
+		return nil
+	default:
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("DELETE %s: status %d: %s", path, resp.StatusCode, string(data))
 	}
-	return nil
 }
 
 // post performs an authenticated POST request with JSON body.
