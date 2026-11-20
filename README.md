@@ -6,13 +6,13 @@
 
 Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a single lightweight native app (~120 MB RAM, no Electron or embedded browser) with warm Field Notes paper tones, Liquid Glass surfaces, and a fast, distraction-free Markdown editor.
 
-**[Download v0.1.0-alpha.3](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)** ·
+**[Download v0.2.0](https://github.com/lsj5031/joplin-lite/releases/tag/v0.2.0)** ·
 **[Watch the 84s UI walkthrough](docs/promo/joplin-lite-ui-walkthrough.mp4)** ·
 **[Technical & desktop guide](shell/README.md)**
 
 [![Watch the 84-second native UI walkthrough](docs/promo/joplin-lite-ui-walkthrough-poster.png)](docs/promo/joplin-lite-ui-walkthrough.mp4)
 
-> **Alpha note:** Joplin Lite is an independent client used daily on macOS and Windows with encrypted Dropbox libraries. Because it is still in alpha and does not cover every official Joplin feature, **always back up your notes** before connecting an existing library.
+> **Before you connect a library:** Joplin Lite is an independent client used daily on macOS and Windows with encrypted Dropbox libraries. It does not cover every official Joplin feature, so **always back up your notes** before connecting an existing library.
 
 ---
 
@@ -20,18 +20,16 @@ Built in Go with [MyGO](https://github.com/egoist/mygo), Joplin Lite runs as a s
 
 ### 1. Download and open
 
-Grab the latest package for your computer from the **[Releases page](https://github.com/lsj5031/joplin-lite/releases/tag/v0.1.0-alpha.3)**:
+Grab the latest package for your computer from the **[Releases page](https://github.com/lsj5031/joplin-lite/releases/latest)**:
 
 | Platform | Package | How to run |
 | --- | --- | --- |
-| **macOS** (Apple silicon) | `Joplin-Lite-0.1.0-alpha.3-macos-arm64.zip` | Unzip and drag **Joplin Lite.app** to **Applications** |
-| **Windows** (64-bit, portable) | `Joplin-Lite-0.1.0-alpha.3-windows-amd64.zip` | Extract the whole folder and run **gojoplin-desktop.exe** |
+| **macOS** (Apple silicon) | `Joplin-Lite-0.2.0-macos-arm64.zip` | Unzip and drag **Joplin Lite.app** to **Applications** |
+| **Windows** (64-bit, portable) | `Joplin-Lite-0.2.0-windows-amd64.zip` | Extract the whole folder and run **Joplin Lite.exe** |
 
-Current source builds use **Joplin Lite.exe** and include the Windows startup
-and integrated-window fixes added after alpha.3. The alpha.3 executable predates
-those fixes and expects an existing configuration.
+Verify your download against the `SHA256SUMS.txt` file on the release page.
 
-* **First launch:** The macOS app is ad-hoc signed (not notarized) and the Windows executable is not publisher-signed, so your OS may ask you to confirm opening it the first time.
+* **First launch:** The macOS app is ad-hoc signed (not notarized) and the Windows executable is not publisher-signed, so your OS may ask you to confirm opening it the first time. If Gatekeeper says the macOS app is damaged, run `xattr -cr "/Applications/Joplin Lite.app"` in Terminal and open it again.
 * **Default profile:** On Windows, without an explicit config, remembered launch selection, `GOJOPLIN_CONFIG_PATH`, or an existing `~/.config/go-joplin/config.yaml`, the app creates its own empty `{}` config at `%AppData%\joplin-lite\config.json`. Select official Joplin's `settings.json` explicitly with `-config` when needed. macOS retains its existing defaults: go-joplin YAML first, then official Joplin settings. Notes still default to `~/.local/share/gojoplin`; existing explicit, environment and remembered selections still apply.
 * **Updating:** There is no background auto-updater. To update, quit Joplin Lite and replace the app or folder—your notes and settings live separately in your user profile directory.
 
@@ -172,7 +170,7 @@ What to expect:
 
 ## Good to know
 
-- **Keep regular backups** while Joplin Lite is in alpha. Fresh-account onboarding, OAuth token renewal, screen-reader accessibility, and live browser-extension pairing for the built-in Clipper API still need broader testing.
+- **Keep regular backups** as Joplin Lite evolves. Fresh-account onboarding, OAuth token renewal, screen-reader accessibility, and live browser-extension pairing for the built-in Clipper API still need broader testing.
 - **First sync on large vaults:** An initial sync or full cursor reset on a large library can take time; see the [Dropbox sync performance notes](docs/dropbox-sync-review.md).
 - **Troubleshooting & logs:** Diagnostic logs are written to `desktop.log` inside your active data directory (automatically rotated at 1 MiB). When [opening an issue](https://github.com/lsj5031/joplin-lite/issues), include the app version and relevant error lines with personal note titles, paths, and tokens removed.
 
