@@ -108,10 +108,13 @@ func conflictNoteRaw(content []byte, note *models.Note) (*models.RawItem, error)
 	_, fields := models.Deserialize(string(content))
 	seen := make(map[string]bool, len(raw.Meta))
 	for _, m := range raw.Meta {
-		if m.Key == "" || seen[m.Key] || fields[m.Key] != m.Value || !validConflictField(m.Key, m.Value) {
+		key, _, hasSeparator := strings.Cut(m.Raw, ": ")
+		value, present := fields[m.Key]
+		if !hasSeparator || key != m.Key || key == "" || key == "title" || key == "body" ||
+			seen[key] || !present || value != m.Value || !validConflictField(key, value) {
 			return nil, errUncertainNoteConflict
 		}
-		seen[m.Key] = true
+		seen[key] = true
 	}
 	// Raw local metadata can be from before the most recent user edit. Bind
 	// it to the same note, but use current row values for all known fields.

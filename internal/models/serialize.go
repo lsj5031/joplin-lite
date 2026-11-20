@@ -175,9 +175,12 @@ func ResourceFields(r *Resource) map[string]string {
 func Deserialize(content string) (int, map[string]string) {
 	fields := make(map[string]string)
 
-	// Trim trailing whitespace so a trailing \n doesn't produce
-	// an empty element that breaks the backward metadata scan.
-	content = strings.TrimRight(content, "\n\r ")
+	// Skip trailing line breaks and blank lines while retaining spaces on
+	// the last metadata line.
+	end := len(strings.TrimRight(content, "\n\r "))
+	if lineEnd := strings.IndexAny(content[end:], "\n\r"); lineEnd >= 0 {
+		content = content[:end+lineEnd]
+	}
 
 	// Find the metadata section: last block of "key: value" lines
 	lines := strings.Split(content, "\n")
@@ -201,8 +204,11 @@ func Deserialize(content string) (int, map[string]string) {
 		line := lines[i]
 		if idx := strings.Index(line, ": "); idx > 0 {
 			key := line[:idx]
-			value := unescapeMetaValue(key, line[idx+2:])
-			fields[key] = value
+			value := line[idx+2:]
+			if key == "type_" && i == len(lines)-1 {
+				value = strings.TrimRight(value, " ")
+			}
+			fields[key] = unescapeMetaValue(key, value)
 		}
 	}
 

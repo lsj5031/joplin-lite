@@ -9,7 +9,7 @@ import (
 type MetaLine struct {
 	Key      string // parsed key (trimmed)
 	Value    string // decoded value (Joplin's unserialize_format escaping reversed)
-	RawValue string // value text as written (trimmed, still escaped)
+	RawValue string // escaped value text after parsing the field separator
 	Raw      string // the exact source line, byte for byte
 }
 
@@ -36,9 +36,8 @@ type RawItem struct {
 	TrailingNL string     // exact trailing newline bytes after the last meta line
 }
 
-// ParseItem parses content the way Joplin's BaseItem.unserialize does (same
-// scan-from-the-end metadata detection, same value trimming), while keeping
-// every raw byte needed for exact re-emission.
+// ParseItem scans metadata from the end, keeping every raw byte needed for
+// exact re-emission.
 func ParseItem(content string) (*RawItem, error) {
 	r := &RawItem{}
 	// Joplin's writer emits no trailing newline; tolerate and remember one.
@@ -83,6 +82,9 @@ func ParseItem(content string) (*RawItem, error) {
 		}
 		key := strings.TrimSpace(t[:p])
 		rawValue := strings.TrimSpace(t[p+1:])
+		if value, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), key+": "); ok && key != "type_" {
+			rawValue = value
+		}
 		r.Meta = append(r.Meta, MetaLine{
 			Key:      key,
 			Value:    unescapeMetaValue(key, rawValue),
