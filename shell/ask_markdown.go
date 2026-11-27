@@ -17,14 +17,14 @@ func askCitationKey(citation assistant.Citation) string {
 	return citation.NoteID + "\x00" + citation.Version
 }
 
-func (a *nativeApp) askMarkdownOptions() *markdown.Options {
+func (a *nativeApp) askMarkdownOptions(c *ui.Context) *markdown.Options {
 	if a.ask.md == nil {
 		a.ask.md = &markdown.Options{}
 	}
 	if a.ask.mdTheme == nil {
 		a.ask.mdTheme = &markdown.Theme{
-			FontSize:       sizeUI,
-			LineHeight:     1.5,
+			FontSize:       scaledText(c, 15),
+			LineHeight:     1.55,
 			Text:           inkNavy,
 			Muted:          inkSoft,
 			Link:           routeBlue,
@@ -36,6 +36,8 @@ func (a *nativeApp) askMarkdownOptions() *markdown.Options {
 			Rule:           hairline,
 		}
 	}
+	// Answers read as body text, and follow the text scale live.
+	a.ask.mdTheme.FontSize = scaledText(c, 15)
 	a.ask.md.Theme = a.ask.mdTheme
 	a.ask.md.OnLink = a.openAskMarkdownLink
 	return a.ask.md
@@ -60,7 +62,7 @@ func askCitationMarkdown(text string, citations []assistant.Citation, ref string
 func (a *nativeApp) askAnswer(c *ui.Context, text string, citations []assistant.Citation, ref string, width float32) {
 	source := askCitationMarkdown(text, citations, ref)
 	ui.Column(c).Width(width).Children(func() {
-		markdown.View(c, source, a.askMarkdownOptions()).MaxWidth(width)
+		markdown.View(c, source, a.askMarkdownOptions(c)).MaxWidth(width)
 	})
 }
 

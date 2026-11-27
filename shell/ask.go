@@ -759,7 +759,7 @@ func (a *nativeApp) askPanel(c *ui.Context, _ *ui.Theme) {
 						a.askAnswer(c, message.Text, message.Citations, strconv.Itoa(i), innerWidth)
 						a.askCitationButtons(c, message.Citations, innerWidth)
 					} else {
-						ui.Text(c, message.Text).FontSize(sizeUI).LineHeight(1.5).TextColor(inkNavy).MaxWidth(innerWidth)
+						ui.Text(c, message.Text).FontSize(scaledText(c, 15)).LineHeight(1.5).TextColor(inkNavy).MaxWidth(innerWidth)
 					}
 				}
 				if a.ask.thinking != "" {

@@ -199,6 +199,10 @@ type nativeApp struct {
 
 	// shortcutsOpen is the keyboard reference dialog (F1 or Cmd/Ctrl+/).
 	shortcutsOpen bool
+	// uiReviewOpen is the Help ▸ UI Review modal; uiReviewMD carries its
+	// Markdown options, built once from the preview's theme.
+	uiReviewOpen bool
+	uiReviewMD   *markdown.Options
 
 	// surfaces carries the entrance state of the menus and dialogs, so a panel
 	// animates in once per open and never at rest.
@@ -2549,7 +2553,10 @@ func (a *nativeApp) prepareMarkdownOptions() string {
 			TableBorder:         hairline,
 			TableHeader:         paperSunken.Alpha(0.65),
 			TableStripe:         paperSunken.Alpha(0.28),
-			Checkbox:            routeBlue,
+			// 15em at 17px keeps a two-column table inside the 700 DIP
+			// measure; the renderer scrolls wider tables sideways.
+			TableMaxColumn: 15,
+			Checkbox:       routeBlue,
 		}
 		a.mdThemeDark = a.dark
 		a.mdThemeWash = activeWash
@@ -2728,7 +2735,7 @@ func (a *nativeApp) modalOpen() bool {
 	return a.confirmDelete || a.confirmBulkDelete || a.confirmDeleteNotebook ||
 		a.confirmDeleteTag || a.notebookBlocked || a.notebookOpen || a.tagOpen ||
 		a.settingsOpen || a.ask.settingsOpen || a.savedOpen || a.savedDelete != "" ||
-		a.resolveConflict || a.paletteOpen || a.shortcutsOpen || a.confirmImport
+		a.resolveConflict || a.paletteOpen || a.shortcutsOpen || a.uiReviewOpen || a.confirmImport
 }
 
 func (a *nativeApp) menuAction(fn func()) func(*mygo.MenuItem, *mygo.Window) {
@@ -2840,6 +2847,8 @@ func (a *nativeApp) appMenu() *mygo.Menu {
 			Label: "Help",
 			Submenu: []*mygo.MenuItem{
 				{Label: "Keyboard Shortcuts", Accelerator: "CmdOrCtrl+/", Click: do(a.openShortcuts)},
+				mygo.Separator(),
+				{Label: "UI Review", Click: do(a.openUIReview)},
 			},
 		},
 	)

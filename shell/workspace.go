@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -165,6 +166,7 @@ func (a *nativeApp) view(c *ui.Context) {
 	a.backupDialogs(c, t)
 	a.commandPalette(c, t)
 	a.shortcutsDialog(c, t)
+	a.uiReviewDialog(c, t)
 
 	if a.confirmDelete {
 		if confirmDialog(c, dangerTheme, &a.confirmDelete, "Delete note?",
@@ -1192,6 +1194,102 @@ func (a *nativeApp) noteRows(c *ui.Context, t *ui.Theme) {
 	}
 }
 
+// highlightSpans cuts a title into spans around every run that matches a word
+// of the search query, so "report draft" highlights both words and a title
+// found only by its body stays plain. ASCII matches ignore case; other bytes
+// must match exactly, which keeps every span on a UTF-8 boundary for Chinese
+// titles. It runs for each visible row on each frame, so it stays a plain scan
+// of a short title against short words.
+func highlightSpans(title, q string) []ui.Span {
+	plain := []ui.Span{{Text: title}}
+	if title == "" || strings.TrimSpace(q) == "" {
+		return plain
+	}
+
+	type run struct{ start, end int }
+	var runs []run
+	for _, word := range strings.Fields(q) {
+		for at := 0; at < len(title); {
+			i := indexFold(title, word, at)
+			if i < 0 {
+				break
+			}
+			runs = append(runs, run{i, i + len(word)})
+			at = i + len(word)
+		}
+	}
+	if len(runs) == 0 {
+		return plain
+	}
+
+	// Words may match out of order ("ana ba" in "Banana"), and two words may
+	// cover the same run; sorting then merging keeps the spans monotonic and
+	// never highlights a byte twice.
+	sort.Slice(runs, func(i, j int) bool { return runs[i].start < runs[j].start })
+	merged := runs[:1]
+	for _, r := range runs[1:] {
+		last := &merged[len(merged)-1]
+		if r.start <= last.end {
+			if r.end > last.end {
+				last.end = r.end
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+
+	spans := make([]ui.Span, 0, len(merged)*2+1)
+	at := 0
+	for _, r := range merged {
+		if r.start > at {
+			spans = append(spans, ui.Span{Text: title[at:r.start]})
+		}
+		spans = append(spans, ui.Span{
+			Text:                title[r.start:r.end],
+			Weight:              600,
+			Background:          violet.Alpha(0.26),
+			Radius:              3,
+			Underline:           true,
+			DecorationColor:     violet,
+			DecorationThickness: 1.5,
+		})
+		at = r.end
+	}
+	if at < len(title) {
+		spans = append(spans, ui.Span{Text: title[at:]})
+	}
+	return spans
+}
+
+// indexFold finds needle in haystack at or after from, folding ASCII case only
+// so the returned offset can slice haystack safely. Bytes that are not ASCII
+// must match exactly, so the callers pass UTF-8 (a note title and the typed
+// query) and a match always starts on a rune boundary. Candidates are tried at
+// every byte, which is O(len(haystack)·len(needle)) and fine for the short
+// strings a row highlights.
+func indexFold(haystack, needle string, from int) int {
+	for i := from; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j := 0; j < len(needle); j++ {
+			if foldASCII(haystack[i+j]) != foldASCII(needle[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+func foldASCII(b byte) byte {
+	if 'A' <= b && b <= 'Z' {
+		return b + 'a' - 'A'
+	}
+	return b
+}
+
 // noteRow draws one row of the list: hairline ruled, a flag column, a title
 // and date header with the excerpt below, and, for the note the editor
 // follows, the sage tint and left accent bar that mark a choice (MyGO's own
@@ -1343,7 +1441,14 @@ func (a *nativeApp) noteRow(c *ui.Context, t *ui.Theme, i int, dragIDs []string,
 		}
 
 		ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(8).Children(func() {
-			name := ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
+			var name ui.Element
+			if a.query != "" {
+				name = ui.RichText(c, highlightSpans(title, a.query)...).
+					FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
+			} else {
+				name = ui.Text(c, title).FontSize(sizeUI).LineHeight(1.25).SingleLine().Grow(1).MinWidth(0)
+			}
+			name.Tooltip(title)
 			timeColor := inkSoft
 			if current || bulk {
 				name.FontWeight(600).TextColor(inkNavy)

@@ -422,6 +422,53 @@ func TestPreviewChunksNeverCutInline(t *testing.T) {
 	}
 }
 
+// TestHighlightSpans cuts a result title into plain and matched runs: ASCII
+// matching ignores case, every word of a multi-word query highlights, a
+// Chinese match stays on rune boundaries, and a query with no match leaves one
+// plain span holding the whole title.
+func TestHighlightSpans(t *testing.T) {
+	title := "Q3 Report draft"
+	spans := highlightSpans(title, "REPORT")
+	if len(spans) != 3 {
+		t.Fatalf("spans = %#v, want three runs", spans)
+	}
+	if spans[0].Text != "Q3 " || spans[1].Text != "Report" || spans[2].Text != " draft" {
+		t.Fatalf("spans cut the title wrong: %#v", spans)
+	}
+	if spans[1].Background.A == 0 {
+		t.Fatal("the matched run has no highlight background")
+	}
+	if got := spans[0].Text + spans[1].Text + spans[2].Text; got != title {
+		t.Fatalf("spans rejoin to %q, want %q", got, title)
+	}
+
+	// Every word highlights, whatever the order and spacing of the query.
+	both := highlightSpans(title, "  draft   q3 ")
+	if len(both) != 3 || both[0].Text != "Q3" || both[1].Text != " Report " || both[2].Text != "draft" {
+		t.Fatalf("multi-word spans = %#v", both)
+	}
+	if both[0].Background.A == 0 || both[2].Background.A == 0 {
+		t.Fatalf("not every word highlighted: %#v", both)
+	}
+
+	// Overlapping words merge into one run instead of highlighting a byte twice.
+	overlap := highlightSpans("Banana", "ana ba")
+	if len(overlap) != 2 || overlap[0].Text != "Bana" || overlap[1].Text != "na" {
+		t.Fatalf("overlapping spans = %#v", overlap)
+	}
+
+	cjk := highlightSpans("会议记录 2026", "记录")
+	if len(cjk) != 3 || cjk[0].Text != "会议" || cjk[1].Text != "记录" || cjk[2].Text != " 2026" {
+		t.Fatalf("Chinese match = %#v", cjk)
+	}
+
+	for _, q := range []string{"missing", "   "} {
+		if plain := highlightSpans(title, q); len(plain) != 1 || plain[0].Text != title {
+			t.Fatalf("query %q changed the title: %#v", q, plain)
+		}
+	}
+}
+
 func TestPreviewChunksShortBodyUnsplit(t *testing.T) {
 	doc := parser.New(parser.Default)
 	src := formatMarkdownPreviewWithDoc(doc, "short\nbody")
