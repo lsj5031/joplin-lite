@@ -17,13 +17,13 @@ import (
 	"github.com/lsj5031/joplin-lite/service"
 )
 
-// TestCapturePromo renders the promotional tour, which qa/promo cuts into the
-// product film. Every frame is rendered at 2x at 30 fps with real pointer
-// movement, hover states, and beat/cursor telemetry in promo.json so the
-// compositor plays the entire capture 1:1 without time-warping or jump cuts.
+// TestCapturePromo renders the promotional tour, which promo_film_test.go cuts
+// into the product film. Every frame is rendered at 2x at 30 fps with real
+// pointer movement, hover states, and beat/cursor telemetry in promo.json so
+// the film plays the entire capture 1:1 without time-warping or jump cuts.
 //
 //	CAPTURE_DIR=../tmp/promo go test -run TestCapturePromo ./shell/
-//	node qa/promo/render.mjs            # -> docs/promo/*.mp4
+//	go test -run TestRenderPromoFilm ./shell/   # -> docs/promo/*.mp4
 const promoFPS = 30
 
 type promoPoint struct {

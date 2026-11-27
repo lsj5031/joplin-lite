@@ -1,28 +1,24 @@
 # Product film
 
-`docs/promo/joplin-lite-promo.mp4` is rendered from deterministic, frame-by-frame captures of the native workspace.
+`docs/promo/joplin-lite-promo.mp4` is rendered from deterministic, frame-by-frame
+captures of the native workspace and cut with MyGO's render plugin: no browser
+takes part, and the frames are encoded by the system's own encoder (or by
+ffmpeg where the system has none, as on a headless runner).
 
 ```sh
 # 1. Capture the native workspace tour at 30 fps (2x retina, 2560x1600).
 (cd shell && CAPTURE_DIR=../tmp/promo go test -run TestCapturePromo .)
 
-# 2. Compose the 1920x1080 film and poster.
-node qa/promo/render.mjs
-
-# Optional: one review still per scene (no video encode).
-node qa/promo/render.mjs --stills
-
-# Check path handling without installing Chromium or ffmpeg.
-node --test qa/promo/render.test.mjs
+# 2. Cut and encode the 1920x1080 film and poster.
+(cd shell && go test -run TestRenderPromoFilm .)
 ```
 
 `PROMO_DIR` selects the captured frames and may point outside the checkout.
-`PROMO_OUT` selects the film output directory; `CHROME_PATH` and `FFMPEG`
-override the rendering executables.
+`PROMO_OUT` selects the film output directory.
 
 `shell/promo_test.go` drives the real `ui.Tester` through a continuous product tour—gliding the pointer with real hover states, opening the Liquid Glass notebooks & tags rail, creating and typing a Markdown note with live sidebar updates, toggling into typeset preview, opening the Command Palette (`⌘K · ⌘P`), and switching to the dark palette—writing numbered PNGs and cursor telemetry to `tmp/promo/`.
 
-`qa/promo/compose.html` plays those captured frames 1:1 at 30 fps with a high-DPI vector pointer, editorial captions, and the opening/closing Field Notes cards; `qa/promo/render.mjs` steps the page frame by frame and pipes the screenshots into `ffmpeg`.
+`shell/promo_film_test.go` is the cut. It builds the same scenes in Go with the views the app draws: the Field Notes wash and its night fade, the app card with the captured frames played 1:1 at 30 fps and the recorded pointer over them, the editorial caption column, and the opening and closing cards. `render.Video` draws each frame on the GPU and encodes H.264 with the system's own encoder.
 
 ## Cut (~22 s)
 
