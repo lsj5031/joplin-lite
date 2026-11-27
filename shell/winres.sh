@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Regenerates web/public/app-icon.ico and then shell/rsrc_windows_amd64.syso:
-# the executable's icon (the same artwork the web preview and the macOS bundle
-# use) and its version block.
+# Regenerates assets/icons/app-icon.ico and then shell/rsrc_windows_amd64.syso:
+# the executable's icon (the same artwork the macOS bundle uses) and its
+# version block.
 # `go build` embeds the .syso automatically, so the icon ships with a plain
 # build; run this after changing the artwork or bumping the version, then
 # commit the result.
@@ -14,8 +14,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${VERSION:-0.1.0}"
-ART="$PWD/web/public/android-chrome-512x512.png"
-ICO="$PWD/web/public/app-icon.ico"
+ART="$PWD/assets/icons/app-icon-512.png"
+ICO="$PWD/assets/icons/app-icon.ico"
 # Pinned so regenerating the checked-in .syso does not pick up a new tool.
 WINRES="${WINRES:-go run github.com/tc-hib/go-winres@v0.3.3}"
 

@@ -5,16 +5,6 @@
 # scratch (local measurement builds)
 /tmp/
 
-# dependencies & build output
-web/node_modules/
-web/dist/
-web/.output/
-web/.vinxi/
-web/.tanstack/
-web/.vite/
-# stale generated SPA bundle; the desktop shell embeds no page
-shell/webdist/
-
 # env & logs
 .env
 .env.*
@@ -47,8 +37,3 @@ Thumbs.db
 /qa/dashboard.html
 /qa/diag.mjs
 /qa/diag2.mjs
-
-# Personal editor/container configuration from the web starter.
-/web/.devcontainer/
-/web/.vscode/
-/web/.prettierignore

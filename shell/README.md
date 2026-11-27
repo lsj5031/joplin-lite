@@ -51,11 +51,11 @@ bash shell/package-windows.sh   # -> tmp/Joplin-Lite-0.1.0-windows-amd64.zip
 The zip holds `Joplin Lite.exe` (GUI subsystem: double-clicking opens no
 console), `LICENSE`, `NOTICE`, `OFL.txt` and a short `README.txt`. The executable's icon
 and version block come from `shell/rsrc_windows_amd64.syso`, which `go build`
-embeds automatically; the icon is the same 512 px artwork the web preview and
-the macOS bundle use, and it is resource `#1` because MyGO loads that for the
+embeds automatically; the icon is the same 512 px artwork the macOS bundle
+uses, and it is resource `#1` because MyGO loads that for the
 window class (title bar and taskbar). `bash shell/winres.sh` (go-winres
 v0.3.3, `VERSION` defaults to `0.1.0`) rebuilds it in two steps:
-`go run ./tools/icongen` writes `web/public/app-icon.ico` with a 16, 32, 48
+`go run ./tools/icongen` writes `assets/icons/app-icon.ico` with a 16, 32, 48
 and 256 pixel entry from the 512 px PNG — one image per size Windows asks for,
 rather than letting Windows scale a single 256 px image — and go-winres packs
 that icon plus the version block into the `.syso`. Commit both files after
@@ -389,33 +389,6 @@ Joplin. Fields that Joplin keeps but this client does not model (`is_locked`,
 `extracted_resource_ids`, and resource OCR metadata) are omitted on export;
 Joplin treats the missing values as defaults on import.
 
-## Browser preview (optional)
-
-The web build is not embedded in any binary. See the [browser README](../web/README.md)
-for a complete disposable-profile setup, API mutation permissions, demo mode and
-frontend checks. It documents the supported browser scope: Reload refreshes the
-local database; sync configuration, Ask and conflict resolution remain native
-features. Browser and native appearance preferences are separate.
-
-To use it in a browser over the
-same vault, serve it from disk — the preview gets its own loopback port because
-the Data API owns the top-level paths (`/notes`, `/tags`, …):
-
-```sh
-cd web && npm run build
-cd .. && go build -o tmp/gojoplin.exe .     # the headless CLI
-./tmp/gojoplin.exe serve --config tmp/try-config.yaml --no-sync \
-  --web-dir web/dist/client --web-addr 127.0.0.1:41185
-# open http://127.0.0.1:41185
-```
-
-`internal/webui` injects `{base, token, shell: "browser", profile}` before
-`</head>`, so the page reaches the API on its configured port; hashed assets
-are immutable and client routes fall back to `index.html`. `GOJOPLIN_WEB_DIR`
-sets the directory without the flag. Keep the preview on loopback: its HTML
-contains the API token. The example assumes a config with an API token and key;
-the browser README supplies a complete local-only trial.
-
 ## Visual contract and capture scope
 
 [DESIGN.md](../DESIGN.md) describes Field Notes palette roles, spacing and platform
@@ -427,8 +400,7 @@ responsive padding. Compact native rows show titles and timestamps; editor/Ask
 cards float over the wash with a subtle border/shadow. Windows paper cards stay
 opaque for ClearType, while macOS normally uses translucent paper and becomes opaque
 with Reduce Transparency. Platform
-caption controls, menus and Cmd/Ctrl conventions remain native. The browser
-retains its larger editorial title and 1.95 body line height.
+caption controls, menus and Cmd/Ctrl conventions remain native.
 
 The pinned MyGO accessibility backport carries Reduce Transparency from platform
 preferences to UI/Painter and makes glass opaque theme Surface, with a theme Border

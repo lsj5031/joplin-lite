@@ -3,7 +3,7 @@
 A quiet place to write: sage binding, warm paper, green ink, and a small folded-ribbon J mark.
 Keep the workspace spacious and useful. Paper is expressed through color, typography, and
 measure rather than texture or artificial folds. Native editor and Ask cards float over
-the theme wash; the browser retains a continuous paper reading surface.
+the theme wash.
 
 ## Palette
 
@@ -19,12 +19,12 @@ the theme wash; the browser retains a continuous paper reading surface.
 
 Selection uses a light sage tint and a clear edge. Red remains reserved for destructive
 actions, conflicts, and errors; amber indicates warnings. Status always includes text.
-Both the native shell and browser support the light and dark palettes.
+The native shell supports the light and dark palettes.
 
 ## Typography
 
 - **Optima** for editorial headings: regular weight, restrained tracking. Native note
-  titles start at 24 DIP. The browser uses 40 CSS px on desktop and 25px below 1024px.
+  titles start at 24 DIP.
 - **Avenir Next** for reading and writing: native body text starts at 17 DIP with
   1.6 line height; controls 13–14 DIP; secondary labels 11–12 DIP. These are baseline
   sizes subject to OS accessibility text scaling, not fixed physical pixels.
@@ -33,12 +33,9 @@ Both the native shell and browser support the light and dark palettes.
 
 Optima and Avenir Next are requested from installed system fonts; Apple font files are never
 redistributed. Native builds fall back to bundled Overpass when those families are absent.
-The browser body stack allows Avenir before bundled Overpass; headings allow Candara
-after Optima. Browser body text is 17 CSS px with 1.95 line height. These existing web
-choices are explicit surface exceptions, not a reason for different Mac/Windows native
-content typography. Native controls/chrome use the platform UI font (default theme
-size 14 DIP on Windows, 13 DIP on macOS); the Windows header uses that font too.
-Browser zoom and native OS scaling must preserve reachable controls and readable text.
+Native controls/chrome use the platform UI font (default theme size 14 DIP on Windows,
+13 DIP on macOS); the Windows header uses that font too. OS scaling must preserve
+reachable controls and readable text.
 
 ## Workspace
 
@@ -63,22 +60,20 @@ The integrated Windows chrome changes the window structure, not the product them
 
 Keep the same palette roles, action hierarchy, humanist content families and reading
 measure across native platforms. Native note rows are compact and title-only, with
-updated time and a to-do control where applicable; the browser retains taller excerpt
-rows. Selection must remain clear without relying on color alone.
+updated time and a to-do control where applicable. Selection must remain clear without
+relying on color alone.
 
 Native writing and preview content share a 700 DIP maximum measure, shrinking with the
-pane and responsive side padding. The browser uses 700 CSS px as its desktop content
-measure with at least 48px side padding; rendered prose also has a 72ch maximum. Below
-1024px it uses 24px side padding. A maximum is a ceiling, not a required width. Favor
+pane and responsive side padding. A maximum is a ceiling, not a required width. Favor
 space around the document over increasing line length in wide windows.
 
 Use a 4px spacing rhythm: compact gaps 4–8, control/panel padding 12–16, and larger
 document margins 24–48, adjusted for available width and text scaling. Keep type,
-spacing and material decisions in `shell/design.go` and `web/src/styles/app.css`.
+spacing and material decisions in `shell/design.go`.
 
-The native list begins at 300 DIP and can be resized; the browser desktop library
-column is 300 CSS px. macOS puts search/actions in the list-local header and
-reserves traffic-light space; its wide inset layout currently omits the brand group.
+The native list begins at 300 DIP and can be resized. macOS puts search/actions in the
+list-local header and reserves traffic-light space; its wide inset layout currently
+omits the brand group.
 Windows has the global integrated header described above, with logo/name first,
 then the notebook action. Both preserve the same primary
 actions. Keep system menus, caption controls, Cmd/Ctrl conventions and native font
@@ -86,9 +81,8 @@ rasterization. Mica and macOS sidebar vibrancy are platform backdrops, not share
 shader glass. Native corner rendering can differ with the platform renderer.
 
 Notebooks and tags open on demand. Native desktop exposes a temporary inline notebook panel
-so dragging notes remains possible; the browser uses a dialog. Narrow native windows and
-mobile browser widths show the list or editor with an explicit Back action and a notebook
-drawer. When the rail, list and Ask are all open, the rail yields first: if the editor would
+so dragging notes remains possible. Narrow native windows show the list or editor with an
+explicit Back action and a notebook drawer. When the rail, list and Ask are all open, the rail yields first: if the editor would
 fall below 480 DIP, opening Ask temporarily hides the rail and restores it when Ask closes.
 Management, search, and recovery controls must remain reachable at compact heights.
 
@@ -99,8 +93,7 @@ cards use the shared 11 DIP card radius, a fine border and soft ambient shadow t
 them from the wash. Windows cards stay opaque for ClearType; macOS cards normally
 use 92% light / 90% dark paper, becoming opaque with Reduce Transparency. This is
 an intentional text-rendering exception.
-Transient menus/popovers use the shared elevated surface treatment. Browser dialogs
-use CSS surfaces/shadows; they do not use the MyGO shader or OS vibrancy.
+Transient menus/popovers use the shared elevated surface treatment.
 
 The [MyGO Glass guide](https://github.com/egoist/mygo/blob/main/docs/plugins/glass.md)
 assigns Regular glass to readable bars/buttons/panels and Clear to content that brings
@@ -123,32 +116,28 @@ reduced-transparency glass. App cards and the wash base become opaque too;
 decorative glow can remain above the wash.
 
 The pinned platform backends read macOS Reduce Transparency and Windows' transparency
-setting; Linux does not populate this preference. The MyGO native-UI browser backend
-reads its media query, but this React preview is a separate implementation. CPU pixel
-tests cover all six materials in light/dark and changing backdrops; they do not verify
+setting; Linux does not populate this preference. CPU pixel tests cover all six materials in light/dark and changing backdrops; they do not verify
 live OS preference toggles, Mica/vibrancy behavior or actual macOS rendering. Native
 backdrop requests are unchanged. Current-guide Clarity/native-webview-glass APIs are
 not available in this pin. See `shell/patches/README.md` for maintained patch details.
-Status remains real text and controls in a compact footer. In the browser, that status
-describes local saving/connection and Reload, rather than native remote-sync controls.
+Status remains real text and controls in a compact footer.
 
 ## Mark and assets
 
 The mark is a folded-ribbon J monogram in sage, formed from a few flat polygons. Keep it small
 beside the wordmark (editorial font where used, system UI font in the Windows header).
 Platform application icons place the same mark on paper for legibility.
-Keep SVG, favicon, PNG, ICO, ICNS, and Windows executable resources consistent.
+Keep PNG, ICO, ICNS, and Windows executable resources consistent.
 
 ## Interaction and accessibility
 
 Preserve keyboard navigation, visible focus, dialog dismissal/return, explicit destructive
 confirmation, save errors, and no-sync operation. Typography and layout changes must not
 change note persistence or hide controls. Test both writing and reading, empty/error states,
-notebook management, compact windows, and browser light/dark themes using rendered screens.
+notebook management, and compact windows using rendered screens.
 No idle animation or new runtime dependency is needed for this visual language.
 
 Compare native platforms using the same commit, disposable notes, theme, wash, viewport
 in DIPs and scale. Simulated macOS screenshots are presentation fixtures, not live Mac
 evidence. Headless app-content images cannot prove Windows non-client geometry or OS
-caption removal; retain separate hidden-HWND checks. Browser DOM checks should exercise
-platform shortcut labels and modal focus, with rendered inspection for visual changes.
+caption removal; retain separate hidden-HWND checks.

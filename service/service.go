@@ -1,13 +1,11 @@
-// Package service is the typed API seam for the UI shell: the MyGO bound
-// services (M4) wrap these methods for the webview. Pure Go over the store —
-// core principle 4: the backend stays a headless, independently testable Go
-// service and the shell is only a shell.
+// Package service is the typed API seam for the native MyGO shell. Pure Go
+// over the store — core principle 4: the backend stays a headless,
+// independently testable Go service and the shell is only a shell.
 //
 // Request/response types are JSON-serializable on purpose: this is the
-// bindings contract the web prototype's mock layer (web/src/lib/mock-data.ts)
-// swaps out in M4. Settings (sync target, master password, clipper token)
-// are wired at M4 too — they need the runtime config and the sync engine,
-// not just the store.
+// bindings contract the native workspace consumes. Settings (sync target,
+// master password, clipper token) are wired by the shell as well, because they
+// need the runtime config and the sync engine, not just the store.
 package service
 
 import (

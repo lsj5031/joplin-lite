@@ -4,11 +4,11 @@
 
 ## Platform
 
-desktop (native Go UI via MyGO `ui` in `shell/`; optional standalone browser SPA in `web/`)
+desktop (native Go UI via MyGO `ui` in `shell/`)
 
 ## Stack
 
-Go (`CGO_ENABLED=0`) + MyGO native `ui` (`shell/`) over the headless Go `service/`, `internal/store/`, `internal/sync/`, and `internal/clipper/` packages. There is no embedded webview, Chromium/WebView2 process, or Node runtime in the desktop binary. An optional React/TanStack browser UI lives in `web/` for standalone browser preview over the HTTP Data API.
+Go (`CGO_ENABLED=0`) + MyGO native `ui` (`shell/`) over the headless Go `service/`, `internal/store/`, `internal/sync/`, and `internal/clipper/` packages. There is no embedded webview, Chromium/WebView2 process, or Node runtime.
 
 ## Users
 

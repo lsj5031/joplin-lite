@@ -1,8 +1,8 @@
 // Command icongen writes the .ico the Windows build embeds from one square
-// source image (the same artwork the web preview and the macOS bundle use):
+// source image (the same artwork the macOS bundle uses):
 //
-//	go run ./tools/icongen -in web/public/android-chrome-512x512.png \
-//	  -out web/public/app-icon.ico
+//	go run ./tools/icongen -in assets/icons/app-icon-512.png \
+//	  -out assets/icons/app-icon.ico
 //
 // shell/winres.sh runs it before go-winres, so the executable's icon has a
 // crisp entry for every size Windows asks for instead of one 256 px image it

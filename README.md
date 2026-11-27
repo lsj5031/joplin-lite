@@ -1,4 +1,4 @@
-<img src="web/public/android-chrome-192x192.png" alt="Joplin Lite folded-ribbon J" width="72" />
+<img src="assets/icons/app-icon-192.png" alt="Joplin Lite folded-ribbon J" width="72" />
 
 # Joplin Lite
 
@@ -171,6 +171,7 @@ What to expect:
 ## Good to know
 
 - **Keep regular backups** as Joplin Lite evolves. Fresh-account onboarding, OAuth token renewal, screen-reader accessibility, and live browser-extension pairing for the built-in Clipper API still need broader testing.
+- **No browser anywhere.** The native window is the only UI. `gojoplin serve` runs the Clipper/Data API alone, and the former browser preview's `--web-dir` and `--web-addr` flags and `GOJOPLIN_WEB_DIR` variable no longer exist, so drop them from any script that passed them.
 - **First sync on large vaults:** An initial sync or full cursor reset on a large library can take time; see the [Dropbox sync performance notes](docs/dropbox-sync-review.md).
 - **Troubleshooting & logs:** Diagnostic logs are written to `desktop.log` inside your active data directory (automatically rotated at 1 MiB). When [opening an issue](https://github.com/lsj5031/joplin-lite/issues), include the app version and relevant error lines with personal note titles, paths, and tokens removed.
 
@@ -189,7 +190,7 @@ go test ./...
 (cd shell && go test ./...)
 ```
 
-See [`shell/README.md`](shell/README.md) for Windows portable packaging, headless UI screenshot/video generation, and the optional browser preview. Additional testing guides cover [local sync](docs/local-sync-test.md), [E2EE sync](docs/e2ee-sync-rehearsal.md), [Joplin Server](docs/joplin-server-test.md), and [S3](docs/s3-test.md).
+See [`shell/README.md`](shell/README.md) for Windows portable packaging and headless UI screenshot/video generation. Additional testing guides cover [local sync](docs/local-sync-test.md), [E2EE sync](docs/e2ee-sync-rehearsal.md), [Joplin Server](docs/joplin-server-test.md), and [S3](docs/s3-test.md).
 
 ### Headless Web Clipper setup
 
@@ -205,9 +206,8 @@ For manual setup, use the token from your secret store, not the server logs.
 [AGPL-3.0-or-later](LICENSE). Forked from [jescarri/go-joplin](https://github.com/jescarri/go-joplin); see [NOTICE](NOTICE).
 
 Dependencies retain their own licenses. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-contains the native dependency, embedded-font, and historical tooling notices;
-browser builds emit their own notice bundle. Overpass fonts remain under SIL
-OFL-1.1. The current folded-J artwork was created for this project.
+contains the native dependency, embedded-font, and historical tooling notices.
+Overpass fonts remain under SIL OFL-1.1. The current folded-J artwork was created for this project.
 
 Redistributed binaries must include the license/notices and corresponding
 source for that build, including build scripts and pinned dependency manifests.

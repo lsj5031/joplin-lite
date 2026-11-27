@@ -1,7 +1,6 @@
 // Command joplin-lite-desktop is the native MyGO desktop app: one Go process
 // drawing the workspace with mygo/ui over service/, with the clipper/Data API
-// in the same process. It embeds no browser and no frontend bundle — the web
-// build remains an optional preview through `gojoplin serve --web-dir`.
+// in the same process. It embeds no browser and no frontend bundle.
 package main
 
 import (

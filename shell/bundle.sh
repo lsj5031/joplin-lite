@@ -13,7 +13,7 @@ case "$BIN" in
   /* | [A-Za-z]:[\\/]*) ;;
   *) BIN="$PWD/shell/$BIN" ;;
 esac
-ICNS="$PWD/web/public/app-icon.icns"
+ICNS="$PWD/assets/icons/app-icon.icns"
 
 bash shell/build.sh
 

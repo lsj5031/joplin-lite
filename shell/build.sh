@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Builds the native desktop app. There is no frontend build step and no
-# embedded SPA: the window is drawn by mygo/ui, and the web build stays an
-# optional browser preview (`cd web && npm run build`, then
-# `gojoplin serve --web-dir web/dist/client`).
+# embedded SPA: the window is drawn by mygo/ui.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
